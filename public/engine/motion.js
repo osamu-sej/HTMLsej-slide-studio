@@ -1,5 +1,5 @@
 /*
- * HTML Slide Studio — motion runtime and presentation player.
+ * HTML SEJ Slide Studio — motion runtime and presentation player.
  * Plays a slide's entrance and builds, counts numbers up, grows charts, lifts items on hover, opens
  * "click for details" cards, plays video, and drives a full-screen presentation with a presenter view.
  * Shared by the studio's presenter and exported HTML files (no dependencies).
@@ -56,8 +56,9 @@
 
   // ---------------------------------------------------------------- kinetic type
 
-  // The big lines of a slide: cover, chapter, hero, statement and closing text, and a titled slide's title.
-  const KINETIC_TARGETS = ".hs-cover-title, .hs-section-title, .hs-hero-title, .hs-statement-text, .hs-closing-message, .hs-closing-title, .hs-frame > .hs-head > .hs-title";
+  // The big lines of a slide: cover, chapter, hero, statement and closing text, and a titled slide's title
+  // (on SEJ the title sits in the master's band above the green rule).
+  const KINETIC_TARGETS = ".hs-cover-title, .hs-section-title, .hs-hero-title, .hs-statement-text, .hs-closing-message, .hs-closing-title, .hs-frame > .hs-head > .hs-title, .hs-frame > .hs-head > .hs-sej-titlebar > .hs-title, .hs-frame > .hs-sej-titlebar > .hs-title";
   // Characters that may not start a line ride with the unit before; opening brackets ride with the unit after.
   const NO_START = /^[、。，．,.)）」』】〕〉》！？!?:：;；ー〜…‥・ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ々ゝゞ%％]+$/u;
   const NO_END = /^[(（「『【〔〈《]+$/u;

@@ -1,0 +1,15 @@
+{
+  "deckTitle": "SEJテンプレートの特別なページ",
+  "audience": "オペレーション本部",
+  "purpose": "SEJテンプレートの表紙・章扉・写真・ひと言・締めの確認",
+  "slideData": [
+    { "type": "title", "title": "店舗オペレーション改革 中間報告", "subtitle": "発注・検品・売場作業の標準化による生産性向上", "date": "2026年9月", "visualAsset": "storeOperations" },
+    { "type": "section", "title": "モデル店の成果", "takeaway": "30店で月120時間の作業削減を確認した" },
+    { "type": "hero", "title": "現場の時間を、お客様へ", "takeaway": "削減した時間を**接客と売場づくり**に回す", "visualAsset": "customerExperience" },
+    { "type": "statement", "title": "ひと言で", "text": "作業を減らすのではなく、**判断を早める**", "takeaway": "それが今回の改革の本質です" },
+    { "type": "content", "title": "導入の効果", "takeaway": "発注時間が**42%短縮**し、廃棄も減った", "points": ["発注：推奨値を基準に微調整するだけになった", "検品：端末でその場で差異を記録できる", "売場：写真付き基準で巡回の観点がそろった"], "source": "モデル店30店の実績（2026年4〜8月）", "visualAsset": "dataInsight" },
+    { "type": "cards", "title": "効果の内訳", "takeaway": "発注と検品で**削減の8割**を占める", "items": [{ "title": "発注", "desc": "月60時間の削減" }, { "title": "検品", "desc": "月36時間の削減" }, { "title": "売場", "desc": "月24時間の削減" }] },
+    { "type": "content", "title": "発注の削減の中身", "takeaway": "推奨値の精度が上がり、**微調整だけ**で済むようになった", "drillOf": "items[0]", "points": ["推奨値の採用率：導入前55%→導入後83%", "1回あたりの発注時間：95分→54分"] },
+    { "type": "closing", "title": "次のアクション", "message": "予算承認：10月の経営会議で2.4億円の承認をいただく\n展開準備：11月から都市型1,500店へ展開する\n伴走体制：地区ごとの支援チームを編成する" }
+  ]
+}

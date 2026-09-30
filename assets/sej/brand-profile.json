@@ -1,0 +1,22 @@
+{
+  "id": "sej-corporate-v1",
+  "schemaVersion": "1.0",
+  "templateSha256": "eb7f6711377784371bac861527158a566c763704fc511813ae61123afbef2a6b",
+  "slideSize": { "widthEmu": 12192000, "heightEmu": 6858000 },
+  "contentSafeAreaInches": { "left": 0.5, "top": 1.1, "right": 12.3, "bottom": 6.7 },
+  "font": {
+    "family": "Meiryo UI",
+    "contentSizesPt": [20, 24, 28, 32]
+  },
+  "textColors": ["1A1A1A", "1F3864", "808080"],
+  "fillColors": ["DCE4F2", "F1F5FB", "F7F9FC", "F5F0EA", "F2F2F2", "FFFFFF"],
+  "lineColors": ["D9D9D9", "B7C3DA", "D6C9B8"],
+  "contentLineWidthsPt": [1, 1.5, 2],
+  "rules": {
+    "whiteText": false,
+    "contentGreenOrangeRed": false,
+    "shadows": false,
+    "nativeMasterOnly": true,
+    "maxNavyEmphasisRunsPerSlide": 4
+  }
+}

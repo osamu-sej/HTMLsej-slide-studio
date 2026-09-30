@@ -27,7 +27,8 @@ const deckOf = (slides, extra = {}) => ({ title: "検証デッキ", audience: "�
 
 test("the engine renders every layout in every theme with editable, animatable parts", async () => {
   const { E } = await loadEngine();
-  assert.equal(E.THEMES.length, 8);
+  assert.equal(E.THEMES.length, 9);
+  assert.equal(E.THEMES[0].id, "sej", "the SEJ template comes first");
   assert.equal(Object.keys(E.TYPE_LABELS).length, 44);
   const types = new Set(allLayoutSlides.map((slide) => slide.type));
   assert.equal(types.size, 44, "the fixture covers every layout");
@@ -41,7 +42,9 @@ test("the engine renders every layout in every theme with editable, animatable p
       assert.ok(el.querySelector("[data-field]"), `${theme.id} ${slide.type}: nothing editable`);
       if (!["title", "section", "closing", "hero", "statement"].includes(slide.type)) {
         assert.ok(el.querySelector(".hs-title[data-field=title]"), `${slide.type}: title`);
-        assert.match(el.querySelector(".hs-foot .hs-page").textContent, new RegExp(`${String(index + 1).padStart(2, "0")} / ${String(deck.slides.length).padStart(2, "0")}`));
+        // SEJ numbers its pages the template's way (the bare number, bottom right); the others show "03 / 44".
+        if (theme.id === "sej") assert.equal(el.querySelector(".hs-sej-page").textContent, String(index + 1));
+        else assert.match(el.querySelector(".hs-foot .hs-page").textContent, new RegExp(`${String(index + 1).padStart(2, "0")} / ${String(deck.slides.length).padStart(2, "0")}`));
       }
     });
   }
