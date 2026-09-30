@@ -329,33 +329,56 @@ async function checkCodexStatus() {
     state.codexImageAuthorized = Boolean(status.authorized || status.authenticated);
     const needsPasscode = Boolean(status.team && !status.member);
     $("passcodePanel").classList.toggle("hidden", !needsPasscode);
+    $("connectCodexBtn").textContent = status.pendingLogin ? "コードを再発行" : "Codexに接続";
     if (needsPasscode) {
       setCodexConnection("", "合言葉を入力してください", "このスタジオはチームで共有されています。管理者から聞いた合言葉を入れると、AIで構成を作れます。雛形から作る・JSON読込は合言葉なしで使えます。");
       setPill("未入室");
       $("connectCodexBtn").hidden = true;
-    } else if (!status.authorized && !status.authenticated && standBy) {
-      setCodexConnection("ready", `予備AI（${status.fallback.model}）で動作中`, `${status.available === false ? `Codexを起動できません（${status.error}）。` : "Codexに接続していません。"}手元の${status.fallback.model}で作ります（Codexより時間がかかり、仕上がりも簡素になります）。Codexに接続すると通常どおり使えます。`);
-      setPill("予備AIで動作中", "busy");
-      $("connectCodexBtn").hidden = status.available === false;
-    } else if (state.codexAuthorized) {
+    } else if (state.codexImageAuthorized) {
       setCodexConnection("ready", "Codexに接続済み", `${status.planType || status.accountType || "ChatGPTアカウント"}で構成を生成できます。${standBy ? `Codexが使えなくなったときは${status.fallback.model}に自動で切り替えます。` : ""}`);
       setPill("Codex接続済み", "ok");
       $("connectCodexBtn").hidden = true;
       $("deviceAuthPanel").classList.add("hidden");
       clearInterval(loginPollTimer);
       loginPollTimer = null;
+    } else if (status.pendingLogin) {
+      $("deviceCode").textContent = status.pendingLogin.userCode;
+      $("deviceLink").href = /^https:\/\//.test(status.pendingLogin.verificationUrl || "") ? status.pendingLogin.verificationUrl : "https://chatgpt.com/";
+      $("deviceAuthPanel").classList.remove("hidden");
+      setCodexConnection("", "認証コードを入力してください", "認証ページでコードを入力すると、自動で接続されます。コードが使えなくなった場合は再発行できます。");
+      setPill(standBy ? "予備AIで動作中" : "Codex認証待ち", standBy ? "busy" : "");
+      $("connectCodexBtn").hidden = false;
+      if (!loginPollTimer) loginPollTimer = setInterval(checkCodexStatus, 2500);
+    } else if (status.loginError) {
+      $("deviceAuthPanel").classList.add("hidden");
+      setCodexConnection("error", "Codexへ接続できません", status.loginError);
+      setPill(standBy ? "予備AIで動作中" : "Codex接続エラー", standBy ? "busy" : "err");
+      $("connectCodexBtn").hidden = false;
+      clearInterval(loginPollTimer);
+      loginPollTimer = null;
+    } else if (standBy) {
+      $("deviceAuthPanel").classList.add("hidden");
+      setCodexConnection("ready", `予備AI（${status.fallback.model}）で動作中`, `${status.available === false ? `Codexを起動できません（${status.error}）。` : "Codexに接続していません。"}手元の${status.fallback.model}で作ります（Codexより時間がかかり、仕上がりも簡素になります）。Codexに接続すると通常どおり使えます。`);
+      setPill("予備AIで動作中", "busy");
+      $("connectCodexBtn").hidden = status.available === false;
     } else {
-      setCodexConnection("", "Codexへの接続が必要です", `${status.loginError || "ChatGPTアカウントでデバイス認証します（APIキーは不要）。サーバーが再起動すると接続が外れるので、そのときはもう一度接続してください。雛形から作る・JSON読込・サンプルは接続なしで使えます。"}${status.fallback?.web ? "（Web版では予備AIのGemmaは使えません）" : ""}`);
+      $("deviceAuthPanel").classList.add("hidden");
+      setCodexConnection("", "Codexへの接続が必要です", `ChatGPTアカウントでデバイス認証します（APIキーは不要）。雛形から作る・JSON読込・サンプルは接続なしで使えます。${status.fallback?.web ? "（Web版では予備AIのGemmaは使えません）" : ""}`);
       setPill("Codex未接続");
       $("connectCodexBtn").hidden = false;
+      clearInterval(loginPollTimer);
+      loginPollTimer = null;
     }
   } catch (error) {
     state.codexAuthorized = false;
     state.codexImageAuthorized = false;
     showLocalAi(error.body?.fallback);
+    $("deviceAuthPanel").classList.add("hidden");
     setCodexConnection("error", "Codexを起動できません", `${error.message}${error.body?.fallback?.web ? "（Web版では予備AIのGemmaは使えないため、AI機能は止まっています）" : ""}`);
     setPill("Codex接続エラー", "err");
     $("connectCodexBtn").hidden = false;
+    clearInterval(loginPollTimer);
+    loginPollTimer = null;
   }
   renderInspector();
   renderChat();
@@ -387,18 +410,12 @@ async function startCodexLogin() {
   try {
     const login = await jsonFetch("/api/codex/login", { method: "POST", body: "{}" });
     if (login.alreadyConnected) return checkCodexStatus();
-    $("deviceCode").textContent = login.userCode || "コードを取得できませんでした";
-    $("deviceLink").href = /^https:\/\//.test(login.verificationUrl || "") ? login.verificationUrl : "https://chatgpt.com/";
-    $("deviceAuthPanel").classList.remove("hidden");
-    setCodexConnection("", "認証コードを入力してください", "認証ページを開いてコードを入力すると、自動で接続されます。");
-    button.hidden = true;
-    clearInterval(loginPollTimer);
-    loginPollTimer = setInterval(checkCodexStatus, 2500);
+    await checkCodexStatus();
   } catch (error) {
     setCodexConnection("error", "Codexへ接続できません", error.message);
   } finally {
     button.disabled = false;
-    button.textContent = "Codexに接続";
+    button.textContent = $("deviceAuthPanel").classList.contains("hidden") ? "Codexに接続" : "コードを再発行";
   }
 }
 

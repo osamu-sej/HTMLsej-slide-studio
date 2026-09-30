@@ -97,6 +97,69 @@ async function withFakeCodex(answers, fn, env = {}) {
   }
 }
 
+test("device login can be resumed after a reload and its code can be replaced", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fake-codex-login-"));
+  const scriptPath = join(dir, "script.json");
+  await writeFile(scriptPath, "[]");
+  const server = await startServer({ CODEX_BIN: join(root, "test", "fake-codex.mjs"), FAKE_CODEX_SCRIPT: scriptPath, FAKE_CODEX_LOGIN_DELAY_MS: "1000" });
+  try {
+    const first = await (await server.postJson("/api/codex/login", {})).json();
+    assert.equal(first.userCode, "TEST-CODE-1");
+    const pending = await (await server.request("/api/codex/status")).json();
+    assert.equal(pending.pendingLogin.userCode, first.userCode);
+    assert.equal(pending.authorized, false);
+
+    const second = await (await server.postJson("/api/codex/login", {})).json();
+    assert.equal(second.userCode, "TEST-CODE-2");
+    assert.equal((await (await server.request("/api/codex/status")).json()).pendingLogin.userCode, second.userCode);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const connected = await (await server.request("/api/codex/status")).json();
+    assert.equal(connected.authorized, true);
+    assert.equal(connected.pendingLogin, null);
+  } finally {
+    await server.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a failed device login returns the Codex error and allows another attempt", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fake-codex-login-"));
+  const scriptPath = join(dir, "script.json");
+  await writeFile(scriptPath, "[]");
+  const server = await startServer({ CODEX_BIN: join(root, "test", "fake-codex.mjs"), FAKE_CODEX_SCRIPT: scriptPath, FAKE_CODEX_LOGIN_ERROR: "Device code expired" });
+  try {
+    assert.equal((await server.postJson("/api/codex/login", {})).status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const failed = await (await server.request("/api/codex/status")).json();
+    assert.equal(failed.authorized, false);
+    assert.equal(failed.pendingLogin, null);
+    assert.equal(failed.loginError, "Device code expired");
+    const retry = await (await server.postJson("/api/codex/login", {})).json();
+    assert.equal(retry.userCode, "TEST-CODE-2");
+    assert.equal((await (await server.request("/api/codex/status")).json()).loginError, null);
+  } finally {
+    await server.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Codex reconnects after its app-server exits during startup", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fake-codex-restart-"));
+  const scriptPath = join(dir, "script.json");
+  const marker = join(dir, "exited-once");
+  await writeFile(scriptPath, "[]");
+  const server = await startServer({ CODEX_BIN: join(root, "test", "fake-codex.mjs"), FAKE_CODEX_SCRIPT: scriptPath, FAKE_CODEX_INIT_EXIT_ONCE_FILE: marker });
+  try {
+    assert.equal((await server.request("/api/codex/status")).status, 503);
+    const retried = await server.request("/api/codex/status");
+    assert.equal(retried.status, 200);
+    assert.equal((await retried.json()).available, true);
+  } finally {
+    await server.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("app shell, engine, assets and security headers", async () => {
   const server = await startServer();
   try {

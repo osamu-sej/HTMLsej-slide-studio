@@ -292,7 +292,7 @@ codex.on("login", ({ sessionId, success, error }) => {
     ownerSessionId = sessionId;
     persistOwnerSession();
   }
-  if (session) session.loginError = error?.message ?? (success ? null : "ログインに失敗しました。");
+  if (session) session.loginError = success ? null : (typeof error === "string" ? error : error?.message) || "ログインに失敗しました。";
 });
 
 codex.on("job", (job) => {
@@ -675,6 +675,7 @@ const httpServer = createServer(async (req, res) => {
         persistOwnerSession();
       }
       const visible = TEAM_MODE ? session.member : authorized(session);
+      const pendingLogin = !authorized(session) ? codex.getPendingLogin(session.id) : null;
       return json(res, 200, {
         available: true,
         fallback: await localAi.status(),
@@ -685,6 +686,7 @@ const httpServer = createServer(async (req, res) => {
         accountType: result?.account?.type ?? null,
         planType: visible ? result?.account?.planType ?? null : null,
         loginError: session.loginError ?? null,
+        pendingLogin: pendingLogin ? { userCode: pendingLogin.userCode, verificationUrl: pendingLogin.verificationUrl } : null,
       });
     } catch (error) {
       // Codex itself will not start; the page can still work through the stand-by AI when it is here.
@@ -726,9 +728,11 @@ const httpServer = createServer(async (req, res) => {
         return json(res, 200, { alreadyConnected: true });
       }
       if (account?.account && !authorized(session)) await codex.accountLogout();
+      session.loginError = null;
       const login = await codex.startDeviceLogin(session.id);
       return json(res, 200, login);
     } catch (error) {
+      session.loginError = error.message;
       return json(res, 503, { error: error.message });
     }
   }

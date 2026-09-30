@@ -613,14 +613,20 @@ export class CodexSlideServer extends EventEmitter {
       this.proc = proc;
 
       proc.once("error", (error) => {
+        if (this.proc !== proc) return;
+        for (const pending of this.pending.values()) pending.reject(error);
+        this.pending.clear();
         this.proc = null;
         this.readyPromise = null;
         reject(error);
       });
       proc.once("exit", (code, signal) => {
+        if (this.proc !== proc) return;
         const error = new Error(`Codex App Server stopped (code=${code ?? "null"}, signal=${signal ?? "null"})`);
         for (const pending of this.pending.values()) pending.reject(error);
         this.pending.clear();
+        for (const login of this.loginSessions.values()) this.emit("login", { sessionId: login.sessionId, success: false, error: "Codexとの接続が切れました。もう一度接続してください。" });
+        this.loginSessions.clear();
         for (const job of this.jobs.values()) {
           if (!["completed", "failed"].includes(job.status) && job.provider !== "local") this.#fallBack(job, error.message).catch((fallbackError) => this.failJob(job.id, fallbackError));
         }
@@ -644,7 +650,10 @@ export class CodexSlideServer extends EventEmitter {
           this.notify("initialized", {});
           resolve();
         })
-        .catch(reject);
+        .catch((error) => {
+          if (this.proc === proc && !proc.killed) proc.kill("SIGTERM");
+          reject(error);
+        });
     });
 
     return this.readyPromise;
@@ -692,9 +701,24 @@ export class CodexSlideServer extends EventEmitter {
 
   async startDeviceLogin(sessionId) {
     await this.ensureStarted();
+    const previous = this.getPendingLogin(sessionId);
+    if (previous) {
+      this.loginSessions.delete(previous.loginId);
+      try { await this.request("account/login/cancel", { loginId: previous.loginId }); }
+      catch { /* The old code may have expired just before the replacement request. */ }
+    }
     const result = await this.request("account/login/start", { type: "chatgptDeviceCode" });
-    if (result?.loginId) this.loginSessions.set(result.loginId, sessionId);
+    if (result?.loginId) this.loginSessions.set(result.loginId, {
+      sessionId,
+      loginId: result.loginId,
+      userCode: result.userCode,
+      verificationUrl: result.verificationUrl,
+    });
     return result;
+  }
+
+  getPendingLogin(sessionId) {
+    return [...this.loginSessions.values()].find((login) => login.sessionId === sessionId) ?? null;
   }
 
   close() {
@@ -865,9 +889,9 @@ export class CodexSlideServer extends EventEmitter {
 
     if (message.method === "account/login/completed") {
       const loginId = message.params?.loginId;
-      const sessionId = loginId ? this.loginSessions.get(loginId) : null;
+      const sessionId = loginId ? this.loginSessions.get(loginId)?.sessionId : null;
       if (loginId) this.loginSessions.delete(loginId);
-      this.emit("login", { sessionId, ...message.params });
+      if (sessionId) this.emit("login", { sessionId, ...message.params });
       return;
     }
 
