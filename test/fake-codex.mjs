@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Minimal stand-in for `codex app-server`: answers JSON-RPC over stdio and
 // replies to each turn with the next scripted answer from FAKE_CODEX_SCRIPT.
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import readline from "node:readline";
 
@@ -9,19 +9,35 @@ const script = JSON.parse(readFileSync(process.env.FAKE_CODEX_SCRIPT, "utf8"));
 const promptLog = process.env.FAKE_CODEX_PROMPTS;
 const prompts = [];
 let turn = 0;
+let login = 0;
+const cancelledLogins = new Set();
 
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   const { id, method, params } = message;
-  if (method === "initialize") return send({ id, result: {} });
+  if (method === "initialize") {
+    const marker = process.env.FAKE_CODEX_INIT_EXIT_ONCE_FILE;
+    if (marker && !existsSync(marker)) {
+      writeFileSync(marker, "1");
+      process.exit(1);
+    }
+    return send({ id, result: {} });
+  }
   if (method === "account/read") return send({ id, result: { account: { type: "chatgpt", planType: "test" } } });
   if (method === "account/logout") return send({ id, result: {} });
   if (method === "account/login/start") {
-    send({ id, result: { loginId: "login-1", userCode: "TEST-CODE", verificationUrl: "https://example.com/device" } });
-    setTimeout(() => send({ method: "account/login/completed", params: { loginId: "login-1", success: true } }), 20);
+    const loginId = `login-${++login}`;
+    send({ id, result: { type: "chatgptDeviceCode", loginId, userCode: `TEST-CODE-${login}`, verificationUrl: "https://example.com/device" } });
+    setTimeout(() => {
+      if (!cancelledLogins.has(loginId)) send({ method: "account/login/completed", params: { loginId, success: !process.env.FAKE_CODEX_LOGIN_ERROR, error: process.env.FAKE_CODEX_LOGIN_ERROR || null } });
+    }, Number(process.env.FAKE_CODEX_LOGIN_DELAY_MS || 20));
     return;
+  }
+  if (method === "account/login/cancel") {
+    cancelledLogins.add(params.loginId);
+    return send({ id, result: {} });
   }
   if (method === "thread/start") return send({ id, result: { thread: { id: `thread-${Date.now()}` } } });
   if (method === "turn/start") {
