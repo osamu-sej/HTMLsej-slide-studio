@@ -1,0 +1,30 @@
+{
+  "name": "html-slide-studio",
+  "version": "1.5.1",
+  "private": true,
+  "type": "module",
+  "description": "AI-built slide decks as moving HTML presentations: outline, edit, talk to the AI, present over a screen share, and export a single HTML file.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test test/*.test.js",
+    "test:py": "python3 -m unittest discover -s test -p \"test_*.py\"",
+    "qa": "node qa/shoot.mjs",
+    "qa:studio": "node qa/studio-smoke.mjs",
+    "qa:motion": "node qa/studio-motion.mjs",
+    "qa:drill": "node qa/studio-drill.mjs",
+    "qa:interactive": "node qa/studio-interactive.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@openai/codex": "0.144.1",
+    "lottie-web": "5.13.0",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.1"
+  },
+  "devDependencies": {
+    "linkedom": "^0.18.12"
+  }
+}
