@@ -261,7 +261,7 @@ export const chatResultSchema = z.object({
   operations: z.array(chatOperationSchema).max(50),
   order: z.array(z.number().int().min(1).max(50)).max(50).optional(),
   deckTitle: z.string().max(100).optional(),
-  theme: themeSchema.optional(),
+  // No theme: every deck wears the SEJ template, so the AI cannot switch the design.
   transition: transitionSchema.optional(),
   // Deck-wide motion graphics, only when asked ("全体をもっと動かして", "表紙と章扉に動く背景を").
   motion: z.object(motionFields).optional(),

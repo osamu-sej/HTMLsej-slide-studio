@@ -60,8 +60,12 @@ await step("make a deep-dive page for item 02 from the inspector", async () => {
   await page.waitForSelector("#inspector .drill-info");
   const caption = await page.textContent(".stage-caption");
   if (!/2枚目の深掘りページ/.test(caption)) throw new Error(`caption: ${caption}`);
+  // The SEJ master's page number counts the story (like ‹#›): the deep-dive page keeps its slide's number
+  // and names that slide in the line above its key message.
   const pageNo = await page.textContent(".slide-wrap .hs-page");
-  if (!/02 ・ 深掘り/.test(pageNo)) throw new Error(`page number on the deep-dive page: ${pageNo}`);
+  if (pageNo.trim() !== "2") throw new Error(`page number on the deep-dive page: ${pageNo}`);
+  const eyebrow = await page.textContent(".slide-wrap .hs-drill .hs-eyebrow");
+  if (!/^↳ /.test(eyebrow)) throw new Error(`the deep-dive page should name its slide: ${eyebrow}`);
   const meta = await page.textContent("#deckMeta");
   if (!/5枚＋深掘り1枚/.test(meta)) throw new Error(`deck meta: ${meta}`);
   await page.fill("#f-title", "データから学習する仕組み");
@@ -75,7 +79,7 @@ await step("the slide shows an arrow on 02, and the arrow opens the page in the 
   const badges = await page.$$eval('.slide-wrap [data-drill]', (els) => [...new Set(els.map((el) => el.dataset.item))]);
   expect(badges, ["items[1]"], "items with a deep-dive page");
   const numbers = await page.$$eval(".film-item", (items) => items.map((item) => item.querySelector(".hs-page")?.textContent ?? ""));
-  expect(numbers.filter(Boolean), ["02 / 05", "02 ・ 深掘り", "03 / 05", "04 / 05"], "page numbers count the story only");
+  expect(numbers.filter(Boolean), ["2", "2", "3", "4", "5"], "page numbers count the story only");
   await shot("studio-slide");
   await page.click(".slide-wrap .hs-drill-badge");
   await page.waitForSelector(".film-item.is-drill.selected");

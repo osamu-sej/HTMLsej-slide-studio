@@ -1,6 +1,6 @@
 // End-to-end smoke test of the studio in a real browser (needs the server running: `npm start`).
 // Usage: node qa/studio-smoke.mjs [--base=http://127.0.0.1:8787]
-// Opens the sample deck, edits, switches theme, previews motion, presents and exports an HTML file.
+// Opens the sample deck, edits, checks the SEJ template is fixed, previews motion, presents and exports an HTML file.
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -116,15 +116,17 @@ await step("grid and outline views", async () => {
   await page.click('label:has-text("1枚")');
 });
 
-await step("design dialog + theme switch", async () => {
+await step("design dialog: the SEJ template is fixed, only motion is chosen", async () => {
   await page.click("#designBtn");
   await page.waitForTimeout(1500);
   await shot("design");
-  await page.click('.theme-card:has-text("ミッドナイト")');
-  await page.waitForTimeout(600);
+  if (await page.locator("#designDialog .theme-card, #accentInput").count()) throw new Error("theme and accent pickers should be gone");
+  if (!(await page.isVisible("#designDialog .template-note"))) throw new Error("the template note is missing");
   await page.click('#designDialog .dialog-foot [data-close]');
   await page.waitForTimeout(800);
-  await shot("midnight");
+  if ((await page.getAttribute(".slide-wrap .hs-slide", "data-theme")) !== "sej") throw new Error("the deck is not in the SEJ template");
+  if (!(await page.locator(".slide-wrap .hs-slide .hs-sej-logo").count())) throw new Error("the SEJ logo is missing");
+  await shot("sej");
 });
 
 await step("motion preview", async () => {
