@@ -52,10 +52,10 @@ await page.goto(base);
 await page.evaluate(() => localStorage.clear());
 await page.goto(base);
 
-await step("the sample deck opens with a backdrop on its cover", async () => {
+await step("the sample deck opens in the SEJ template, its cover dressed by the template's ripples", async () => {
   await page.click("#sampleDeckBtn");
   await page.waitForFunction(() => document.querySelectorAll(".film-item").length >= 40, null, { timeout: 20000 });
-  await page.waitForSelector('.slide-wrap .hs-slide[data-backdrop="orbits"] .hs-bd-orbit', { state: "attached", timeout: 5000 });
+  await page.waitForSelector('.slide-wrap .hs-slide[data-theme="sej"] .hs-sej-ripples[data-kind="title"]', { state: "attached", timeout: 5000 });
   await page.waitForTimeout(500);
   await shot("edit-cover");
 });
@@ -100,9 +100,11 @@ await step("presenting the cover: kinetic title over moving orbits", async () =>
     units: document.querySelectorAll(".hs-player .hs-kin .hs-k").length,
     masks: document.querySelectorAll(".hs-player .hs-kin .hs-km").length,
     orbit: [...document.querySelectorAll(".hs-player .hs-bd-sat")].some((el) => el.getAnimations().length),
+    ripple: [...document.querySelectorAll(".hs-player .hs-sej-ripples .wave")].some((el) => el.getAnimations().length),
   }));
   if (state.units < 4 || !state.masks) throw new Error(`the title was not split for the mask motion (${JSON.stringify(state)})`);
   if (!state.orbit) throw new Error("the satellites do not orbit");
+  if (!state.ripple) throw new Error("the SEJ ripples do not spread while presenting");
   await page.waitForTimeout(1800);
   await shot("present-cover-end");
   await page.keyboard.press("Escape");

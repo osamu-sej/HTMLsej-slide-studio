@@ -30,6 +30,7 @@ const outDir = join(root, "qa", "out");
 await mkdir(outDir, { recursive: true });
 const total = JSON.parse(await readFile(join(root, deck), "utf8")).slideData.length;
 const problems = [];
+const brandProblems = [];
 for (const theme of themes) {
   const batches = args.only ? [args.only] : Array.from({ length: Math.ceil(total / per) }, (_, b) => Array.from({ length: per }, (_, k) => b * per + k).filter((i) => i < total).join(","));
   for (const [b, only] of batches.entries()) {
@@ -38,11 +39,13 @@ for (const theme of themes) {
     const done = await page.waitForFunction(() => window.__done, null, { timeout: 60000 }).then((handle) => handle.jsonValue());
     if (done.error) { console.error(theme, done.error); continue; }
     for (const result of done) if (result.issues.length || result.fs < 1 || result.ts < 1) problems.push(`${theme} #${result.index + 1} ${result.type}: fs=${result.fs} ts=${result.ts} ${result.issues.map((i) => `${i.field}:${i.message}`).join(" | ")}`);
+    for (const result of done) for (const issue of result.brand || []) brandProblems.push(`${theme} #${result.index + 1} ${result.type}: ${issue.field}: ${issue.message}`);
     const file = join(outDir, `${theme}-${String(b + 1).padStart(2, "0")}.png`);
     await page.locator(".sheet").screenshot({ path: file });
     console.log("saved", file);
   }
 }
 console.log(problems.length ? `fit notes:\n${problems.join("\n")}` : "no fit notes");
+if (themes.includes("sej")) console.log(brandProblems.length ? `SEJ brand check:\n${brandProblems.join("\n")}` : "SEJ brand check: no findings");
 await browser.close();
 server.close();

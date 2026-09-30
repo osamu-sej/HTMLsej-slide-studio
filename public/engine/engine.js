@@ -1,5 +1,5 @@
 /*
- * HTML Slide Studio — slide engine.
+ * HTML SEJ Slide Studio — slide engine.
  * Turns a deck (JSON) into 1920×1080 HTML slides: themes, 44 layouts, SVG charts, text fitting.
  * Motion and the presentation player live in motion.js; both attach to window.SlideEngine.
  * The file is also inlined into exported presentations, so it has no dependencies.
@@ -11,6 +11,9 @@
   const H = 1080;
   const SVGNS = "http://www.w3.org/2000/svg";
   let ICONS = /*__ICONS__*/{};
+  // The SEJ template's two master pictures (the 7-Eleven logo and the copyright line), as data URLs.
+  // The server writes them in from assets/sej/ so exported files carry them; everything else is drawn.
+  let SEJ_ART = /*__SEJ__*/{};
 
   // Built-in photo library (public/assets). Keys are what the AI and the editor use.
   const PHOTOS = {
@@ -26,7 +29,12 @@
     ai: ["ai-executive-hero.jpg", "テクノロジー"],
   };
 
+  // "sej" wears the SEJ corporate template: its masters (logo, green rule, 秘（B）, 社内限り, slogan,
+  // copyright, page number) are drawn where the original PowerPoint puts them, and its brand rules hold
+  // (Meiryo UI, black / navy / grey text, pale blue / grey / pale brown fills, no white text, no shadows).
   const THEMES = [
+    { id: "sej", name: "SEJ", desc: "SEJの原本テンプレート。ロゴ・緑線・秘（B）・社内限り", dark: false, swatch: ["#ffffff", "#1a1a1a", "#1f3864", "#008738"],
+      fonts: ["BIZ UDPGothic:wght@400;700", "Klee One:wght@600"] },
     { id: "clarity", name: "クリア", desc: "白地に深い青。報告・提案の定番", dark: false, swatch: ["#ffffff", "#0e1726", "#2451e6", "#13a89e"],
       fonts: ["Zen Kaku Gothic New:wght@500;700;900", "Noto Sans JP:wght@400;500;700;800", "Manrope:wght@600;800"] },
     { id: "midnight", name: "ミッドナイト", desc: "濃紺の舞台。画面共有で映える", dark: true, swatch: ["#0b1020", "#eef2fa", "#7cb8ff", "#ffb454"],
@@ -45,6 +53,7 @@
       fonts: ["Zen Old Mincho:wght@600;700;900", "Zen Kaku Gothic New:wght@400;500;700"] },
   ];
   const THEME_IDS = new Set(THEMES.map((theme) => theme.id));
+  const DEFAULT_THEME = "sej";
 
   const TYPE_LABELS = {
     title: "表紙", section: "章扉", closing: "クロージング", hero: "全面写真", statement: "ひと言メッセージ",
@@ -329,6 +338,9 @@
   }
 
   const SERIES = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c2)", "var(--c3)"];
+  // Stacked bars carry their values inside the segments: a theme may give them a lighter palette (--k1…) and a
+  // dark label (--k-ink) instead of white text on the series colours.
+  const stackColor = (i) => `var(--k${(i % 6) + 1}, ${SERIES[i % SERIES.length]})`;
 
   /** Normalize the studio's chart data (items / series / barData) into labels + series. */
   function chartModel(spec) {
@@ -359,7 +371,8 @@
     const model = chartModel(spec);
     const legendNames = model.type === "donut" ? model.labels : model.series.length > 1 ? model.series.map((serie) => serie.name) : [];
     if (legendNames.length > 1 && model.type !== "donut") {
-      wrap.append(h("div", { class: "hs-legend" }, legendNames.map((name, i) => h("span", { style: { "--c": SERIES[i % SERIES.length] } }, h("i"), name))));
+      const stacked = model.type === "stacked-bar" || model.type === "100-stacked-bar";
+      wrap.append(h("div", { class: "hs-legend" }, legendNames.map((name, i) => h("span", { style: { "--c": stacked ? stackColor(i) : SERIES[i % SERIES.length] } }, h("i"), name))));
     }
     const holder = h("div", { class: "hs-chart", "data-field": key });
     const svg = s("svg", { viewBox: `0 0 ${w} ${ht}`, preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": strip(spec?.data?.title || "グラフ") });
@@ -546,8 +559,8 @@
         const y1 = y0 - ((base + value) / max) * plotH;
         const y2 = y0 - (base / max) * plotH;
         const hh = Math.max(0, y2 - y1 - 3);
-        svg.append(markTip(s("rect", { class: "hs-bar", x, y: y1, width: bw, height: hh, rx: si === model.series.length - 1 ? 8 : 2, fill: SERIES[si % SERIES.length] }), `${label} ${serie.name}：${fmt(serie.values[i])}${percent ? `（${Math.round(value)}%）` : ""}`, i));
-        if (hh > 40 && bw > 60) svg.append(s("text", { x: x + bw / 2, y: y1 + hh / 2 + 8, "text-anchor": "middle", style: { fill: "#fff", "font-weight": 700, "font-size": "20px" } }, percent ? `${Math.round(value)}%` : fmt(serie.values[i])));
+        svg.append(markTip(s("rect", { class: "hs-bar", x, y: y1, width: bw, height: hh, rx: si === model.series.length - 1 ? 8 : 2, fill: stackColor(si) }), `${label} ${serie.name}：${fmt(serie.values[i])}${percent ? `（${Math.round(value)}%）` : ""}`, i));
+        if (hh > 40 && bw > 60) svg.append(s("text", { x: x + bw / 2, y: y1 + hh / 2 + 8, "text-anchor": "middle", style: { fill: "var(--k-ink, #fff)", "font-weight": 700, "font-size": "20px" } }, percent ? `${Math.round(value)}%` : fmt(serie.values[i])));
         base += value;
       });
       if (!percent) svg.append(s("text", { class: "hs-val", x: x + bw / 2, y: y0 - (totals[i] / max) * plotH - 14, "text-anchor": "middle" }, fmt(totals[i])));
@@ -761,6 +774,13 @@
   // ---------------------------------------------------------------- slide chrome
 
   function header(slide, ctx) {
+    // SEJ: the title lives in the master's band above the green rule; the key message opens the body under it.
+    if (ctx.theme === "sej") {
+      return h("header", { class: "hs-head" },
+        sejTitlebar(slide.title, "title"),
+        ctx.eyebrow ? h("div", { class: "hs-eyebrow" }, ctx.eyebrow) : null,
+        slide.takeaway ? t("p", "hs-takeaway", slide.takeaway, "takeaway", { emphasis: true }) : null);
+    }
     return h("header", { class: "hs-head" },
       ctx.eyebrow ? h("div", { class: "hs-eyebrow" }, ctx.eyebrow) : null,
       t("h2", "hs-title", slide.title, "title", { emphasis: true }),
@@ -892,14 +912,14 @@
         const p = (deg, rad = r) => [c + rad * Math.cos((deg * Math.PI) / 180), c + rad * Math.sin((deg * Math.PI) / 180)];
         const [x0, y0] = p(a0);
         const [x1, y1] = p(a1);
-        const seg = s("path", { class: "hs-seg", d: `M${x0},${y0} A${r},${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1},${y1}`, fill: "none", stroke: `color-mix(in srgb, var(--accent) ${Math.round(100 - (i * 55) / n)}%, var(--surface2))`, "stroke-width": 84, pathLength: 1, "data-item": `items[${i}]` });
+        const seg = s("path", { class: "hs-seg", d: `M${x0},${y0} A${r},${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1},${y1}`, fill: "none", stroke: `color-mix(in srgb, var(--tint) ${Math.round(100 - (i * 55) / n)}%, var(--tint-lo))`, "stroke-width": 84, pathLength: 1, "data-item": `items[${i}]` });
         seg.classList.add("hs-item");
         svg.append(seg);
         const [ax, ay] = p(a1 + gap / 2);
         const dir = a1 + gap / 2 + 90;
         svg.append(s("path", { d: "M-16,-22 L14,0 L-16,22 Z", fill: "var(--ink)", opacity: 0.55, transform: `translate(${ax} ${ay}) rotate(${dir})` }));
         const [nx, ny] = p((a0 + a1) / 2);
-        svg.append(s("text", { x: nx, y: ny + 12, "text-anchor": "middle", style: { "font-family": "var(--font-num)", "font-weight": 800, "font-size": "34px", fill: i < n / 2 ? "var(--accent-ink)" : "var(--ink)" } }, pad2(i + 1)));
+        svg.append(s("text", { x: nx, y: ny + 12, "text-anchor": "middle", style: { "font-family": "var(--font-num)", "font-weight": 800, "font-size": "34px", fill: i < n / 2 ? "var(--tint-ink)" : "var(--ink)" } }, pad2(i + 1)));
       });
       const ring = h("div", { class: "hs-cycle-ring" }, svg, h("div", { class: "hs-cycle-center" }, t("span", "", slide.centerText || "", "centerText")));
       const legend = h("ol", { class: "hs-cycle-legend" }, items.map((it, i) => item(`items[${i}]`, { tag: "li" },
@@ -1168,7 +1188,7 @@
         const y1 = yOf(Math.max(b.from, b.to));
         const y2 = yOf(Math.min(b.from, b.to));
         const hot = !b.total && Math.abs(b.value) === biggest;
-        const fill = b.total ? "var(--ink)" : hot ? "var(--accent)" : b.value >= 0 ? "color-mix(in srgb, var(--accent) 38%, var(--surface2))" : "color-mix(in srgb, var(--bad) 42%, var(--surface2))";
+        const fill = b.total ? "var(--wf-total)" : hot ? "var(--accent)" : b.value >= 0 ? "var(--wf-up)" : "var(--wf-down)";
         const g = s("g", { "data-item": `items[${i}]`, class: "hs-item" });
         g.append(markTip(s("rect", { class: "hs-bar", x, y: y1, width: bw, height: Math.max(3, y2 - y1), rx: 8, fill }), `${strip(items[i].label)}：${b.value > 0 && !b.total ? "+" : ""}${fmt(b.value)}${strip(slide.unit || "")}`, i));
         g.append(s("text", { class: `hs-val${hot ? " hot" : ""}`, x: x + bw / 2, y: y1 - 16, "text-anchor": "middle" }, `${!b.total && b.value > 0 ? "+" : ""}${fmt(b.value)}`));
@@ -1347,8 +1367,8 @@
       return item(`levels[${i}]`, { class: "hs-layer", "data-box": "", style: {
         "--h": `${layerH}px`, height: `${layerH}px`,
         "clip-path": `polygon(${inset(topW)}% 0, ${100 - inset(topW)}% 0, ${100 - inset(botW)}% 100%, ${inset(botW)}% 100%)`,
-        background: `color-mix(in srgb, var(--accent) ${Math.round(strength)}%, var(--surface2))`,
-        color: strength > 55 ? "var(--accent-ink)" : "var(--ink)",
+        background: `color-mix(in srgb, var(--tint) ${Math.round(strength)}%, var(--tint-lo))`,
+        color: strength > 55 ? "var(--tint-ink)" : "var(--ink)",
       } }, t("span", "", lv.title, `levels[${i}].title`));
     }));
     const desc = h("ol", { class: "hs-stack-desc" }, levels.map((lv, i) => item(`levels[${i}]`, { tag: "li", style: { "--h": `${layerH}px` } },
@@ -1383,6 +1403,127 @@
     }
     return h("div", { class: "hs-cover-art" }, svg);
   }
+
+  // ---------------------------------------------------------------- SEJ template (masters and motif)
+  // Geometry comes from assets/sej/template.pptx at 144 px per inch (13.333 × 7.5 in → 1920 × 1080), so a slide
+  // lines up with the PowerPoint original. The title master (cover, chapters) runs the green rule across the
+  // middle; the content master (every other page) runs it under the title. test/test_sej_master.py checks
+  // these numbers against the template.
+
+  const SEJ_MASTER = {
+    title: { rule: [68.1, 535.6, 1795.4, 10.2], slogan: [51.7, 42.4, 467.7, 58.2, "center"], page: false },
+    content: { rule: [69.5, 123.3, 1780.7, 10.1], slogan: [1358.1, 994.1, 467.7, 58.2, "right"], page: true },
+  };
+  const SEJ_BOX = { logo: [1798.2, 28.8, 64.8, 68.2], secret: [1503.1, 37.4, 253.5, 57.5], internal: [48.5, 989.3, 253.5, 57.5], copyright: [843.9, 1028.5, 230.0, 18.2], page: [1734.4, 1012.8, 129.1, 57.5] };
+  const box = ([x, y, w, hh]) => ({ left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${hh}px` });
+
+  /** The master's parts, above the backdrop and below the content (they never overlap it). */
+  function sejChrome(master, pageLabel) {
+    const m = SEJ_MASTER[master];
+    const [sx, sy, sw, sh, align] = m.slogan;
+    return h("div", { class: "hs-sej", "data-master": master, "aria-hidden": "true" },
+      h("i", { class: "hs-sej-rule", style: box(m.rule) }),
+      SEJ_ART.logo ? h("img", { class: "hs-sej-logo", src: SEJ_ART.logo, alt: "", draggable: "false", style: box(SEJ_BOX.logo) }) : h("span", { class: "hs-sej-logo", style: box(SEJ_BOX.logo) }),
+      h("span", { class: "hs-sej-tag", style: box(SEJ_BOX.secret) }, "秘（B）"),
+      h("span", { class: "hs-sej-tag", style: box(SEJ_BOX.internal) }, "社内限り"),
+      h("span", { class: "hs-sej-slogan", style: { ...box([sx, sy, sw, sh]), "text-align": align } }, "明日の笑顔を 共に創る"),
+      SEJ_ART.copyright ? h("img", { class: "hs-sej-copy", src: SEJ_ART.copyright, alt: "", draggable: "false", style: box(SEJ_BOX.copyright) }) : null,
+      m.page ? h("span", { class: "hs-sej-page hs-page", style: box(SEJ_BOX.page) }, pageLabel) : null);
+  }
+
+  // The deck's one motif (seven-eleven-pptx): concentric ripples of the same pale blue, stacked translucent so the
+  // centre reads darker. [cx, cy, r, alpha] discs and [cx, cy, r, alpha] rings, in slide pixels.
+  const SEJ_RIPPLES = {
+    // cover: from the bottom-right corner, the only corner of the title master without a brand element
+    title: { discs: [[1922, 1159, 511, 0.4], [1922, 1159, 367, 0.5], [1922, 1159, 223, 0.65], [1548, 1231, 252, 0.35]], rings: [[1922, 1159, 540, 1], [1548, 1231, 310, 1]] },
+    // chapter: background art on the right that passes under the green rule (the horizon)
+    section: { discs: [[1757, 540, 432, 0.45], [1757, 540, 288, 0.55], [1757, 540, 144, 0.75]], rings: [[1757, 540, 605, 1], [1757, 540, 720, 0.8]] },
+    // closing: the cover's ripples come back to close the deck
+    closing: { discs: [[1987, 1210, 461, 0.4], [1987, 1210, 317, 0.55], [1987, 1210, 173, 0.75]], rings: [[1987, 1210, 547, 1]] },
+  };
+
+  function sejRipples(kind) {
+    const art = SEJ_RIPPLES[kind];
+    const svg = s("svg", { class: "hs-sej-ripples", "data-kind": kind, width: W, height: H, viewBox: `0 0 ${W} ${H}`, "aria-hidden": "true" });
+    for (const [cx, cy, r, a] of art.discs) svg.append(s("circle", { class: "disc", cx, cy, r, "fill-opacity": a }));
+    for (const [cx, cy, r, a] of art.rings) svg.append(s("circle", { class: "ring", cx, cy, r, "stroke-opacity": a }));
+    // While presenting, one more ring spreads from the centre now and then, like a ripple on water.
+    const [cx, cy, r] = art.discs[0];
+    svg.append(s("circle", { class: "wave", cx, cy, r }), s("circle", { class: "wave late", cx, cy, r }));
+    return svg;
+  }
+
+  function renderSejTitle(slide, ctx, parts) {
+    const media = ctx.media && !ctx.media.placement ? ctx.media : null;
+    parts.decor.append(sejRipples("title"));
+    // A photo takes the room above the title as a wide band, aligned with the title (the title grows upwards).
+    parts.frame.append(h("div", { class: ["hs-sej-cover", media ? "with-photo" : ""] },
+      h("div", { class: "hs-sej-cover-top" },
+        media ? h("div", { class: "hs-sej-cover-photo hs-enter", style: { "--d": 0 } }, mediaEl(media, ctx)) : null,
+        h("h1", { class: "hs-t hs-cover-title hs-enter", style: { "--d": 1 }, "data-field": "title", "data-lines": "2" }, rich(slide.title))),
+      h("div", { class: "hs-sej-cover-meta hs-enter", style: { "--d": 2 } },
+        h("span", { class: "hs-t", "data-field": "date" }, strip(slide.date || "")),
+        h("span", {}, strip(ctx.deck?.audience || ""))),
+      slide.subtitle ? h("p", { class: "hs-t hs-cover-sub hs-enter", style: { "--d": 3 }, "data-field": "subtitle" }, strip(slide.subtitle)) : null));
+  }
+
+  function renderSejSection(slide, ctx, parts) {
+    parts.decor.append(sejRipples("section"));
+    parts.frame.append(h("div", { class: "hs-sej-section" },
+      h("div", { class: "hs-section-no hs-enter", style: { "--d": 0 } }, pad2(slide.sectionNo || ctx.sectionNo || 1)),
+      h("h2", { class: "hs-t hs-section-title hs-enter", style: { "--d": 1 }, "data-field": "title", "data-lines": "1" }, rich(slide.title)),
+      slide.takeaway ? h("p", { class: "hs-t hs-section-sub hs-enter", style: { "--d": 2 }, "data-field": "takeaway" }, rich(slide.takeaway)) : null));
+  }
+
+  function renderSejClosing(slide, ctx, parts) {
+    const media = ctx.media && !ctx.media.placement ? ctx.media : null;
+    parts.decor.append(sejRipples("closing"));
+    const message = str(slide.message).trim();
+    const actions = message.split(/\n|／|(?<=。)(?=.)/).map((part) => part.trim()).filter(Boolean);
+    const many = actions.length >= 2 && actions.length <= 3;
+    parts.frame.append(sejTitlebar(slide.title || "次のアクション", "title"));
+    const panel = h("div", { class: ["hs-sej-closing", media ? "with-photo" : ""] });
+    if (many) {
+      panel.append(h("ol", { class: "hs-closing-actions", "data-field": "message" }, actions.map((action, i) => {
+        const [title, desc] = splitLabel(action);
+        return item(`message[${i}]`, { tag: "li", class: "hs-enter", style: { "--d": i + 1 } }, h("span", { class: "hs-index" }, pad2(i + 1)), h("div", { class: "hs-card-title" }, title), desc ? h("div", { class: "hs-card-desc" }, desc) : null);
+      })));
+    } else {
+      panel.append(h("p", { class: "hs-t hs-closing-message hs-enter", style: { "--d": 1 }, "data-field": "message" }, rich(message || "ご清聴ありがとうございました")));
+    }
+    if (media) panel.append(mediaEl(media, ctx, "hs-sej-closing-photo"));
+    parts.frame.append(panel);
+  }
+
+  // A full photo would cover the master, so on SEJ it fills the body instead and the message sits on a white card.
+  function renderSejHero(slide, ctx, parts) {
+    const media = ctx.media && !ctx.media.placement ? ctx.media : null;
+    parts.frame.append(sejTitlebar(slide.title, "title"),
+      h("div", { class: "hs-sej-hero" },
+        media ? mediaEl(media, ctx) : h("div", { class: "hs-media hs-sej-hero-blank" }),
+        slide.takeaway ? h("div", { class: "hs-sej-hero-card hs-enter", style: { "--d": 1 } }, t("p", "hs-hero-sub", slide.takeaway, "takeaway", { emphasis: true })) : null));
+  }
+
+  function renderSejStatement(slide, ctx, parts) {
+    const media = ctx.media && !ctx.media.placement ? ctx.media : null;
+    parts.frame.append(sejTitlebar(slide.title, "title"),
+      h("div", { class: ["hs-sej-statement", media ? "with-photo" : ""] },
+        h("div", { class: "hs-sej-statement-text" },
+          t("p", "hs-statement-text hs-enter", slide.text, "text", { emphasis: true }),
+          slide.takeaway ? t("p", "hs-statement-sub hs-enter", slide.takeaway, "takeaway", { emphasis: true }) : null),
+        media ? mediaEl(media, ctx) : null));
+    parts.frame.querySelector(".hs-statement-text").style.setProperty("--d", "1");
+    parts.frame.querySelector(".hs-statement-sub")?.style.setProperty("--d", "2");
+  }
+
+  /** The page title on the content master: one line, in the band above the green rule, left of 秘（B）. */
+  function sejTitlebar(text, field) {
+    const title = t("h2", "hs-title", text, field, { emphasis: true });
+    title.dataset.lines = "1";
+    return h("div", { class: "hs-sej-titlebar" }, title);
+  }
+
+  const SEJ_FULL = { title: renderSejTitle, section: renderSejSection, closing: renderSejClosing, hero: renderSejHero, statement: renderSejStatement };
 
   // ---------------------------------------------------------------- backdrops (moving graphics behind a slide)
 
@@ -1633,8 +1774,9 @@
     const total = story.order.length || 1;
     const drillParent = slide?.drillOf && index > 0 ? story.parent[index] ?? null : null;
     const pageNo = story.no[index] ?? index + 1;
-    const theme = THEME_IDS.has(deck.theme) ? deck.theme : "clarity";
+    const theme = THEME_IDS.has(deck.theme) ? deck.theme : DEFAULT_THEME;
     const meta = THEMES.find((entry) => entry.id === theme);
+    const sej = theme === "sej";
     const mode = opts.mode || "edit";
     const live = mode === "present";
     const type = LAYOUTS[slide?.type] || FULL[slide?.type] ? slide.type : "content";
@@ -1655,7 +1797,9 @@
       if (slides[i]?.type === "section") { chapterNo += 1; if (i < index) chapter = slides[i]; }
     }
     ctx.sectionNo = chapterNo || 1;
-    ctx.eyebrow = strip(slide?.subhead || (drillParent != null ? `↳ ${strip(slides[drillParent]?.title || slides[drillParent]?.message || "")}` : chapter ? `${pad2(chapter.sectionNo || chapterNo)}  ${strip(chapter.title)}` : ""));
+    // The SEJ page has no room for the chapter's name (the title band is the master's); it keeps a subhead and
+    // the "which slide is this a deep dive of" line.
+    ctx.eyebrow = strip(slide?.subhead || (drillParent != null ? `↳ ${strip(slides[drillParent]?.title || slides[drillParent]?.message || "")}` : chapter && !sej ? `${pad2(chapter.sectionNo || chapterNo)}  ${strip(chapter.title)}` : ""));
 
     const build = BUILDS.includes(slide?.animation) && slide.animation !== "auto" ? slide.animation : recommendedBuild(type);
     const root = h("div", {
@@ -1671,14 +1815,16 @@
       "data-drill-of": drillParent != null ? String(drillParent) : null,
       role: "img", "aria-label": `${pageNo}枚目${drillParent != null ? "の深掘り" : ""}：${strip(slide?.title || TYPE_LABELS[type] || "")}`,
     });
-    if (deck.accent && /^#[0-9a-f]{6}$/i.test(deck.accent)) {
+    // The SEJ template's colours are the brand's: a deck accent applies to the other themes only.
+    if (deck.accent && !sej && /^#[0-9a-f]{6}$/i.test(deck.accent)) {
       root.style.setProperty("--accent", deck.accent);
       root.style.setProperty("--c1", deck.accent);
       root.style.setProperty("--accent-soft", `color-mix(in srgb, ${deck.accent} 12%, transparent)`);
       root.style.setProperty("--hl", `color-mix(in srgb, ${deck.accent} 20%, transparent)`);
     }
+    // Measured text scales (see fit). A theme may start above 1 (SEJ sets larger type), so any measured value is kept.
     const fitValues = opts.fit || {};
-    if (fitValues.fs && fitValues.fs < 1) root.style.setProperty("--fs", String(fitValues.fs));
+    if (fitValues.fs > 0) root.style.setProperty("--fs", String(fitValues.fs));
     if (fitValues.ts && fitValues.ts < 1) root.style.setProperty("--ts", String(fitValues.ts));
 
     const decor = h("div", { class: "hs-decor", "aria-hidden": "true" });
@@ -1690,6 +1836,8 @@
     const parts = { root, decor, frame, overlay };
     if (!slide) {
       frame.append(h("div", { class: "hs-body", style: { "align-items": "center", "justify-content": "center", color: "var(--muted)" } }, "スライドがありません"));
+    } else if (sej && SEJ_FULL[type]) {
+      SEJ_FULL[type](slide, ctx, parts);
     } else if (FULL[type]) {
       FULL[type](slide, ctx, parts);
     } else {
@@ -1709,7 +1857,17 @@
       overlay.append(placed);
     }
     root.append(overlay);
-    if (!["title", "section", "closing"].includes(type)) {
+    if (sej) {
+      // The master: the cover and chapters use the title master, every other page the content master
+      // (its page number counts the story, as ‹#› does in the template; a deep-dive page shows its slide's number
+      // and says what it belongs to in the line above its key message).
+      const master = type === "title" || type === "section" ? "title" : "content";
+      root.dataset.master = master;
+      root.insertBefore(sejChrome(master, String(pageNo)), frame);
+      const source = strip(slide?.source || "");
+      if (source) root.dataset.source = source;
+      if (master === "content" && source) root.append(h("footer", { class: "hs-foot" }, h("span", { class: "hs-source", "data-field": "source" }, `出所：${source}`)));
+    } else if (!["title", "section", "closing"].includes(type)) {
       // Where the figures come from sits at the foot of the page (and in the chart tooltips); otherwise the deck's name.
       const source = strip(slide?.source || "");
       if (source) root.dataset.source = source;
@@ -1873,17 +2031,29 @@
     const bodyEl = slideEl.querySelector(".hs-body");
     const frame = slideEl.querySelector(".hs-frame");
     const boxes = () => [...slideEl.querySelectorAll("[data-box]")];
-    const bad = () => (bodyEl && bodyEl.scrollHeight > bodyEl.clientHeight + 2) || (frame && frame.scrollHeight > frame.clientHeight + 2) || boxes().some(overflowing);
-    let fs = 1;
-    slideEl.style.setProperty("--fs", "1");
-    while (bad() && fs > min + 0.001) {
+    // Labels hung above a point (roadmap milestones, the triangle's top) grow upwards, out of the body's top.
+    // They may reach a little into the gap under the key message (24px), not into the message itself.
+    const rises = () => {
+      if (!bodyEl) return false;
+      const top = bodyEl.getBoundingClientRect().top - 24 * currentScale(bodyEl);
+      return [...bodyEl.querySelectorAll(".hs-road-node, .hs-tri-node")].some((el) => el.getBoundingClientRect().top < top);
+    };
+    const bad = () => (bodyEl && bodyEl.scrollHeight > bodyEl.clientHeight + 2) || (frame && frame.scrollHeight > frame.clientHeight + 2) || boxes().some(overflowing) || rises();
+    // A theme may start from larger type and stop shrinking earlier (--fs-top / --fs-min, e.g. SEJ's 20pt body).
+    slideEl.style.removeProperty("--fs");
+    const themed = (name) => parseFloat(root.getComputedStyle?.(slideEl).getPropertyValue(name)) || null;
+    const top = themed("--fs-top") ?? 1;
+    const floor = Math.min(top, themed("--fs-min") ?? min);
+    let fs = top;
+    slideEl.style.setProperty("--fs", String(top));
+    while (bad() && fs > floor + 0.001) {
       fs = Math.round((fs - 0.05) * 100) / 100;
       slideEl.style.setProperty("--fs", String(fs));
     }
     const titles = [...slideEl.querySelectorAll(".hs-title, .hs-cover-title, .hs-section-title, .hs-hero-title")];
     let ts = 1;
     slideEl.style.setProperty("--ts", "1");
-    const maxLines = (el) => (el.classList.contains("hs-title") ? 2 : 3);
+    const maxLines = (el) => Number(el.dataset.lines) || (el.classList.contains("hs-title") ? 2 : 3);
     const titleBad = () => titles.some((el) => lineCount(el) > maxLines(el)) || (frame && frame.scrollHeight > frame.clientHeight + 2);
     while (titleBad() && ts > minTitle + 0.001) {
       ts = Math.round((ts - 0.05) * 100) / 100;
@@ -1905,6 +2075,73 @@
       }
     }
     return { fs, ts, issues };
+  }
+
+  // ---------------------------------------------------------------- SEJ brand check
+  // The SEJ studio refused to write a PowerPoint that broke the brand; here the rendered slide is read back (the
+  // slide must be in the document) and what breaks the rules is reported: text in colours other than black, navy
+  // and grey (white above all), text on a dark fill, drop shadows. The masters and the user's media are left out.
+
+  const SEJ_TEXT = new Set(["1a1a1a", "1f3864", "808080"]);
+  const SEJ_DECO = new Set(["b7c3da", "dce4f2"]);
+
+  function hexOf(color) {
+    const match = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(color || "");
+    if (!match) return null;
+    if (match[4] !== undefined && Number(match[4]) === 0) return "transparent";
+    return [match[1], match[2], match[3]].map((v) => Math.round(Number(v)).toString(16).padStart(2, "0")).join("");
+  }
+
+  function luminance(hex) {
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  /** Drop shadows (an offset or a blur, not inset); rings drawn with a spread only are outlines, not shadows. */
+  function dropShadow(value) {
+    if (!value || value === "none") return false;
+    return value.split(/,(?![^(]*\))/).some((part) => {
+      if (/inset/.test(part)) return false;
+      const [x = 0, y = 0, blur = 0] = part.replace(/rgba?\([^)]*\)|#[0-9a-f]+|[a-z-]+\([^)]*\)/gi, "").match(/-?[\d.]+(?=px)/g)?.map(Number) ?? [];
+      return x !== 0 || y !== 0 || blur !== 0;
+    });
+  }
+
+  function brandCheck(slideEl) {
+    if (slideEl?.dataset?.theme !== "sej" || !root.getComputedStyle) return [];
+    const issues = [];
+    const seen = new Set();
+    const add = (el, message) => {
+      const field = el.closest("[data-field]")?.dataset.field || "body";
+      if (seen.has(message)) return;
+      seen.add(message);
+      issues.push({ kind: "brand", severity: "warning", field, message });
+    };
+    const fillOf = new Map();
+    const paint = (el) => {
+      if (!el || el === slideEl) return null;
+      if (!fillOf.has(el)) {
+        const own = hexOf(root.getComputedStyle(el).backgroundColor);
+        fillOf.set(el, own && own !== "transparent" ? own : paint(el.parentElement));
+      }
+      return fillOf.get(el);
+    };
+    for (const el of slideEl.querySelectorAll("*")) {
+      if (el.closest(".hs-sej, .hs-media, .hs-placed, .hs-detail-badge, .hs-drill-badge, .hs-control")) continue;
+      const style = root.getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+      if (dropShadow(style.boxShadow)) add(el, "影は付けません（SEJテンプレート）");
+      if (![...el.childNodes].some((node) => node.nodeType === 3 && node.data.trim())) continue;
+      const svg = typeof SVGElement === "function" && el instanceof SVGElement;
+      const fill = style.webkitTextFillColor && hexOf(style.webkitTextFillColor) !== hexOf(style.color) ? style.webkitTextFillColor : style.color;
+      const color = hexOf(svg ? style.fill : fill);
+      if (color && color !== "transparent" && !SEJ_TEXT.has(color) && !SEJ_DECO.has(color)) {
+        add(el, color === "ffffff" ? "白抜き文字は使いません（SEJテンプレート）" : `文字の色 #${color} はSEJの文字色（黒・濃紺・グレー）ではありません`);
+      }
+      const ground = svg ? null : paint(el);
+      if (ground && luminance(ground) < 0.25) add(el, "濃い色の面に文字を載せません（SEJテンプレート）");
+    }
+    return issues;
   }
 
   function fontHref(themeIds) {
@@ -1933,9 +2170,11 @@
   const Engine = root.SlideEngine || {};
   Object.assign(Engine, {
     W, H, THEMES, PHOTOS, TYPE_LABELS, BUILDS, KINETIC, BACKDROPS, ENTRANCES, HOVERS, EMPHASES, TRANSITIONS, PHOTO_MOTIONS, LAYOUT_TYPES: [...Object.keys(FULL), "hero", ...Object.keys(LAYOUTS)].filter((v, i, a) => a.indexOf(v) === i),
+    DEFAULT_THEME, SEJ_MASTER, SEJ_BOX,
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },
-    render, mount, fit, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
+    setSejArt(art) { SEJ_ART = art || {}; },
+    render, mount, fit, brandCheck, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
     evalFormula, formulaTokens, rankShow, simUpdate, gapUpdate, fmtNum,
   });
   root.SlideEngine = Engine;

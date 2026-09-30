@@ -22,6 +22,7 @@ body { margin: 0; background: #8a8f99; }
   const q = new URLSearchParams(location.search);
   const source = await (await fetch(q.get("deck") || "/public/samples/ai-rollout.json")).json();
   SlideEngine.setIcons(await (await fetch("/public/engine/icons.json")).json());
+  SlideEngine.setSejArt({ logo: "/assets/sej/logo.png", copyright: "/assets/sej/copyright.png" });
   const theme = q.get("theme") || "clarity";
   const deck = { title: source.deckTitle, audience: source.audience, purpose: source.purpose, theme, slides: source.slideData, motion: {}, accent: q.get("accent") || undefined };
   const link = document.getElementById("fonts");
@@ -54,7 +55,9 @@ body { margin: 0; background: #8a8f99; }
   const results = [];
   [...sheet.querySelectorAll(".hs-slide")].forEach((el, k) => {
     const result = SlideEngine.fit(el);
-    results.push({ index: indices[k], type: deck.slides[indices[k]].type, ...result });
+    const brand = SlideEngine.brandCheck(el);
+    results.push({ index: indices[k], type: deck.slides[indices[k]].type, ...result, brand });
+    if (brand.length) el.closest(".cell").classList.add("bad");
     if (result.issues.length) el.closest(".cell").classList.add("bad");
   });
   if (q.get('repaint') !== '0') for (const svg of sheet.querySelectorAll('.hs-slide svg')) { svg.style.display = 'none'; void svg.getBoundingClientRect(); svg.style.display = ''; }

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: html-slide-studio
+    name: htmlsej-slide-studio
     runtime: docker
     region: singapore
     plan: free

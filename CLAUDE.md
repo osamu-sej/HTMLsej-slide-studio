@@ -1,6 +1,12 @@
-# HTML Slide Studio — 作業のきまり
+# HTML SEJ Slide Studio — 作業のきまり
 
-AIで構成したスライドを、動きのあるHTMLプレゼンとして編集・発表・書き出すWebアプリです。作るのはHTMLのスライドで、PowerPoint（.pptx）は作りません。
+AIで構成したスライドを、SEJの原本テンプレートの見た目で、動きのあるHTMLプレゼンとして編集・発表・書き出すWebアプリです。作るのはHTMLのスライドで、PowerPoint（.pptx）は作りません。HTML Slide Studio をベースに、SEJ Slide Studio のテンプレートを「SEJ」テーマ（既定）として再現しています。
+
+## SEJテーマ
+
+- マスター（ロゴ・緑線・秘（B）・社内限り・スローガン・コピーライト・ページ番号）は原本 `assets/sej/template.pptx` と同じ位置に描く（1インチ＝144px）。位置は `public/engine/engine.js` の `SEJ_MASTER`／`SEJ_BOX` にあり、`test/test_sej_master.py` が原本と1px以内で一致するかを確かめる。マスターを動かす・消す・書き換える変更はしない。
+- ブランドのきまり：文字は黒（#1A1A1A）・濃紺（#1F3864）・グレー（#808080）だけ。白抜き文字は使わない。濃紺の面には文字を載せない。面は淡青・グレー・淡茶。影を付けない。色の付いた箱に枠線を付けない。アクセント色の変更は効かない。
+- レイアウトやCSSを変えたら `npm run qa:sej`（撮影とSEJブランド検査）で見た目と指摘を確かめる。`test/sej.test.js` はSEJのスタイルに白い文字や落ち影が入っていないかも見る。
 
 ## PRとマージ
 

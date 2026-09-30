@@ -24,7 +24,7 @@ async function startServer(extraEnv = {}) {
     stdio: ["ignore", "pipe", "pipe"],
   });
   const [chunk] = await once(child.stdout, "data");
-  assert.match(String(chunk), /HTML Slide Studio:/);
+  assert.match(String(chunk), /HTML SEJ Slide Studio:/);
   const base = `http://127.0.0.1:${port}`;
   let cookie = "";
   const request = async (path, options = {}) => {
@@ -102,7 +102,7 @@ test("app shell, engine, assets and security headers", async () => {
   try {
     const health = await (await server.request("/healthz")).json();
     assert.equal(health.status, "ok");
-    assert.equal(health.name, "HTML Slide Studio");
+    assert.equal(health.name, "HTML SEJ Slide Studio");
     const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
     assert.equal(health.version, pkg.version);
     assert.match(health.commit ?? "", /^([0-9a-f]{7})?$/, "the running commit, when the checkout has one");

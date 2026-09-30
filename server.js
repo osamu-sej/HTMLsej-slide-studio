@@ -29,6 +29,7 @@ import { extractText, importDeck } from "./server/extract.mjs";
 import { varietyIssues } from "./public/layout-looks.mjs";
 import {
   chatRequestSchema,
+  themeSchema,
   chatResultSchema,
   codexChatSchema,
   codexDeckSchema,
@@ -107,6 +108,8 @@ function imagePrompt({ message, deck, index }, hasReference = false) {
 const PUBLIC = join(here, "public");
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".jpg": "image/jpeg", ".png": "image/png", ".svg": "image/svg+xml", ".txt": "text/plain; charset=utf-8" };
 const icons = readFileSync(join(PUBLIC, "engine", "icons.json"), "utf8").trim();
+// The SEJ template's master pictures travel inside the engine, so every slide and every exported file has them.
+const sejArt = JSON.stringify(Object.fromEntries(["logo", "copyright"].map((name) => [name, `data:image/png;base64,${readFileSync(join(here, "assets", "sej", `${name}.png`)).toString("base64")}`])));
 function loadStatic() {
   const files = new Map();
   const add = (path, body, type) => files.set(path, { body: Buffer.isBuffer(body) ? body : Buffer.from(body), type, etag: `"${createHash("sha1").update(body).digest("base64url").slice(0, 16)}"` });
@@ -119,7 +122,7 @@ function loadStatic() {
   add("/auto-images.mjs", readFileSync(join(PUBLIC, "auto-images.mjs"), "utf8"), TYPES[".js"]);
   add("/app.css", readFileSync(join(PUBLIC, "app.css"), "utf8"), TYPES[".css"]);
   add("/layout-looks.mjs", readFileSync(join(PUBLIC, "layout-looks.mjs"), "utf8"), TYPES[".js"]);
-  add("/engine/engine.js", readFileSync(join(PUBLIC, "engine", "engine.js"), "utf8").replace("/*__ICONS__*/{}", () => icons), TYPES[".js"]);
+  add("/engine/engine.js", readFileSync(join(PUBLIC, "engine", "engine.js"), "utf8").replace("/*__ICONS__*/{}", () => icons).replace("/*__SEJ__*/{}", () => sejArt), TYPES[".js"]);
   add("/engine/motion.js", readFileSync(join(PUBLIC, "engine", "motion.js"), "utf8"), TYPES[".js"]);
   add("/engine/engine.css", readFileSync(join(PUBLIC, "engine", "engine.css"), "utf8"), TYPES[".css"]);
   for (const name of readdirSync(join(PUBLIC, "assets")).filter((n) => /^[a-z0-9-]+\.jpg$/.test(n))) add(`/assets/${name}`, readFileSync(join(PUBLIC, "assets", name)), TYPES[".jpg"]);
@@ -620,7 +623,7 @@ const httpServer = createServer(async (req, res) => {
   }
 
   if ((url.pathname === "/healthz" || url.pathname === "/readyz") && req.method === "GET") {
-    return json(res, 200, { name: "HTML Slide Studio", version: APP_VERSION, commit: APP_COMMIT || null, startedAt: STARTED_AT.toISOString(), status: "ok", mode: "standalone-codex-app-server" });
+    return json(res, 200, { name: "HTML SEJ Slide Studio", version: APP_VERSION, commit: APP_COMMIT || null, startedAt: STARTED_AT.toISOString(), status: "ok", mode: "standalone-codex-app-server" });
   }
 
   const stateless = STATELESS_API.has(url.pathname);
@@ -852,7 +855,7 @@ const httpServer = createServer(async (req, res) => {
 });
 
 httpServer.listen(PORT, process.env.HOST ?? "0.0.0.0", () => {
-  console.log(`HTML Slide Studio: http://localhost:${PORT}`);
+  console.log(`HTML SEJ Slide Studio: http://localhost:${PORT}`);
 });
 
 for (const signal of ["SIGTERM", "SIGINT"]) {

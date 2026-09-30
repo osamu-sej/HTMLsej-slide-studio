@@ -1,4 +1,4 @@
-const DB_NAME = "html-slide-studio-library";
+const DB_NAME = "htmlsej-slide-studio-library";
 const STORE = "decks";
 const SKIP_FIELDS = new Set([
   "media", "customImage", "src", "visualAsset", "imagePlacement", "photoMotion",

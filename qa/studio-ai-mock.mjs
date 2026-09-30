@@ -120,7 +120,7 @@ await step("generate from the outline", async () => {
   await page.click(".film-item:nth-child(1)");
   await page.reload();
   await page.waitForFunction(() => document.querySelector("#autoImageStatus")?.textContent?.includes("画像 3/9枚"), null, { timeout: 10000 });
-  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("hs-studio-current-v1"))?.deck?.slides?.filter((slide) => slide.media?.kind === "image").length);
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("hsej-studio-current-v1"))?.deck?.slides?.filter((slide) => slide.media?.kind === "image").length);
   if (stored !== 3) throw new Error(`images not saved: ${stored}`);
 });
 
