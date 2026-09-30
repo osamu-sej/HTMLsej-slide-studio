@@ -39,7 +39,7 @@ test("Codex output schemas satisfy strict structured-output rules", () => {
   assert.match(chat, /"animation"/);
   assert.match(chat, /"photoMotion"/);
   assert.match(chat, /"details"/);
-  assert.match(chat, /"theme"/);
+  assert.doesNotMatch(chat, /"theme"/, "the AI cannot change the SEJ template");
   // Motion graphics: the AI may choose kinetic type and backdrops per slide, and change the deck's defaults in chat.
   for (const schema of [codexDeckSchema, codexChatSchema, codexSlideSchema, codexVariantsSchema]) {
     const text = JSON.stringify(schema);

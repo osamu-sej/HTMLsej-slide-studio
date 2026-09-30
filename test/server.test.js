@@ -178,7 +178,7 @@ test("app shell, engine, assets and security headers", async () => {
     assert.match(csp, /frame-src https:\/\/www\.youtube-nocookie\.com/);
     assert.match(csp, /font-src 'self' https:\/\/fonts\.gstatic\.com/);
     const html = await page.text();
-    for (const id of ["briefInput", "askChatGptBtn", "createThemes", "filmstrip", "inspector", "chatPane", "designDialog", "themeGrid", "mediaUrlDialog", "presenter", "measureRoot", "downloadBtn", "historyDialog"]) {
+    for (const id of ["briefInput", "askChatGptBtn", "createTemplate", "filmstrip", "inspector", "chatPane", "designDialog", "mediaUrlDialog", "presenter", "measureRoot", "downloadBtn", "historyDialog"]) {
       assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
     }
     assert.doesNotMatch(html, /__APP_VERSION__|__APP_BUILD__/);
@@ -457,13 +457,13 @@ test("AI speaker notes are written only for the requested slides", async () => {
   });
 });
 
-test("chat proposes operations on the original numbering, keeps photos and videos, repairs overflow, and may switch the theme", async () => {
+test("chat proposes operations on the original numbering, keeps photos and videos, repairs overflow, and never switches off the SEJ template", async () => {
   const photo = `data:image/jpeg;base64,${(await readFile(PHOTO)).toString("base64")}`;
   const long = "とても長い説明文".repeat(13);
   await withFakeCodex([
     { reply: "2枚目を簡潔にしました。", operations: [{ op: "replace", slide: 2, content: { type: "content", title: "本文1", takeaway: long, points: ["A"] } }], suggestions: ["結論を強く"] },
     {
-      reply: "2枚目を簡潔にし、4枚目の後ろに1枚追加し、3枚目を削除しました。テーマも発表向けに変えました。",
+      reply: "2枚目を簡潔にし、4枚目の後ろに1枚追加し、3枚目を削除しました。テーマも変えようとしました。",
       operations: [
         { op: "replace", slide: 2, content: { type: "content", title: "本文1", takeaway: "短い結論", points: ["A"], animation: "click" } },
         { op: "insert", slide: 4, content: { type: "cards", title: "追加", takeaway: "追加の結論", items: [{ title: "X", desc: "x" }, { title: "Y", desc: "y" }], details: [{ target: "items[0]", text: "Xの根拠" }] } },
@@ -491,10 +491,12 @@ test("chat proposes operations on the original numbering, keeps photos and video
     assert.equal(chat.slides[3].title, "追加");
     assert.equal(chat.slides[3].details[0].text, "Xの根拠");
     assert.equal(chat.slides[4].media.src, slides[4].media.src, "videos survive too");
-    assert.equal(chat.theme, "midnight");
+    assert.equal(chat.theme, undefined, "the design is fixed to the SEJ template; a theme from the AI is dropped");
     assert.equal(chat.transition, "morph");
-    assert.match(chat.summary, /テーマを変更/);
+    assert.doesNotMatch(chat.summary, /テーマ/);
     const [first, retry] = await prompts();
+    assert.match(first, /SEJテンプレート/);
+    assert.doesNotMatch(first, /ミッドナイト|midnight/, "no theme list is offered to the AI");
     assert.match(first, /前提条件（必ず守る）:\n役員向け。数値は9月時点。/);
     assert.match(first, /今見ているスライド: 2枚目／ユーザーが指定したスライド: 4枚目/);
     assert.match(first, /ユーザー: 前の依頼/);

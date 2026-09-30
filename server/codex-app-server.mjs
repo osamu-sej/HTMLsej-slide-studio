@@ -164,8 +164,8 @@ const WRITING_GUIDE = [
   "- 証拠の型を内容で選ぶ：数字1つが主役→kpi（1項目。%ならゲージ）／指標を複数→kpi・dashboard／項目の大小比較→imageText（bar）／推移→imageText（line）／構成比→imageText（donut）／合計の内訳・増減の要因→waterfall／原因分解→logicTree／現状と目指す姿→beforeAfter／時系列の計画→roadmap・timeline・gantt／繰り返す業務→cycle／声→quote／決意・問い→statement",
   "- 見た目のグループ（下の一覧）を散らす。アイコン付きカードの羅列で図解の代わりにしない",
   "- 写真（visualAsset）は表紙・hero・写真が内容を補強するスライドだけ。図解・表・グラフのスライドには付けない",
-  "- SEJテンプレート（既定のテーマ sej）は、ロゴ・緑線・「秘（B）」「社内限り」・スローガン・コピーライト・ページ番号をテンプレートが描く。これらをタイトルや本文に書かない。タイトルは緑線の上の1行に入るので24字以内を必ず守る。表紙の date には作成日（例：2026年9月）を入れる（所属・対象者は資料の対象者欄が表紙の右に出る）",
-  "- sej では色は決まっている（本文は黒、強調だけ濃紺。面は淡青・グレー・淡茶）。accent は使わない。強調は **語句** の1〜2か所に絞る",
+  "- デザインはSEJテンプレートに決まっている（テーマは変えられない）。SEJテンプレートは、ロゴ・緑線・「秘（B）」「社内限り」・スローガン・コピーライト・ページ番号をテンプレートが描く。これらをタイトルや本文に書かない。タイトルは緑線の上の1行に入るので24字以内を必ず守る。表紙の date には作成日（例：2026年9月）を入れる（所属・対象者は資料の対象者欄が表紙の右に出る）",
+  "- 色も決まっている（本文は黒、強調だけ濃紺。面は淡青・グレー・淡茶）。accent は使わない。強調は **語句** の1〜2か所に絞る",
 ];
 
 // Different layouts can look the same on screen (a timeline, a process and a roadmap are all a line of points),
@@ -227,7 +227,7 @@ function memoLines(deck) {
   return memo ? ["", "この資料の前提条件（必ず守る）:", memo, ""] : [];
 }
 
-const THEME_LINE = "テーマ（見た目）: sej=SEJ（SEJの原本テンプレート。社内資料の既定） / clarity=クリア（白地に深い青） / midnight=ミッドナイト（濃紺の舞台） / editorial=エディトリアル（明朝と朱） / mono=モノ（黒い罫線と赤） / forest=フォレスト（緑と黄土） / sunset=サンセット（コーラルと琥珀） / aurora=オーロラ（漂う光とガラス） / kinari=生成り（和の落ち着き）。切り替え: none / fade / slide / zoom / morph（見出しがつながって動く） / wipe（色の帯が横切る） / circle（クリックした所から円が広がる） / push（下から押し上げる） / flip（カードのように裏返る） / dive（奥へ飛び込む） / blinds（ブラインドが開く） / curtain（幕が中央から開く）";
+const THEME_LINE = "デザイン: SEJテンプレートに固定（テーマ・色は変えない）。切り替え: none / fade / slide / zoom / morph（見出しがつながって動く） / wipe（色の帯が横切る） / circle（クリックした所から円が広がる） / push（下から押し上げる） / flip（カードのように裏返る） / dive（奥へ飛び込む） / blinds（ブラインドが開く） / curtain（幕が中央から開く）";
 
 export function buildChatPrompt({ deck, message, history = [], current = 0, focus = [], attachment = null }) {
   const slides = withoutImageData(deck.slides ?? []);
@@ -247,7 +247,7 @@ export function buildChatPrompt({ deck, message, history = [], current = 0, focu
     "  - 枚数は常に「今の資料」の番号で書く（他の操作で番号がずれることは考えなくてよい）",
     "- order: スライドの順番を入れ替えるときだけ、元の枚数を新しい順に並べた配列（削除したものは除く）。入れ替えないなら省略",
     "- deckTitle: 資料名の変更を頼まれたときだけ",
-    "- theme / transition: 見た目のテーマやスライドの切り替えの変更を頼まれたときだけ（下の一覧から選ぶ）",
+    "- transition: スライドの切り替えの変更を頼まれたときだけ（下の一覧から選ぶ）。デザイン（テーマ・色）はSEJテンプレートに決まっていて変えられない。「テーマを変えて」「色を変えて」と頼まれたら、変えられないことを伝え、動き（motion・切り替え）やレイアウトで応える",
     "- motion: 資料全体の動き（モーショングラフィック）の変更を頼まれたときだけ。変えるものだけ入れる。entrance（全スライドの登場のしかた）/ hover（項目にマウスを乗せたときの反応: lift・focus・tilt・glow・zoom）/ kinetic（表紙・章扉などの大きな文字の動き）/ backdrop（表紙・章扉・statement・最後のスライドの後ろで動く図形）/ emphasis（**語句** の強調の見せ方）/ draw（アイコン・線・マーカーを描くように見せるか）。1枚だけなら、そのスライドの entrance・kinetic・backdrop・emphasis・transition を変える",
     "- suggestions: ユーザーが次に頼みそうな改善を最大3つ。20字以内の依頼文（例：「結論を1枚目に寄せて」「工程をクリックで1つずつ出して」）",
     "- 頼まれていないスライドは変えない。直すときは必要最小限にする",
@@ -261,7 +261,7 @@ export function buildChatPrompt({ deck, message, history = [], current = 0, focu
     "- 新しい画像は生成できない。既存の写真を選ぶことと画像生成を混同せず、生成したと説明しない",
     "- 本文スライドには結論を一文で言い切る takeaway を入れる。文字数の上限を守る",
     ...memoLines(deck),
-    `資料: ${deck.title ?? ""}（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}、全${total}枚、テーマ: ${deck.theme || "sej"}、切り替え: ${deck.transition || "fade"}、登場: ${deck.motion?.entrance || "rise"}、大きな文字の動き: ${deck.motion?.kinetic || "mask"}、背景の動き: ${deck.motion?.backdrop || "none"}、強調: ${deck.motion?.emphasis || "marker"}）`,
+    `資料: ${deck.title ?? ""}（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}、全${total}枚、デザイン: SEJテンプレート、切り替え: ${deck.transition || "fade"}、登場: ${deck.motion?.entrance || "rise"}、大きな文字の動き: ${deck.motion?.kinetic || "mask"}、背景の動き: ${deck.motion?.backdrop || "none"}、強調: ${deck.motion?.emphasis || "marker"}）`,
     `ユーザーが今見ているスライド: ${current + 1}枚目${targets.length ? `／ユーザーが指定したスライド: ${targets.map((n) => `${n}枚目`).join("、")}` : ""}`,
     "「この1枚」「このスライド」は今見ているスライドを指す。",
     "資料全体の骨子（各枚の役割・主張・根拠。対象の前後は詳しく示す）:",
@@ -407,7 +407,7 @@ export function buildDeckPrompt(input) {
     "- 素材にスライドへ載せきれない補足（根拠・具体例・内訳・数値の出所）があるときは、その項目の details に書く（資料全体で3〜6か所まで。本文はそのぶん短くする）",
     "- animation は基本的に省略（auto）。発表者が話しながら1つずつ見せたい工程・計画・原因分解だけ click を指定してよい",
     "- 動く資料: 素材に数字と出所がある本文スライドには、見出しの構造に合う操作を1つ付ける（上の「動く資料（1枚1操作）」）。数字のある本文スライドの details には rows・source を入れて根拠パネルにし、出所があれば slide の source も入れる。rank・shift・simulator・gap は素材の数字で作れるときだけ、資料全体で合わせて1〜3枚",
-    "- モーショングラフィック: 表紙（title）・章扉（section）・closing には、資料の話題に合う backdrop を1種類選んで同じものを付ける（AI・テクノロジー→orbits、データ・DX→grid、つながり・業務の流れ→lines、ビジョン→gradient、研修・キックオフ→shapes か particles）。kinetic は省略（自動で mask）してよく、研修・キックオフなら chars、問いかけの statement なら type を使ってよい",
+    "- モーショングラフィック: 表紙・章扉・closing にはSEJテンプレートの波紋（同心円）が入り、発表中はゆっくり広がる。backdrop は付けない（省略）。kinetic は省略（自動で mask）してよく、研修・キックオフなら chars、問いかけの statement なら type を使ってよい",
     "- 最後のclosingには、誰が・いつまでに・何をするかが分かる具体的な次のアクションを入れる",
     "- 各スライドに、発表者が読み上げられる自然な notes（2〜4文）を付ける",
     ...audienceLines(input.audience),

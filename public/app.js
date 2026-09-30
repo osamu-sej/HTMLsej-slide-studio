@@ -16,7 +16,6 @@ const STORAGE = {
   history: "hsej-studio-history-v1",
   chat: "hsej-studio-chat-v1",
   panel: "hsej-studio-panel",
-  theme: "hsej-studio-create-theme",
 };
 
 // ---------------------------------------------------------------- catalog
@@ -38,6 +37,24 @@ const typeLabel = (type) => TYPE_INFO[type]?.[0] ?? type;
 const TITLED = (type) => !["title", "section", "closing"].includes(type);
 const THEME_IDS = new Set(E.THEMES.map((theme) => theme.id));
 const themeMeta = (id) => E.THEMES.find((theme) => theme.id === id) ?? E.THEMES[0];
+// Every deck this studio makes, opens or changes wears the SEJ template. The engine still knows other themes
+// (HTML Slide Studio's), but a deck here never leaves the template: see withTemplate.
+const TEMPLATE_THEME = "sej";
+
+/**
+ * Put a deck in the SEJ template (in place). A deck made in another theme also loses what was chosen for that
+ * design: its accent colour and its moving backdrops (the template has its own motif, the ripples).
+ */
+function withTemplate(deck) {
+  if (!deck) return deck;
+  if (deck.theme && deck.theme !== TEMPLATE_THEME) {
+    if (deck.motion?.backdrop) deck.motion = { ...deck.motion, backdrop: "none" };
+    for (const slide of deck.slides ?? []) delete slide?.backdrop;
+  }
+  deck.theme = TEMPLATE_THEME;
+  delete deck.accent;
+  return deck;
+}
 // Layouts that give a photo its own place; anywhere else a photo or video floats where you put it.
 const SLOTTED = new Set(["title", "section", "closing", "hero", "statement", "content", "quote", "imageText"]);
 const ICON_TYPES = new Set(["cards", "headerCards", "bulletCards", "triangle", "orgChart", "grid2x2", "headerTwoColumn", "headerThreeSummary"]);
@@ -185,7 +202,6 @@ const state = {
   chat: { messages: [], busy: false, progress: "", attachment: null },
   outline: null,
   createBusy: false,
-  createTheme: "sej",
   panel: "chat",
   imported: null,
   player: null,
@@ -529,20 +545,18 @@ function normalizeDeck(value, base = null) {
   else throw new Error("slideData 配列が見つかりません。");
   if (slides.length < 2 || slides.length > 50) throw new Error("スライド枚数は2〜50枚にしてください。");
   const normalized = slides.map((slide, index) => normalizeSlide(slide, index, slides.length));
-  const theme = THEME_IDS.has(meta.theme) ? meta.theme : THEME_IDS.has(base?.theme) ? base.theme : state.createTheme;
-  const accent = /^#[0-9a-f]{6}$/i.test(meta.accent ?? "") ? meta.accent : meta.theme ? undefined : /^#[0-9a-f]{6}$/i.test(base?.accent ?? "") ? base.accent : undefined;
   const transition = TRANSITIONS.includes(meta.transition) ? meta.transition : base?.transition ?? "fade";
-  return {
+  // Whatever design the JSON names (a deck from HTML Slide Studio, an old save), it opens in the SEJ template.
+  return withTemplate({
     title: strip(meta.title || meta.deckTitle || normalized[0]?.title || "無題の資料").slice(0, 100),
     purpose: strip(meta.purpose ?? $("purposeInput").value ?? "").slice(0, 180),
     audience: strip(meta.audience ?? $("audienceInput").value ?? "").slice(0, 80),
-    theme,
-    ...(accent ? { accent } : {}),
+    theme: THEME_IDS.has(meta.theme) ? meta.theme : TEMPLATE_THEME,
     transition,
     motion: normalizeMotion(meta.motion ?? base?.motion ?? DEFAULT_MOTION),
     memo: String(meta.memo ?? base?.memo ?? "").slice(0, 2000),
     slides: normalized,
-  };
+  });
 }
 
 /** Make the deck acceptable to the server schema without changing what the user sees. */
@@ -941,7 +955,7 @@ function loadDeck(deck, { source = "", keepUndo = false, imported = null, savedD
   stopMotionPreview({ render: false });
   state.imported = imported;
   if (!keepUndo && state.deck) pushUndo();
-  state.deck = deck;
+  state.deck = withTemplate(deck);
   showImageCoverage();
   state.selected = keepUndo ? Math.min(state.selected, deck.slides.length - 1) : Math.max(0, Math.min(selected, deck.slides.length - 1));
   state.savedDeckId = savedDeckId;
@@ -998,7 +1012,7 @@ function undoRedo(direction) {
   if (!from.length || !state.deck) return;
   to.push(JSON.stringify({ deck: state.deck, selected: state.selected }));
   const snapshot = JSON.parse(from.pop());
-  state.deck = snapshot.deck;
+  state.deck = withTemplate(snapshot.deck);
   state.selected = Math.min(snapshot.selected, state.deck.slides.length - 1);
   clearTimeout(state.editBurst);
   state.editBurst = null;
@@ -1177,7 +1191,7 @@ function renderHistory() {
   const list = $("historyList");
   const entries = historyEntries();
   list.replaceChildren(...(entries.length ? entries.map((entry) => h("div", { class: "history-item" },
-    h("div", {}, h("b", {}, entry.title || "無題の資料"), h("span", {}, `${new Date(entry.savedAt).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}・${entry.slideCount}枚・${themeMeta(entry.theme).name}${entry.exported ? "・HTML出力済み" : ""}`)),
+    h("div", {}, h("b", {}, entry.title || "無題の資料"), h("span", {}, `${new Date(entry.savedAt).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}・${entry.slideCount}枚${entry.exported ? "・HTML出力済み" : ""}`)),
     h("div", { class: "actions" },
       h("button", { class: "btn", type: "button", onclick: () => restoreHistory(entry.id) }, "開く"),
       h("button", { class: "btn btn-ghost btn-danger", type: "button", title: "削除", onclick: () => deleteHistory(entry.id) }, "削除")),
@@ -1245,7 +1259,7 @@ async function renderVersions() {
 async function restoreVersion(version) {
   await saveVersion("版を戻す前");
   pushUndo();
-  state.deck = JSON.parse(version.data);
+  state.deck = withTemplate(JSON.parse(version.data));
   state.selected = Math.min(state.selected, state.deck.slides.length - 1);
   $("deckTitleInput").value = state.deck.title;
   $("historyDialog").close();
@@ -1545,10 +1559,10 @@ function renderAll() {
 
 function updateDesignButton() {
   if (!state.deck) return;
-  const meta = themeMeta(state.deck.theme);
-  const colors = [meta.swatch[0], (state.deck.theme !== "sej" && state.deck.accent) || meta.swatch[2], meta.swatch[3], meta.swatch[1]];
+  const meta = themeMeta(TEMPLATE_THEME);
+  const colors = [meta.swatch[0], meta.swatch[2], meta.swatch[3], meta.swatch[1]];
   $("designSwatch").replaceChildren(...colors.map((color) => h("i", { style: { background: color } })));
-  $("designLabel").textContent = meta.name;
+  $("designLabel").textContent = `${meta.name}・動き`;
 }
 
 let dragFrom = null;
@@ -2775,27 +2789,9 @@ function openTypeDialog(mode) {
 
 // ---------------------------------------------------------------- design & motion (deck-wide)
 
-function renderThemeGrid() {
-  const deck = state.deck;
-  const index = state.selected;
-  const slide = deck.slides[index];
-  $("themeGrid").replaceChildren(...E.THEMES.map((theme) => {
-    const previewDeck = { ...deck, theme: theme.id };
-    return h("button", { type: "button", class: "theme-card", role: "radio", "aria-checked": String(deck.theme === theme.id), onclick: () => setDeckDesign({ theme: theme.id }) },
-      slidePicture(slide, index, previewDeck), h("b", {}, theme.name), h("span", {}, theme.desc));
-  }));
-}
-
 function syncDesignControls() {
   const deck = state.deck;
   const motion = normalizeMotion(deck.motion || DEFAULT_MOTION);
-  $("accentInput").value = deck.accent || themeMeta(deck.theme).swatch[2];
-  $("accentReset").disabled = !deck.accent;
-  // The SEJ template keeps the brand's colours: the accent applies to the other themes only.
-  const sej = deck.theme === "sej";
-  $("accentInput").disabled = sej;
-  $("accentReset").hidden = sej;
-  $("accentNote").hidden = !sej;
   $("transitionSelect").value = deck.transition || "fade";
   $("entranceSelect").value = motion.entrance || "rise";
   $("hoverSelect").value = motion.hover || "lift";
@@ -2830,7 +2826,7 @@ function renderMotionGrids() {
       : E.render(cover, { ...renderOptions(), deck: { ...deck, motion: { ...motion, ...patch } }, index: 0, mode: "preview", fit: fitFor(0) ?? undefined });
     return h("button", { type: "button", class: "motion-card", role: "radio", "data-value": value, "aria-checked": String(current === value), onclick: () => setDeckDesign({ motion: patch }) }, E.mount(el), h("b", {}, label));
   };
-  $("backdropGrid").replaceChildren(...["none", ...Object.keys(E.BACKDROPS)].map((kind) => card(motion.backdrop, kind, kind === "none" ? "テーマの飾り" : E.BACKDROPS[kind], { backdrop: kind })));
+  $("backdropGrid").replaceChildren(...["none", ...Object.keys(E.BACKDROPS)].map((kind) => card(motion.backdrop, kind, kind === "none" ? "テンプレートの波紋だけ" : E.BACKDROPS[kind], { backdrop: kind })));
   $("kineticGrid").replaceChildren(...["none", ...Object.keys(E.KINETIC)].map((style) => card(motion.kinetic, style, style === "none" ? "動かさない" : E.KINETIC[style].replace(/（.*）/, ""), { kinetic: style })));
   $("emphasisGrid").replaceChildren(...Object.entries(E.EMPHASES).map(([style, label]) => card(motion.emphasis, style, label, { emphasis: style }, phrase)));
   const replay = () => { for (const slide of document.querySelectorAll("#kineticGrid .motion-card .hs-slide, #emphasisGrid .motion-card .hs-slide")) E.play(slide); };
@@ -2841,47 +2837,28 @@ function renderMotionGrids() {
 
 function openDesignDialog() {
   if (!state.deck) return;
-  useFonts(E.THEMES.map((theme) => theme.id));
-  renderThemeGrid();
+  useFonts([TEMPLATE_THEME]);
   renderMotionGrids();
   syncDesignControls();
   $("designDialog").showModal();
 }
 
-function setDeckDesign(patch, { quiet = false } = {}) {
+function setDeckDesign(patch) {
   if (!state.deck) return;
   pushUndo();
   const deck = state.deck;
-  if (patch.theme) deck.theme = patch.theme;
-  if ("accent" in patch) { if (patch.accent) deck.accent = patch.accent; else delete deck.accent; }
+  // The design itself is the SEJ template's: only the transition and the motion change here.
   if (patch.transition) deck.transition = patch.transition;
   if (patch.motion) deck.motion = normalizeMotion({ ...(deck.motion || DEFAULT_MOTION), ...patch.motion });
   useFonts([deck.theme]);
   markChanged({ structural: true });
   if ($("designDialog").open) {
-    renderThemeGrid();
-    // Motion previews follow the theme, the accent and each other (the kinetic cards show the chosen backdrop).
-    if (patch.theme || "accent" in patch || patch.motion) renderMotionGrids();
+    // Motion previews follow each other (the kinetic cards show the chosen backdrop).
+    if (patch.motion) renderMotionGrids();
     syncDesignControls();
   }
-  if (patch.theme && !quiet) toast(`テーマを「${themeMeta(deck.theme).name}」にしました（⌘Zで元に戻せます）`);
 }
 
-function renderCreateThemes() {
-  const box = $("createThemes");
-  box.replaceChildren(...E.THEMES.map((theme) => {
-    const [bg, ink, accent, accent2] = theme.swatch;
-    return h("button", { type: "button", class: "theme-chip", role: "radio", "aria-checked": String(state.createTheme === theme.id), title: theme.desc, onclick: () => {
-      state.createTheme = theme.id;
-      try { localStorage.setItem(STORAGE.theme, theme.id); } catch { /* optional */ }
-      renderCreateThemes();
-    } },
-    h("span", { class: "art", style: { background: bg } },
-      h("i", { class: "bar", style: { background: ink } }), h("i", { class: "sub", style: { background: ink } }),
-      h("i", { class: "dot", style: { background: accent, "box-shadow": `-14px -10px 0 -4px ${accent2}` } })),
-    h("b", {}, theme.name));
-  }));
-}
 
 // ---------------------------------------------------------------- AI jobs
 
@@ -3077,7 +3054,6 @@ async function generateDeck({ outline = null } = {}) {
   if (outline) $("outlinePanel").classList.add("hidden");
   $("generationProgress").scrollIntoView({ behavior: "smooth", block: "center" });
   saveCurrent();
-  const theme = state.createTheme;
   try {
     const { jobId } = await jsonFetch("/api/decks", {
       method: "POST",
@@ -3097,7 +3073,9 @@ async function generateDeck({ outline = null } = {}) {
         state.outline = null;
         renderOutlinePanel();
         const deck = normalizeDeck(job.deck);
-        deck.theme = theme;
+        // The template dresses the cover, chapters and close with its own ripples: no moving backdrop on top.
+        deck.motion = { ...deck.motion, backdrop: "none" };
+        for (const slide of deck.slides) delete slide.backdrop;
         loadDeck(deck, { source: "Codex" });
         afterGeneration().then(() => autoIllustrateDeck(deck)).catch((error) => toast(`画像の自動生成を開始できませんでした：${error.message}`));
       },
@@ -3219,7 +3197,7 @@ function buildFromOutline() {
 function renderLiveSlides(partial, planned = []) {
   const box = $("liveSlides");
   const total = Math.max(partial.length + 1, planned.length || 0);
-  const liveDeck = { title: strip(partial[0]?.title) || "作成中", theme: state.createTheme, transition: "fade", motion: DEFAULT_MOTION, slides: [] };
+  const liveDeck = { title: strip(partial[0]?.title) || "作成中", theme: TEMPLATE_THEME, transition: "fade", motion: DEFAULT_MOTION, slides: [] };
   const cards = partial.map((raw, index) => {
     let picture = box.querySelector(`.live-card[data-index="${index}"] .hs-scaler`);
     if (!picture) {
@@ -3235,7 +3213,7 @@ function renderLiveSlides(partial, planned = []) {
   });
   const pending = planned.slice(partial.length).map((item, offset) => h("div", { class: "live-card pending" },
     h("b", {}, `${partial.length + offset + 1}. ${strip(item.title)}`), h("span", {}, typeLabel(item.type))));
-  useFonts([state.createTheme]);
+  useFonts([TEMPLATE_THEME]);
   box.replaceChildren(...cards, ...pending);
 }
 
@@ -3642,11 +3620,10 @@ function createProposal(id, chat, base, baseDeck, { whole = false } = {}) {
   for (const index of chat.deleted || []) selected.add(`d${index}`);
   if (chat.moved) selected.add("move");
   if (chat.deckTitle) selected.add("title");
-  if (chat.theme) selected.add("theme");
   if (chat.transition) selected.add("transition");
   const motion = chat.motion && typeof chat.motion === "object" && Object.keys(chat.motion).length ? chat.motion : null;
   if (motion) selected.add("motion");
-  const proposal = { id, base, baseDeck, baseSlides: clone(baseDeck.slides), baseTitle: baseDeck.title, slides, items: chat.items || [], deleted: chat.deleted || [], moved: Boolean(chat.moved), deckTitle: chat.deckTitle, theme: chat.theme, transition: chat.transition, motion, issues: chat.issues || [], selected, whole };
+  const proposal = { id, base, baseDeck, baseSlides: clone(baseDeck.slides), baseTitle: baseDeck.title, slides, items: chat.items || [], deleted: chat.deleted || [], moved: Boolean(chat.moved), deckTitle: chat.deckTitle, transition: chat.transition, motion, issues: chat.issues || [], selected, whole };
   proposals.set(id, proposal);
   renderChat();
 }
@@ -3678,7 +3655,7 @@ function proposalCard(message) {
   }
   const rows = [];
   const toggle = (key) => h("input", { type: "checkbox", checked: proposal.selected.has(key), disabled: proposal.whole, onchange: (event) => { if (event.target.checked) proposal.selected.add(key); else proposal.selected.delete(key); } });
-  const designDeck = { ...proposal.baseDeck, ...(proposal.theme ? { theme: proposal.theme } : {}) };
+  const designDeck = proposal.baseDeck;
   proposal.items.forEach((item, index) => {
     if (!item.changed) return;
     const isNew = item.from == null;
@@ -3703,12 +3680,6 @@ function proposalCard(message) {
   }
   if (proposal.moved) rows.push(h("div", { class: "change-row" }, h("label", {}, toggle("move"), "スライドの順番を入れ替え"), h("span")));
   if (proposal.deckTitle) rows.push(h("div", { class: "change-row" }, h("label", {}, toggle("title"), "資料名"), h("span", { class: "hint", style: { "font-size": "11.5px" } }, `${proposal.baseTitle} → ${proposal.deckTitle}`)));
-  if (proposal.theme) {
-    rows.push(h("div", { class: "change-row" }, h("label", {}, toggle("theme"), "テーマ"), h("span", { class: "hint", style: { "font-size": "11.5px" } }, `${themeMeta(proposal.baseDeck.theme).name} → ${themeMeta(proposal.theme).name}`),
-      h("div", { class: "change-thumbs", onclick: () => openCompare(() => slidePicture(proposal.baseSlides[0], 0, proposal.baseDeck), () => slidePicture(proposal.baseSlides[0], 0, designDeck), "テーマの変更") },
-        slidePicture(proposal.baseSlides[0], 0, proposal.baseDeck), h("span", { class: "arrow" }, "→"), slidePicture(proposal.baseSlides[0], 0, designDeck))));
-    useFonts([proposal.theme]);
-  }
   if (proposal.transition) rows.push(h("div", { class: "change-row" }, h("label", {}, toggle("transition"), "スライドの切り替え"), h("span", { class: "hint", style: { "font-size": "11.5px" } }, `${TRANSITION_LABEL[proposal.baseDeck.transition] ?? "フェード"} → ${TRANSITION_LABEL[proposal.transition]}`)));
   if (proposal.motion) {
     const motionDeck = { ...designDeck, motion: normalizeMotion({ ...(proposal.baseDeck.motion || DEFAULT_MOTION), ...proposal.motion }) };
@@ -3779,7 +3750,6 @@ function applyProposal(id) {
   pushUndo();
   state.deck.slides = slides.map((slide, index) => normalizeSlide(slide, index, slides.length));
   if (proposal.deckTitle && proposal.selected.has("title")) { state.deck.title = proposal.deckTitle; $("deckTitleInput").value = proposal.deckTitle; }
-  if (proposal.theme && proposal.selected.has("theme")) { state.deck.theme = proposal.theme; useFonts([proposal.theme]); }
   if (proposal.transition && proposal.selected.has("transition")) state.deck.transition = proposal.transition;
   if (proposal.motion && proposal.selected.has("motion")) state.deck.motion = normalizeMotion({ ...(state.deck.motion || DEFAULT_MOTION), ...proposal.motion });
   const first = proposal.items.findIndex((item, index) => item.changed && (proposal.selected.has(`c${index}`) || proposal.selected.has(`n${index}`)));
@@ -3807,7 +3777,7 @@ function revertProposal(id) {
   if (!proposal?.before || !message) return;
   saveVersion("提案の取り消し前");
   pushUndo();
-  state.deck = JSON.parse(proposal.before);
+  state.deck = withTemplate(JSON.parse(proposal.before));
   state.selected = Math.min(state.selected, state.deck.slides.length - 1);
   $("deckTitleInput").value = state.deck.title;
   message.proposal.status = "reverted";
@@ -4048,8 +4018,7 @@ function commandList() {
       cmd("資料", "🗒", "スピーカーノートを作る", () => openNotesDialog()),
       cmd("資料", "🕘", "版の履歴・過去の資料", () => openHistory()),
       cmd("資料", "{}", "JSONで保存", () => saveJsonFile()),
-      cmd("デザイン", "◐", "デザインと動き（テーマ・色・切り替え）", () => openDesignDialog()),
-      ...E.THEMES.map((theme) => cmd("デザイン", "◐", `テーマ：${theme.name}`, () => setDeckDesign({ theme: theme.id }), theme.desc)),
+      cmd("デザイン", "◐", "動き（切り替え・登場・背景）", () => openDesignDialog()),
       ...Object.entries(E.BACKDROPS).map(([kind, label]) => cmd("動き", "◎", `背景の動き：${label}`, () => { setDeckDesign({ motion: { backdrop: kind } }); toast(`表紙・章扉などの背景を「${label}」にしました`); }, "モーショングラフィック（資料全体）")),
       ...Object.entries(E.KINETIC).map(([style, label]) => cmd("動き", "◎", `文字の動き：${label.replace(/（.*）/, "")}`, () => { setDeckDesign({ motion: { kinetic: style } }); toast(`大きな文字の動きを「${label.replace(/（.*）/, "")}」にしました`); }, "モーショングラフィック（資料全体）")),
       ...Object.entries(E.ENTRANCES).map(([style, label]) => cmd("動き", "◎", `登場のしかた：${label}`, () => { setDeckDesign({ motion: { entrance: style } }); toast(`登場のしかたを「${label}」にしました`); }, "資料全体")),
@@ -4635,10 +4604,10 @@ const TEMPLATES = [
 
 function openTemplateDialog() {
   const renderTemplate = (template) => {
-    const deck = { title: template.slides[0].title, theme: state.createTheme, transition: "fade", motion: DEFAULT_MOTION, slides: template.slides };
+    const deck = { title: template.slides[0].title, theme: TEMPLATE_THEME, transition: "fade", motion: DEFAULT_MOTION, slides: template.slides };
     try { return E.mount(E.render(template.slides[1], { deck, index: 1, mode: "thumb", assetBase: "/assets/" })); } catch { return null; }
   };
-  useFonts([state.createTheme]);
+  useFonts([TEMPLATE_THEME]);
   $("templateGrid").replaceChildren(
     ...TEMPLATES.map((template) => h("button", { type: "button", onclick: () => { $("templateDialog").close(); fromTemplate(template); } },
       renderTemplate(template), h("b", {}, template.name), h("span", {}, `${template.desc}（${template.slides.length}枚）`))),
@@ -4652,7 +4621,7 @@ function fromTemplate(template) {
   if (!form.audience) { $("audienceInput").value = template.audience; showChoice("audienceInput"); }
   slides[0].date = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long" });
   state.historyId = null;
-  loadDeck(normalizeDeck({ title: slides[0].title, purpose: form.purpose || template.purpose, audience: form.audience || template.audience, theme: state.createTheme, slides }), { source: template.name });
+  loadDeck(normalizeDeck({ title: slides[0].title, purpose: form.purpose || template.purpose, audience: form.audience || template.audience, theme: TEMPLATE_THEME, slides }), { source: template.name });
   toast(JSON.stringify(template.slides).includes("【")
     ? "【】の部分を書き換えてください。構成チェックが残りを知らせます"
     : "記入例の資料です。発表（F5）でクリック・スライダーを試してから、数字と文言を自分の内容に置き換えてください");
@@ -4669,7 +4638,7 @@ function blankDeck() {
     { type: "closing", title: "次のアクション", message: "誰が・いつまでに・何をするか" },
   ];
   state.historyId = null;
-  loadDeck(normalizeDeck({ title, purpose: form.purpose, audience: form.audience, theme: state.createTheme, slides }), { source: "白紙" });
+  loadDeck(normalizeDeck({ title, purpose: form.purpose, audience: form.audience, theme: TEMPLATE_THEME, slides }), { source: "白紙" });
 }
 
 // ---------------------------------------------------------------- wiring
@@ -4751,8 +4720,6 @@ function bind() {
   $("issueSummary").addEventListener("click", () => openCheckDialog(false));
   $("deckTitleInput").addEventListener("input", (event) => { if (!state.deck) return; beginEdit(); state.deck.title = event.target.value; markChanged(); });
   $("designBtn").addEventListener("click", openDesignDialog);
-  $("accentInput").addEventListener("change", (event) => setDeckDesign({ accent: event.target.value }));
-  $("accentReset").addEventListener("click", () => setDeckDesign({ accent: null }));
   $("transitionSelect").addEventListener("change", (event) => setDeckDesign({ transition: event.target.value }));
   $("entranceSelect").addEventListener("change", (event) => setDeckDesign({ motion: { entrance: event.target.value } }));
   $("hoverSelect").addEventListener("change", (event) => setDeckDesign({ motion: { hover: event.target.value } }));
@@ -4903,11 +4870,9 @@ function reportClientError(message, where) {
 window.addEventListener("error", (event) => reportClientError(event.message, `${event.filename}:${event.lineno}:${event.colno}`));
 window.addEventListener("unhandledrejection", (event) => reportClientError(String(event.reason?.message ?? event.reason), "promise"));
 
-try { const saved = localStorage.getItem(STORAGE.theme); if (THEME_IDS.has(saved)) state.createTheme = saved; } catch { /* optional */ }
 bind();
 try { setPanel(localStorage.getItem(STORAGE.panel) === "form" ? "form" : "chat"); } catch { setPanel("chat"); }
 updateBriefCount();
-renderCreateThemes();
 restore();
 updateTopbar();
 checkCodexStatus();

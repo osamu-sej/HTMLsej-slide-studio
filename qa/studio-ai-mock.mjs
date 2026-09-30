@@ -1,5 +1,5 @@
 // The AI side of the studio with the server's AI answers stubbed in the browser (no Codex login needed):
-// outline → generation with live slides → chat proposal (text + theme) → three variants.
+// outline → generation with live slides (always in the SEJ template) → chat proposal → three variants.
 // Usage: node qa/studio-ai-mock.mjs [--base=http://127.0.0.1:8787]   (with `npm start` running)
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -26,9 +26,10 @@ const outline = {
 };
 const revisedSlides = pick.map((slide, i) => (i === 2 ? { ...slide, title: "削減効果（簡潔版）", takeaway: "1人あたり**月12時間**を取り戻した" } : slide));
 const chat = {
-  reply: "3枚目の見出しとキーメッセージを短くし、テーマを画面共有で映えるミッドナイトにしました。",
+  reply: "3枚目の見出しとキーメッセージを短くしました。",
   suggestions: ["工程をクリックで1つずつ出して", "数字を目立たせて"],
-  deckTitle: null, theme: "midnight", transition: null, changed: true, summary: "1枚を修正・テーマを変更",
+  // An older server could still send a theme; the studio must keep the SEJ template anyway.
+  deckTitle: null, theme: "midnight", transition: null, changed: true, summary: "1枚を修正",
   slides: revisedSlides, items: revisedSlides.map((_, i) => ({ from: i, changed: i === 2 })), deleted: [], moved: false, issues: [],
 };
 const variants = [
@@ -88,7 +89,6 @@ await page.evaluate(() => localStorage.clear());
 await page.goto(base);
 
 await step("outline", async () => {
-  await page.click('.theme-chip:has-text("オーロラ")');
   await page.fill("#briefInput", "生成AIの試行結果を役員に報告し、全社展開の予算承認をもらいたい。");
   await page.click("#askChatGptBtn");
   await page.waitForSelector("#outlinePanel:not(.hidden) .outline-item", { timeout: 10000 });
@@ -109,7 +109,8 @@ await step("generate from the outline", async () => {
   await page.waitForFunction((n) => document.querySelectorAll(".film-item").length === n, pick.length, { timeout: 15000 });
   await page.waitForTimeout(1500);
   const theme = await page.getAttribute(".slide-wrap .hs-slide", "data-theme");
-  if (theme !== "aurora") throw new Error(`theme was ${theme}`);
+  if (theme !== "sej") throw new Error(`theme was ${theme}`);
+  if (!(await page.locator(".slide-wrap .hs-slide .hs-sej-logo").count())) throw new Error("the SEJ logo is missing");
   await page.waitForFunction(() => document.querySelector("#autoImageStatus")?.textContent?.includes("画像 3/9枚"), null, { timeout: 15000 });
   if (imageRequests.length !== 3) throw new Error(`automatic images: ${imageRequests.length} instead of 3`);
   await shot("generated");
@@ -124,7 +125,7 @@ await step("generate from the outline", async () => {
   if (stored !== 3) throw new Error(`images not saved: ${stored}`);
 });
 
-await step("chat proposal: text and theme", async () => {
+await step("chat proposal: text, and the SEJ template stays", async () => {
   await page.click("#chatTab");
   await page.fill("#chatInput", "@3 をもっと簡潔に。テーマも画面共有向けに");
   await page.keyboard.press("Enter");
@@ -135,7 +136,7 @@ await step("chat proposal: text and theme", async () => {
   await page.waitForTimeout(900);
   const title = await page.textContent(".slide-wrap .hs-title");
   const theme = await page.getAttribute(".slide-wrap .hs-slide", "data-theme");
-  if (!title.includes("簡潔版") || theme !== "midnight") throw new Error(`title=${title} theme=${theme}`);
+  if (!title.includes("簡潔版") || theme !== "sej") throw new Error(`title=${title} theme=${theme}`);
   await shot("applied");
 });
 

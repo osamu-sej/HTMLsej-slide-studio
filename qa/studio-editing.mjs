@@ -29,15 +29,33 @@ await page.goto(base);
 await page.evaluate(() => localStorage.clear());
 await page.goto(base);
 
+await step("a deck saved in another theme comes back in the SEJ template", async () => {
+  await page.evaluate(() => localStorage.setItem("hsej-studio-current-v1", JSON.stringify({ selected: 1, deck: {
+    title: "前の版の資料", theme: "kinari", accent: "#2d4b78", transition: "fade", motion: { backdrop: "waves" },
+    slides: [{ type: "title", title: "前の版の資料", backdrop: "orbits" }, { type: "content", title: "本文", takeaway: "結論", points: ["A", "B"] }, { type: "closing" }],
+  } })));
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll(".film-item").length === 3, null, { timeout: 10000 });
+  const themes = await page.$$eval(".slide-wrap .hs-slide, .film-item .hs-slide", (els) => [...new Set(els.map((el) => el.dataset.theme))]);
+  if (themes.join() !== "sej") throw new Error(`themes: ${themes}`);
+  for (const part of [".hs-sej-logo", ".hs-sej-rule", ".hs-sej-page"]) {
+    if (!(await page.locator(`.slide-wrap .hs-slide ${part}`).count())) throw new Error(`${part} missing`);
+  }
+  await shot("old-deck-in-sej");
+  await page.evaluate(() => localStorage.clear());
+  await page.goto(base);
+});
+
 await step("start from a template", async () => {
-  await page.click('.theme-chip:has-text("生成り")');
+  if (!(await page.isVisible("#createTemplate"))) throw new Error("the SEJ template strip is missing");
+  if (await page.locator(".theme-chip").count()) throw new Error("the theme chips should be gone");
   await page.click("#blankDeckBtn");
   await page.waitForSelector("#templateDialog[open] .type-grid button");
   await page.waitForTimeout(600);
   await shot("templates");
   await page.click('#templateGrid button:has-text("企画提案")');
   await page.waitForFunction(() => document.querySelectorAll(".film-item").length === 8);
-  if ((await page.getAttribute(".slide-wrap .hs-slide", "data-theme")) !== "kinari") throw new Error("the chosen theme was not used");
+  if ((await page.getAttribute(".slide-wrap .hs-slide", "data-theme")) !== "sej") throw new Error("the SEJ template was not used");
   const chip = await page.textContent("#issueSummary");
   if (!/構成の指摘/.test(chip)) throw new Error(`placeholders should be flagged: ${chip}`);
 });
@@ -114,18 +132,18 @@ await step("find and replace", async () => {
   await page.waitForTimeout(300);
 });
 
-await step("command palette jumps to a slide and switches the theme", async () => {
+await step("command palette jumps to a slide and offers no theme switch", async () => {
   await page.keyboard.press("Control+k");
-  await page.fill("#commandInput", "テーマ：サンセット");
-  await page.keyboard.press("Enter");
-  await page.waitForTimeout(400);
-  if ((await page.getAttribute(".slide-wrap .hs-slide", "data-theme")) !== "sunset") throw new Error("theme not switched");
+  await page.fill("#commandInput", "テーマ");
+  await page.waitForTimeout(200);
+  if (await page.locator('#commandList :text("サンセット")').count()) throw new Error("theme commands should be gone");
+  await page.keyboard.press("Escape");
   await page.keyboard.press("Control+k");
   await page.fill("#commandInput", "スケジュール");
   await page.keyboard.press("Enter");
   await page.waitForTimeout(300);
   if ((await stageType()) !== "timeline") throw new Error(`landed on ${await stageType()}`);
-  await shot("sunset");
+  await shot("palette-jump");
 });
 
 await step("checks list the placeholders and move to them", async () => {
@@ -141,7 +159,7 @@ await step("the work comes back after a reload", async () => {
   await page.waitForTimeout(600);
   await page.reload();
   await page.waitForFunction((n) => document.querySelectorAll(".film-item").length === n, count, { timeout: 10000 });
-  if ((await page.getAttribute(".slide-wrap .hs-slide", "data-theme")) !== "sunset") throw new Error("design lost on reload");
+  if ((await page.getAttribute(".slide-wrap .hs-slide", "data-theme")) !== "sej") throw new Error("the SEJ template was lost on reload");
 });
 
 await step("history keeps versions to go back to", async () => {

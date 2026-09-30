@@ -116,6 +116,13 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 
 /* theme strip on the create view */
 .theme-strip { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; padding: 12px 0; border-top: 1px dashed var(--line); }
+/* The one design: the SEJ template (its green rule under a title line, as in the studio's mark) */
+.template-strip { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-top: 1px dashed var(--line); font-size: 12.5px; }
+.template-strip b { white-space: nowrap; }
+.template-mark { position: relative; flex: none; width: 44px; height: 25px; border-radius: 5px; background: #fff; box-shadow: inset 0 0 0 1px var(--line-2); overflow: hidden; }
+.template-mark::before { content: ""; position: absolute; left: 6px; top: 6px; width: 16px; height: 3px; border-radius: 2px; background: #1a1a1a; }
+.template-mark i { position: absolute; left: 5px; right: 5px; top: 12px; height: 2px; background: #008738; }
+.template-note { margin: 0 0 14px; }
 .theme-chip { position: relative; display: grid; gap: 6px; padding: 6px; border: 1.5px solid var(--line); border-radius: 12px; background: #fff; text-align: left; transition: border-color .15s, transform .15s, box-shadow .15s; }
 .theme-chip:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
 .theme-chip[aria-checked="true"] { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(20, 22, 28, .08); }

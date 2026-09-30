@@ -72,7 +72,8 @@
             </div>
           </div>
         </div>
-        <div class="theme-strip" id="createThemes" role="radiogroup" aria-label="デザインのテーマ"></div>
+        <!-- The studio makes every deck in the SEJ template; there is no theme to choose. -->
+        <div class="template-strip" id="createTemplate"><span class="template-mark" aria-hidden="true"><i></i></span><b>SEJテンプレートで作ります</b><span class="hint">ロゴ・緑線・秘（B）・社内限り・スローガン・コピーライト入りの原本テンプレート</span></div>
         <div class="prompt-bar">
           <label class="chip" for="sourceFile" style="cursor:pointer" title="PowerPoint・Word・PDF・テキストから文章を取り込みます">📎 ファイルを添付</label>
           <input id="sourceFile" class="hidden" type="file" accept=".txt,.md,.csv,.json,.pptx,.docx,.pdf,text/plain,application/json" />
@@ -139,7 +140,7 @@
           <span id="autoImageStatus" class="meta" role="status"></span>
           <button id="autoImageAction" class="btn btn-sm hidden" type="button">停止</button>
           <span class="spacer"></span>
-          <button id="designBtn" class="btn design-btn" type="button" title="テーマ・色・切り替え・動き（資料全体）"><span id="designSwatch" class="swatch-dots" aria-hidden="true"></span><span id="designLabel">デザインと動き</span></button>
+          <button id="designBtn" class="btn design-btn" type="button" title="切り替え・動き（資料全体）"><span id="designSwatch" class="swatch-dots" aria-hidden="true"></span><span id="designLabel">SEJ・動き</span></button>
           <button id="issueSummary" class="issue-chip ok" type="button">チェック中…</button>
           <button id="fixAllBtn" class="btn hidden" type="button" title="文字が収まらないスライドをAIで順番に直します">あふれをAIで直す</button>
           <details class="more-menu">
@@ -190,15 +191,10 @@
     </main>
 
     <dialog id="designDialog" class="design-dialog">
-      <div class="dialog-head"><h3>デザインと動き（資料全体）</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
+      <div class="dialog-head"><h3>動き（資料全体）</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
       <div class="dialog-body">
-        <h4 class="dialog-section">テーマ</h4>
-        <div id="themeGrid" class="theme-grid" role="radiogroup" aria-label="テーマ"></div>
+        <p class="hint template-note">デザインはSEJテンプレート（原本）に決まっています。ロゴ・緑線・秘（B）・社内限りと配色はそのままで、ここでは動きを選べます。</p>
         <div class="design-row">
-          <label class="field"><span class="field-label">アクセント色（会社の色に合わせる）</span>
-            <span class="accent-row"><input id="accentInput" type="color" value="#1f3864" aria-label="アクセント色" /><button id="accentReset" class="btn btn-ghost" type="button">テーマの色に戻す</button></span>
-            <span id="accentNote" class="hint" hidden>SEJテンプレートは色が決まっています（濃紺・淡青・グレー・淡茶）</span>
-          </label>
           <!-- The choices are filled in from the engine's catalogs (app.js: fillMotionSelects). -->
           <label class="field"><span class="field-label">スライドの切り替え</span>
             <select id="transitionSelect"></select>
@@ -212,7 +208,7 @@
         </div>
         <div class="design-checks">
           <label class="inline-check"><input id="numbersCheck" type="checkbox" checked />数字をカウントアップし、グラフを伸ばす</label>
-          <label class="inline-check"><input id="ambientCheck" type="checkbox" checked />背景の飾りをゆっくり動かす（オーロラ・生成りなど）</label>
+          <label class="inline-check"><input id="ambientCheck" type="checkbox" checked />SEJの波紋を発表中にゆっくり広げる</label>
           <label class="inline-check"><input id="drawCheck" type="checkbox" checked />アイコン・線・マーカーを描くように見せる</label>
         </div>
         <h4 class="dialog-section">モーショングラフィック</h4>
