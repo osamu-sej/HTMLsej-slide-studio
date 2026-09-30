@@ -3,7 +3,7 @@ import { hasSlidePicture, picturePlan } from "./auto-images.mjs?v=__APP_VERSION_
 import { LOOK_ADVICE, LOOKS, lookOf, varietyIssues } from "./layout-looks.mjs?v=__APP_VERSION__";
 
 /*
- * HTML Slide Studio — the editor.
+ * HTML SEJ Slide Studio — the editor.
  * Brief → outline → slides (Codex), then edit by chat or by hand, present with motion, export one HTML file.
  * Slides are drawn by SlideEngine (engine/engine.js) and played by engine/motion.js.
  */
@@ -12,11 +12,11 @@ const E = window.SlideEngine;
 E.lottieUrl = "/vendor/lottie.js";
 const APP_VERSION = "__APP_VERSION__";
 const STORAGE = {
-  current: "hs-studio-current-v1",
-  history: "hs-studio-history-v1",
-  chat: "hs-studio-chat-v1",
-  panel: "hs-studio-panel",
-  theme: "hs-studio-create-theme",
+  current: "hsej-studio-current-v1",
+  history: "hsej-studio-history-v1",
+  chat: "hsej-studio-chat-v1",
+  panel: "hsej-studio-panel",
+  theme: "hsej-studio-create-theme",
 };
 
 // ---------------------------------------------------------------- catalog
@@ -185,7 +185,7 @@ const state = {
   chat: { messages: [], busy: false, progress: "", attachment: null },
   outline: null,
   createBusy: false,
-  createTheme: "clarity",
+  createTheme: "sej",
   panel: "chat",
   imported: null,
   player: null,
@@ -713,7 +713,7 @@ const mediaUrls = {};
 function openDb() {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open("html-slide-studio", 1);
+    const request = indexedDB.open("htmlsej-slide-studio", 1);
     request.onupgradeneeded = () => {
       for (const name of ["media", "versions"]) if (!request.result.objectStoreNames.contains(name)) request.result.createObjectStore(name, { keyPath: "id" });
     };
@@ -871,7 +871,9 @@ function measureSlide(index) {
   const el = E.render(state.deck.slides[index], renderOptions({ index, mode: "thumb" }));
   root.replaceChildren(el);
   const result = E.fit(el);
-  fitState.byKey.set(slideKey(index), { fs: result.fs, ts: result.ts, issues: result.issues.map((issue) => ({ ...issue, slide: index })) });
+  // SEJ decks are read back against the brand's rules too (white text, text on dark fills, shadows).
+  const brand = E.brandCheck(el).map((issue) => ({ ...issue, slide: index }));
+  fitState.byKey.set(slideKey(index), { fs: result.fs, ts: result.ts, issues: result.issues.map((issue) => ({ ...issue, slide: index })), brand });
   root.replaceChildren();
 }
 
@@ -1483,8 +1485,12 @@ function overflowFor(index) {
   return fitFor(index)?.issues ?? [];
 }
 
+function brandFor(index) {
+  return fitFor(index)?.brand ?? [];
+}
+
 function issuesFor(index) {
-  return [...overflowFor(index), ...(lintDeck()[index] ?? [])];
+  return [...overflowFor(index), ...brandFor(index), ...(lintDeck()[index] ?? [])];
 }
 
 // ---------------------------------------------------------------- views
@@ -1523,7 +1529,7 @@ function renderAll() {
 function updateDesignButton() {
   if (!state.deck) return;
   const meta = themeMeta(state.deck.theme);
-  const colors = [meta.swatch[0], state.deck.accent || meta.swatch[2], meta.swatch[3], meta.swatch[1]];
+  const colors = [meta.swatch[0], (state.deck.theme !== "sej" && state.deck.accent) || meta.swatch[2], meta.swatch[3], meta.swatch[1]];
   $("designSwatch").replaceChildren(...colors.map((color) => h("i", { style: { background: color } })));
   $("designLabel").textContent = meta.name;
 }
@@ -2047,12 +2053,14 @@ function renderIssueSummary() {
   const overflowSlides = state.deck.slides.map((_, i) => (overflowFor(i).length ? i : -1)).filter((i) => i >= 0);
   const lint = lintDeck().flat();
   const lintWarnings = lint.filter((issue) => issue.severity !== "info").length;
+  const brandSlides = state.deck.slides.map((_, i) => (brandFor(i).length ? i : -1)).filter((i) => i >= 0);
   const parts = [];
   if (overflowSlides.length) parts.push(`${overflowSlides.length}枚に文字あふれ`);
+  if (brandSlides.length) parts.push(`${brandSlides.length}枚にSEJブランドの指摘`);
   if (lint.length) parts.push(`構成の指摘${lint.length}件`);
-  chip.className = `issue-chip ${overflowSlides.length ? "error" : lintWarnings ? "warn" : "ok"}`;
+  chip.className = `issue-chip ${overflowSlides.length ? "error" : lintWarnings || brandSlides.length ? "warn" : "ok"}`;
   chip.textContent = parts.length ? `⚠ ${parts.join("・")}` : pending ? "チェック中…" : "✓ チェックOK";
-  chip.title = parts.length ? "クリックで一覧を表示（移動・AIで直す）" : "文字あふれ・構成の問題は見つかりませんでした";
+  chip.title = parts.length ? "クリックで一覧を表示（移動・AIで直す）" : state.deck.theme === "sej" ? "文字あふれ・SEJブランド・構成の問題は見つかりませんでした" : "文字あふれ・構成の問題は見つかりませんでした";
   $("fixAllBtn").classList.toggle("hidden", !overflowSlides.length || !state.codexAuthorized);
   $("fixAllBtn").disabled = state.aiBusy;
 }
@@ -2073,8 +2081,9 @@ function refreshInspectorIssues() {
 
 function issueSection() {
   const overflow = overflowFor(state.selected);
+  const brand = brandFor(state.selected);
   const lint = lintDeck()[state.selected] ?? [];
-  if (!overflow.length && !lint.length) return h("div", { id: "inspectorIssues" });
+  if (!overflow.length && !brand.length && !lint.length) return h("div", { id: "inspectorIssues" });
   const canAi = state.codexAuthorized;
   const item = (issue) => h("li", { class: issue.severity === "error" ? "error" : issue.severity === "info" ? "info" : "", onclick: () => focusField(issue.field), title: "クリックで該当欄へ" },
     h("span", {}, `${issue.plain ? "" : `${fieldLabel(issue.field)}：`}${issue.message}`),
@@ -2086,8 +2095,12 @@ function issueSection() {
       h("button", { class: "btn btn-ai", type: "button", disabled: !canAi || state.aiBusy, onclick: () => reviseSlide(state.selected, "スライドに収まらない文字を、意味を保って短く言い換える（補足は details に回してよい）", overflow), title: canAi ? "" : "Codexに接続すると使えます" }, "✦ AIで収まるように直す"),
       h("span", { class: "hint", style: { "margin-left": "8px" } }, "または赤枠の欄を短くしてください"),
     ] : null,
+    brand.length ? [
+      h("div", { class: "section-title", style: { "margin-top": overflow.length ? "12px" : "0" } }, h("span", {}, "SEJブランド")),
+      h("ul", { class: "issue-list" }, brand.map((issue) => item({ ...issue, plain: true }))),
+    ] : null,
     lint.length ? [
-      h("div", { class: "section-title", style: { "margin-top": overflow.length ? "12px" : "0" } }, h("span", {}, "構成チェック")),
+      h("div", { class: "section-title", style: { "margin-top": overflow.length || brand.length ? "12px" : "0" } }, h("span", {}, "構成チェック")),
       h("ul", { class: "issue-list" }, lint.map(item)),
     ] : null);
 }
@@ -2761,6 +2774,11 @@ function syncDesignControls() {
   const motion = normalizeMotion(deck.motion || DEFAULT_MOTION);
   $("accentInput").value = deck.accent || themeMeta(deck.theme).swatch[2];
   $("accentReset").disabled = !deck.accent;
+  // The SEJ template keeps the brand's colours: the accent applies to the other themes only.
+  const sej = deck.theme === "sej";
+  $("accentInput").disabled = sej;
+  $("accentReset").hidden = sej;
+  $("accentNote").hidden = !sej;
   $("transitionSelect").value = deck.transition || "fade";
   $("entranceSelect").value = motion.entrance || "rise";
   $("hoverSelect").value = motion.hover || "lift";
@@ -4100,6 +4118,7 @@ function checkItems() {
   const items = [];
   state.deck.slides.forEach((_, index) => {
     for (const issue of overflowFor(index)) items.push({ index, severity: "error", kind: "overflow", field: issue.field, message: `文字あふれ：${issue.message}`, issue });
+    for (const issue of brandFor(index)) items.push({ index, severity: "warning", kind: "brand", field: issue.field, message: `SEJブランド：${issue.message}`, issue });
   });
   lintDeck().flat().forEach((issue) => items.push({ index: issue.slide, severity: issue.severity, kind: "lint", field: issue.field, message: issue.message, fix: issue.fix, ai: issue.ai }));
   const order = { error: 0, warning: 1, info: 2 };
@@ -4243,7 +4262,7 @@ async function standaloneHtml({ title, body, boot, data, background = "#07080c",
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="generator" content="HTML Slide Studio ${APP_VERSION}">
+<meta name="generator" content="HTML SEJ Slide Studio ${APP_VERSION}">
 <title>${esc(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -4376,7 +4395,7 @@ async function saveJsonFile() {
   if (!state.deck) return;
   try {
     const { deck, bytes } = await portableDeck();
-    const payload = { app: "HTML Slide Studio", version: APP_VERSION, ...deck };
+    const payload = { app: "HTML SEJ Slide Studio", version: APP_VERSION, ...deck };
     await downloadBlob(new Blob([JSON.stringify(payload, null, 1)], { type: "application/json" }), `${fileSafe(deck.title, "slides")}.json`);
     toast(bytes > 20_000_000 ? `JSONで保存しました（動画・写真を含め約${Math.round(bytes / 1_000_000)}MB）` : "JSONで保存しました（別のPCで「JSONを読み込む」から続きを編集できます）");
   } catch (error) {

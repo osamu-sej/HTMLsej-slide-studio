@@ -2,11 +2,10 @@
   "deckTitle": "生成AI活用の全社展開",
   "audience": "役員",
   "purpose": "意思決定・報告",
-  "theme": "clarity",
+  "theme": "sej",
   "transition": "fade",
   "motion": {
-    "kinetic": "mask",
-    "backdrop": "orbits"
+    "kinetic": "mask"
   },
   "slideData": [
     {

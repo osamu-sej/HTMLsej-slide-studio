@@ -186,7 +186,7 @@ export const slideSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-export const THEMES = ["clarity", "midnight", "editorial", "mono", "forest", "sunset", "aurora", "kinari"];
+export const THEMES = ["sej", "clarity", "midnight", "editorial", "mono", "forest", "sunset", "aurora", "kinari"];
 export const themeSchema = z.enum(THEMES);
 const motionFields = {
   entrance: z.enum([...ENTRANCES, "none"]).optional(),
@@ -214,7 +214,7 @@ export const deckShape = z.object({
   purpose: z.string().max(180).optional().default(""),
   audience: z.string().max(80).optional().default(""),
   schemaVersion: z.string().max(20).optional().default("3.0"),
-  theme: themeSchema.optional().default("clarity"),
+  theme: themeSchema.optional().default("sej"),
   accent: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   transition: transitionSchema.optional().default("fade"),
   motion: deckMotionSchema.optional(),

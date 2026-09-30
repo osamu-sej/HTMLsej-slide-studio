@@ -44,7 +44,7 @@ const deck = {
 };
 
 await page.goto(base);
-await page.evaluate((value) => localStorage.setItem("hs-studio-current-v1", JSON.stringify({ deck: value, selected: 1, savedAt: new Date().toISOString() })), deck);
+await page.evaluate((value) => localStorage.setItem("hsej-studio-current-v1", JSON.stringify({ deck: value, selected: 1, savedAt: new Date().toISOString() })), deck);
 await page.goto(base);
 await page.waitForSelector(".film-item");
 await page.waitForTimeout(800);
@@ -182,7 +182,7 @@ await step("details: the item is marked 「＋ 詳しく」 on its text line, an
       details: [{ target: "levels[2]", title: "ルール整備の範囲", text: "入力してよい情報、確認すべき出力、承認が必要な用途を明確にします。" }] },
     { type: "closing", message: "次のアクション" },
   ] };
-  await page.evaluate((value) => localStorage.setItem("hs-studio-current-v1", JSON.stringify({ deck: value, selected: 1, savedAt: new Date().toISOString() })), pyramidDeck);
+  await page.evaluate((value) => localStorage.setItem("hsej-studio-current-v1", JSON.stringify({ deck: value, selected: 1, savedAt: new Date().toISOString() })), pyramidDeck);
   await page.goto(base);
   await page.waitForSelector(".film-item");
   await page.click(".film-item:nth-child(2)");
