@@ -46,6 +46,45 @@
 .hs-overlay { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
 .hs-overlay > * { pointer-events: auto; }
 
+/* ------------------------------------------------------------------ objects placed by hand (objects.js)
+   box (position, size) → motion-path layer → effect layer → rotated / flipped body (shape, text, picture…) */
+.hs-objects { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.hs-obj { position: absolute; }
+.hs-obj-move, .hs-obj-fx, .hs-obj-rot { position: absolute; inset: 0; }
+.hs-obj-rot { transform-origin: 50% 50%; }
+.hs-obj-geom { position: absolute; left: 0; top: 0; overflow: visible; }
+.hs-obj-line .hs-obj-geom { width: 100%; height: 100%; }
+.hs-obj-text { position: absolute; display: flex; flex-direction: column; justify-content: flex-start; overflow: visible; }
+.hs-obj-text[data-valign="middle"] { justify-content: center; }
+.hs-obj-text[data-valign="bottom"] { justify-content: flex-end; }
+.hs-obj-text.is-vertical { writing-mode: vertical-rl; }
+/* Web fonts are served without vertical metrics (glyphs would overlap): vertical text uses the computer's own fonts. */
+.hs-obj-text.is-vertical .hs-obj-tx { font-family: "Meiryo UI", "メイリオ", Meiryo, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans CJK JP", sans-serif; }
+.hs-obj-tx { flex: none; min-width: 0; font-family: var(--font-body); white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; line-break: strict; letter-spacing: 0; }
+.hs-slide .hs-obj-tx p { margin: 0; min-height: 1lh; }
+.hs-slide .hs-obj-tx :is(p, li) + :is(p, li, ul, ol), .hs-slide .hs-obj-tx :is(ul, ol) + :is(p, ul, ol) { margin-top: var(--psp, 0); }
+.hs-slide .hs-obj-tx :is(ul, ol) { margin: 0; padding: 0 0 0 1.25em; }
+.hs-slide .hs-obj-tx ul { list-style: disc; }
+.hs-slide .hs-obj-tx ul ul { list-style: circle; }
+.hs-slide .hs-obj-tx ul ul ul { list-style: square; }
+.hs-slide .hs-obj-tx ol { list-style: decimal; }
+.hs-slide .hs-obj-tx ol ol { list-style: lower-alpha; }
+.hs-slide .hs-obj-tx li::marker { color: currentColor; }
+.hs-obj-tx [data-indent="1"] { margin-left: 1.5em; } .hs-obj-tx [data-indent="2"] { margin-left: 3em; } .hs-obj-tx [data-indent="3"] { margin-left: 4.5em; } .hs-obj-tx [data-indent="4"] { margin-left: 6em; }
+.hs-obj-tx b { font-weight: 700; }
+.hs-obj-tx a { color: inherit; text-decoration: underline; }
+.hs-obj-img { position: absolute; inset: 0; overflow: hidden; }
+.hs-obj-img > img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; max-width: none; }
+.hs-obj-media { position: absolute; inset: 0; }
+.hs-slide .hs-obj-media { border-radius: 0; }
+.hs-obj .hs-obj-icon { position: absolute; inset: 0; width: 100%; height: 100%; }
+.hs-obj-missing { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: #f2f2f2; color: #808080; font-size: 22px; }
+.hs-obj-missing .hs-icon { font-size: 64px; }
+.hs-slide.hs-live .hs-obj[data-action] { pointer-events: auto; cursor: pointer; }
+.hs-slide.hs-live .hs-obj-video, .hs-slide.hs-live .hs-obj-lottie { pointer-events: auto; }
+/* an empty title in the editor shows where to type */
+.hs-slide.hs-editable .hs-title[data-placeholder]:empty::before { content: attr(data-placeholder); color: #b3b3b3; font-weight: 400; }
+
 /* ------------------------------------------------------------------ type */
 
 .hs-head { position: relative; flex: none; display: flex; flex-direction: column; gap: 18px; margin-bottom: 52px; max-width: 1560px; }
@@ -1359,7 +1398,8 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 }
 
 /* ---- the masters (drawn by engine.js at the template's positions) */
-.hs-sej { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+/* above the layout (they never overlap it) and above objects placed by hand, which can never hide the master */
+.hs-sej { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 .hs-sej > * { position: absolute; display: block; margin: 0; }
 .hs-sej-rule { background: #008738; }
 .hs-sej-logo { object-fit: fill; }

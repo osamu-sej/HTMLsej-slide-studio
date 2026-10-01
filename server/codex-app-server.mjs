@@ -7,6 +7,7 @@ import readline from "node:readline";
 import { LOOK_ADVICE, LOOKS, maxSameLook } from "../public/layout-looks.mjs";
 import { drillParents } from "./chat.mjs";
 import { slideMeaning } from "./visual-relevance.mjs";
+import { objectsSummary } from "./objects.mjs";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const ICONS = Object.fromEntries(Object.entries(JSON.parse(readFileSync(new URL("../public/engine/icons.json", import.meta.url), "utf8"))).map(([key, value]) => [key, value.label]));
@@ -227,6 +228,9 @@ function memoLines(deck) {
   return memo ? ["", "この資料の前提条件（必ず守る）:", memo, ""] : [];
 }
 
+// Objects people placed by hand and 白紙 pages are theirs: the AI sees a summary and leaves them alone.
+const OBJECTS_RULE = "- 「[自由配置: …]」はユーザーが手で置いた図形・文字・画像（アニメーションを含む）。あなたは変えられず、どんな変更でもそのまま残る。本文はそれと重ならない内容にする。type が blank（白紙）のスライドはユーザーが自由に作ったページなので、頼まれない限り replace・delete しない";
+
 const THEME_LINE = "デザイン: SEJテンプレートに固定（テーマ・色は変えない）。切り替え: none / fade / slide / zoom / morph（見出しがつながって動く） / wipe（色の帯が横切る） / circle（クリックした所から円が広がる） / push（下から押し上げる） / flip（カードのように裏返る） / dive（奥へ飛び込む） / blinds（ブラインドが開く） / curtain（幕が中央から開く）";
 
 export function buildChatPrompt({ deck, message, history = [], current = 0, focus = [], attachment = null }) {
@@ -258,6 +262,7 @@ export function buildChatPrompt({ deck, message, history = [], current = 0, focu
     "- 1枚目は title、最後は closing のままにする。表紙と最後は削除・移動しない",
     "- 「〇〇を深掘りするページを作って」「クリックで詳しいページに飛べるように」と頼まれたら、元のスライドの後ろに insert し、content に drillOf（元のスライドの項目。例: items[1]）を入れる。本文はその項目の背景・内訳・具体例・根拠で、元のスライドの繰り返しにしない。drillOf のあるスライド（深掘りページ）は本編の流れに入らないので、順番の入れ替えや枚数の話では数えない",
     "- 入力にない数値や事実は作らない。既存の数値は変えない。「[画像あり]」「[写真・動画あり]」の値はそのまま残す",
+    OBJECTS_RULE,
     "- 新しい画像は生成できない。既存の写真を選ぶことと画像生成を混同せず、生成したと説明しない",
     "- 本文スライドには結論を一文で言い切る takeaway を入れる。文字数の上限を守る",
     ...memoLines(deck),
@@ -428,9 +433,12 @@ export function buildDeckPrompt(input) {
 /** Replace embedded images and videos with a marker: the AI never needs the pixels, and they are huge. */
 export function withoutImageData(value, key = "") {
   if (key === "media" && value && typeof value === "object") return "[写真・動画あり]";
+  // Objects placed by hand: a summary of what they are and say (the AI cannot change them; they always stay).
+  if (key === "elements") return objectsSummary(value);
+  if (key === "timeline") return Array.isArray(value) && value.length ? `[アニメーション${value.length}件]` : undefined;
   if (typeof value === "string") return value.startsWith("data:") ? "[画像あり]" : value;
   if (Array.isArray(value)) return value.map((item) => withoutImageData(item));
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([childKey]) => childKey !== "imagePlacement").map(([childKey, child]) => [childKey, withoutImageData(child, childKey)]));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([childKey]) => childKey !== "imagePlacement" && childKey !== "sid").map(([childKey, child]) => [childKey, withoutImageData(child, childKey)]).filter(([, child]) => child !== undefined));
   return value;
 }
 
@@ -446,6 +454,7 @@ export function buildRevisePrompt({ deck, slideIndex, instruction, issues = [], 
       : `資料「${deck.title ?? deck.deckTitle ?? ""}」（対象者: ${deck.audience || "未指定"}、目的: ${deck.purpose || "未指定"}）のうち、${slideIndex + 1}枚目のスライドだけを作り直してください。`,
     "最終回答は指定されたJSONスキーマに一致する1枚分のスライドJSONだけを返してください。入力にない数値や事実は作らないでください。",
     "資料全体の結論と対象スライドの役割・前後の根拠を踏まえ、指示に関係しない内容・画像を変えない。写真は明示的に頼まれたときだけ変更し、本文に合わない素材を足さない。",
+    OBJECTS_RULE,
     ...memoLines(deck),
     !inserting && slideIndex === 0 ? "このスライドは表紙なので type は title のままにする。" : "",
     !inserting && slideIndex === slides.length - 1 ? "このスライドは最後なので type は closing のままにする。" : "",
@@ -483,6 +492,7 @@ export function buildVariantsPrompt({ deck, slideIndex, instruction = "" }) {
     slideIndex === total - 1 ? "- 最後のスライドなので type は closing のまま、言い回しで変化をつける" : "",
     instruction ? `- ユーザーの希望: ${instruction}` : "",
     "- 「[画像あり]」「[写真・動画あり]」の値はそのまま残す",
+    OBJECTS_RULE,
     "- 見せ方の違いは主張の強弱・レイアウト・根拠の整理で作る。写真を新たに付けるのは明示的な依頼があり、本文と直接一致する場合だけ",
     "",
     "デッキ全体の流れ:",
@@ -514,6 +524,8 @@ export function buildRewritePrompt({ deck, instruction, settings = {} }) {
     `見直しの指示: ${instruction}`,
     countRule,
     "「[画像あり]」「[写真・動画あり]」と書かれた値は写真・動画なので、そのまま残す（別の文字に書き換えない）。",
+    OBJECTS_RULE,
+    "type が blank（白紙）のスライドは、ユーザーが図形や文字を自由に置いて作ったページ。同じ位置に、同じ title の type=content（points は空）として1枚残す（元のページに戻します）。",
     `文字量: ${density.label}（${density.rule}）`,
     `対象者: ${deck.audience || "未指定"} ／ 目的: ${deck.purpose || "未指定"}`,
     "各本文スライドの takeaway と notes を保つか改善する。指示に関係しない良い部分は無理に変えない。details・animation・photoMotion・kinetic・backdrop・entrance・emphasis・transition は指示がなければ残す。",

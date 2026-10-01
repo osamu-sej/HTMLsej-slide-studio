@@ -1,6 +1,9 @@
 import { buildSearchIndex, deleteSavedDeck, getSavedDeck, listSavedDecks, putSavedDeck, searchSavedDecks, slideExcerpt } from "./saved-library.js";
 import { hasSlidePicture, picturePlan } from "./auto-images.mjs?v=__APP_VERSION__";
 import { LOOK_ADVICE, LOOKS, lookOf, varietyIssues } from "./layout-looks.mjs?v=__APP_VERSION__";
+import { createCanvas } from "./editor/canvas.mjs?v=__APP_VERSION__";
+import { createEditorUi } from "./editor/ui.mjs?v=__APP_VERSION__";
+import * as ops from "./editor/ops.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -29,7 +32,7 @@ const TYPE_DESC = {
   bulletCards: "説明付きの要点", headerTwoColumn: "見出し付き2列", headerThreeSummary: "3論点から結論へ", grid2x2: "4つの論点", matrix: "2軸で整理",
   swot: "強み・弱み・機会・脅威", diagram: "役割ごとの流れ", cycle: "循環する取り組み", pyramid: "階層構造", funnel: "段階的な絞り込み",
   stepUp: "段階的な成長", triangle: "3要素の関係", venn: "重なり", orgChart: "体制・役割分担", checklist: "確認項目", faq: "想定問答", quote: "声・メッセージ",
-  simulator: "条件を動かすと結果を計算し直す", gap: "打ち手で目標との差を埋める",
+  simulator: "条件を動かすと結果を計算し直す", gap: "打ち手で目標との差を埋める", blank: "図形・文字・画像を自由に置く",
 };
 const TYPE_INFO = Object.fromEntries(Object.keys(TYPE_DESC).map((type) => [type, [E.TYPE_LABELS[type] ?? type, TYPE_DESC[type]]]));
 const SLIDE_TYPES = Object.keys(TYPE_INFO);
@@ -181,6 +184,8 @@ const COMMON_TOP = [
 ];
 
 function specFor(type) {
+  // 白紙: the title is optional; everything else on the page is objects placed by hand.
+  if (type === "blank") return [T("title", "タイトル（任意。空欄なら出しません）", { max: 30 }), ...COMMON_TOP.slice(1)];
   return TITLED(type) ? [...COMMON_TOP, ...(SPEC[type] ?? [])] : SPEC[type] ?? [];
 }
 
@@ -516,6 +521,12 @@ function normalizeSlide(raw, index, total) {
   } else delete slide.details;
   if (typeof slide.drillOf === "string" && slide.drillOf.trim() && index > 0 && TITLED(type)) slide.drillOf = slide.drillOf.trim().slice(0, 30);
   else delete slide.drillOf;
+  // Objects placed by hand, their animations, and the id that links to this slide point at.
+  const objects = E.normalizeObjects(slide.elements);
+  if (objects.length) slide.elements = objects; else delete slide.elements;
+  if (Array.isArray(slide.timeline) && slide.timeline.length) slide.timeline = slide.timeline.filter((entry) => entry && typeof entry === "object" && typeof entry.el === "string").slice(0, 400);
+  else delete slide.timeline;
+  if (!(typeof slide.sid === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(slide.sid))) delete slide.sid;
   if (index === 0 && total > 1 && type !== "title") return { type: "title", title: strip(slide.title) || "無題の資料" };
   return slide;
 }
@@ -631,6 +642,7 @@ function defaultSlide(type) {
   switch (type) {
     case "title": return { type, title: state.deck?.title || "資料タイトル", subtitle: "", date: new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long" }) };
     case "section": return { type, title: "章タイトル" };
+    case "blank": return { type, title: "" };
     case "closing": return { type, title: "次のアクション", message: "誰が・いつまでに・何をするか" };
     case "hero": return { type, title: "伝えたいひと言", takeaway: "写真に重ねて見せる補足の一文", visualAsset: "transformationRoadmap", photoMotion: "zoom" };
     case "statement": return { type, title: "ポイント", text: "いちばん伝えたい**ひと言**を大きく", takeaway: "" };
@@ -691,7 +703,7 @@ function extractUnits(slide) {
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf"]) {
+  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid"]) {
     if (slide[key] && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
@@ -782,18 +794,25 @@ async function mediaBlob(src) {
   return null;
 }
 
+/** Every photo, video and animation a slide uses: its own media and the objects placed on it. */
+const mediaSources = (slide) => [slide.media?.src, ...(slide.elements || []).map((o) => o?.src)].filter((src) => typeof src === "string" && src);
+// Bumped when a browser-kept file becomes available, so thumbnails drawn without it are drawn again.
+let mediaEpoch = 0;
+
 /** Load the browser-kept photos and videos a deck refers to; true when something new arrived. */
 async function ensureMedia(deck = state.deck) {
   if (!deck) return false;
   let added = false;
   for (const slide of deck.slides) {
-    const src = slide.media?.src;
-    if (!src?.startsWith("idb:") || mediaUrls[src]) continue;
-    try {
-      const blob = await mediaBlob(src);
-      if (blob) { mediaUrls[src] = URL.createObjectURL(blob); added = true; }
-    } catch { /* missing on this browser */ }
+    for (const src of mediaSources(slide)) {
+      if (!src.startsWith("idb:") || mediaUrls[src]) continue;
+      try {
+        const blob = await mediaBlob(src);
+        if (blob) { mediaUrls[src] = URL.createObjectURL(blob); added = true; }
+      } catch { /* missing on this browser */ }
+    }
   }
+  if (added) mediaEpoch += 1;
   return added;
 }
 
@@ -802,6 +821,11 @@ async function storeInlineMedia(deck) {
   for (const slide of deck.slides) {
     if (slide.media?.src?.startsWith("data:")) {
       try { slide.media.src = await putMedia(await dataUrlToBlob(slide.media.src), slide.media.name || ""); } catch { /* keep the data URL */ }
+    }
+    for (const o of slide.elements || []) {
+      if (o?.src?.startsWith("data:")) {
+        try { o.src = await putMedia(await dataUrlToBlob(o.src), o.fileName || ""); } catch { /* keep the data URL */ }
+      }
     }
   }
   return deck;
@@ -904,7 +928,7 @@ function measureSlide(index) {
   const result = E.fit(el);
   // SEJ decks are read back against the brand's rules too (white text, text on dark fills, shadows).
   const brand = E.brandCheck(el).map((issue) => ({ ...issue, slide: index }));
-  fitState.byKey.set(slideKey(index), { fs: result.fs, ts: result.ts, issues: result.issues.map((issue) => ({ ...issue, slide: index })), brand });
+  fitState.byKey.set(slideKey(index), { fs: result.fs, ts: result.ts, ...(result.objs ? { objs: result.objs } : {}), issues: result.issues.map((issue) => ({ ...issue, slide: index })), brand });
   root.replaceChildren();
 }
 
@@ -931,7 +955,7 @@ document.fonts?.addEventListener?.("loadingdone", () => {
 const thumbCache = new Map();
 function thumb(index, variant = "film") {
   const fit = fitFor(index);
-  const key = `${variant}|${slideKey(index)}|${fit ? `${fit.fs},${fit.ts}` : "-"}|${state.deck.slides[index]?.media?.src && mediaUrls[state.deck.slides[index].media.src] ? "m" : ""}`;
+  const key = `${variant}|${slideKey(index)}|${fit ? `${fit.fs},${fit.ts},${JSON.stringify(fit.objs ?? "")}` : "-"}|${mediaSources(state.deck.slides[index] || {}).filter((src) => mediaUrls[src]).length}|${mediaEpoch}`;
   const cached = thumbCache.get(key);
   if (cached) return cached;
   const el = E.render(state.deck.slides[index], renderOptions({ index, mode: "thumb", fit: fit ?? undefined }));
@@ -1084,6 +1108,8 @@ function groupEnd(index, story = storyOf()) {
 function copyOf(slide) {
   const copy = clone(slide);
   delete copy.drillOf;
+  // A copy is another slide: links to the original keep pointing at the original.
+  delete copy.sid;
   return copy;
 }
 
@@ -1091,6 +1117,7 @@ function select(index) {
   if (!state.deck) return;
   stopMotionPreview({ render: false });
   if (state.inline) finishInlineEdit(true);
+  if (editor.typing) editor.stopTyping(true);
   state.selected = Math.max(0, Math.min(index, slideCount() - 1));
   renderFilmstrip();
   renderStage();
@@ -1417,7 +1444,7 @@ const PLACEHOLDERS = new Set([
   "工程", "項目", "補足", "説明", "伝えたいひと言", "写真に重ねて見せる補足の一文", "ポイント", "いちばん伝えたい**ひと言**を大きく",
 ]);
 const FULLWIDTH_NUMBER = /[０-９％．，]/;
-const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula"]);
+const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula", "elements", "timeline", "sid"]);
 
 function textEntries(value, path = [], out = []) {
   if (typeof value === "string") out.push([path, value]);
@@ -1431,8 +1458,29 @@ function textEntries(value, path = [], out = []) {
 function eachText(value, visit, key = "") {
   if (typeof value === "string") return NON_TEXT_KEYS.has(key) && key !== "notes" || value.startsWith("data:") || value.startsWith("idb:") ? value : visit(value);
   if (Array.isArray(value)) return value.map((item) => eachText(item, visit, key));
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, k === "media" ? v : eachText(v, visit, k)]));
+  // Objects keep their words in rich text: they are visited by eachObjectText, never as markup.
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, ["media", "elements", "timeline", "sid"].includes(k) ? v : eachText(v, visit, k)]));
   return value;
+}
+
+/** Visit the words of every object's text (not its markup); returns how many objects changed. */
+function eachObjectText(slides, visit) {
+  let changed = 0;
+  for (const slide of slides) {
+    for (const o of slide.elements || []) {
+      if (!o?.text) continue;
+      const box = document.createElement("div");
+      box.append(E.richFragment(o.text));
+      const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+      let dirty = false;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const next = visit(node.data);
+        if (next !== node.data) { node.data = next; dirty = true; }
+      }
+      if (dirty) { o.text = E.sanitizeRich(box.innerHTML); changed += 1; }
+    }
+  }
+  return changed;
 }
 
 function normalizeNumbers() {
@@ -1471,7 +1519,7 @@ function lintDeck() {
     const placeholders = texts.filter(isPlaceholder);
     placeholders.slice(0, 3).forEach(([path]) => add(i, pathKey(path), "仮の文言のままです"));
     if (placeholders.length > 3) add(i, pathKey(placeholders[3][0]), `ほかにも仮の文言が${placeholders.length - 3}か所あります`, "warning", null, true);
-    if (TITLED(slide.type) && !["hero", "statement"].includes(slide.type) && !strip(slide.takeaway)) add(i, "takeaway", "キーメッセージ（このスライドの結論）がありません");
+    if (TITLED(slide.type) && !["hero", "statement", "blank"].includes(slide.type) && !strip(slide.takeaway)) add(i, "takeaway", "キーメッセージ（このスライドの結論）がありません");
     if (slide.type === "closing" && !strip(slide.message)) add(i, "message", "次のアクションが書かれていません");
     if (slide.type === "hero" && !slide.media && !slide.visualAsset && !slide.customImage) add(i, "title", "全面写真のスライドに写真がありません（「編集」→「写真・動画」で選べます）", "warning", null, true);
     if (slide.media?.src?.startsWith("idb:") && !mediaUrls[slide.media.src] && state.mediaChecked) add(i, "title", "このブラウザに動画・写真のデータがありません（別のPCで保存した資料です）", "warning", null, true);
@@ -1605,6 +1653,8 @@ function renderFilmstrip() {
 function renderStage() {
   const body = $("stageBody");
   if (state.inline && body.contains(state.inline.el)) { state.stageDirty = true; return; }
+  if (editor.typing) { state.stageDirty = true; return; }
+  editorUi.renderRibbon();
   if (state.motionPreview) return;
   E.stopLottie(body);
   if (!state.deck) {
@@ -1645,11 +1695,13 @@ function renderStage() {
   // Mark what does not fit on the slide itself (red dashed outline) and keep the measurement in step.
   if (body.offsetParent) {
     const result = E.fit(el);
-    fitState.byKey.set(slideKey(index), { fs: result.fs, ts: result.ts, issues: result.issues.map((issue) => ({ ...issue, slide: index })) });
+    const brand = E.brandCheck(el).map((issue) => ({ ...issue, slide: index }));
+    fitState.byKey.set(slideKey(index), { fs: result.fs, ts: result.ts, ...(result.objs ? { objs: result.objs } : {}), issues: result.issues.map((issue) => ({ ...issue, slide: index })), brand });
   }
   wirePlacedMedia(el, slide);
   // The editor stays still: a Lottie animation shows one frame from its middle.
   E.mountLottie(el, { play: false, frame: 0.5 });
+  editor.attach(wrap, el, index);
 }
 
 // Second text line shown in the outline for each kind of slide.
@@ -1696,9 +1748,14 @@ function setView(view) {
   renderStage();
 }
 
-/** Clicking text on the slide (or an issue) jumps to the matching form field. */
+/** Clicking text on the slide (or an issue) jumps to the matching form field (an object: it is selected). */
 function focusField(field) {
   if (!field) return;
+  if (field.startsWith("obj:")) {
+    const id = field.slice(4);
+    if (state.deck?.slides[state.selected]?.elements?.some((o) => o.id === id)) { editor.select([id]); openFormatPanel(); }
+    return;
+  }
   if (state.panel !== "form") setPanel("form");
   const candidates = [field];
   let rest = field;
@@ -1721,6 +1778,179 @@ function focusField(field) {
     void input.offsetWidth;
     input.classList.add("flash");
     return;
+  }
+}
+
+// ---------------------------------------------------------------- objects placed by hand (the PowerPoint-style editor)
+// public/editor/: canvas.mjs (select, move, resize, rotate, type, clipboard, keys), ui.mjs (ribbon, 書式 pane),
+// ops.mjs (plain operations). Objects are slide.elements; the engine draws them (engine/objects.js).
+
+const editorApp = {
+  E, h,
+  state: () => state,
+  deck: () => state.deck,
+  slide: () => (state.deck ? state.deck.slides[state.selected] ?? null : null),
+  index: () => state.selected,
+  setObjects,
+  renderOptions: () => renderOptions(),
+  rerender: () => { if (state.deck && state.mode === "edit" && state.view === "single") renderStage(); },
+  toast,
+  canEdit: () => state.mode === "edit" && state.view === "single" && Boolean(state.deck) && !state.player && !state.motionPreview && !document.querySelector("dialog[open]"),
+  busy: () => Boolean(state.motionPreview || state.player),
+  focusStage: () => { if (state.inline) finishInlineEdit(true); },
+  insertFiles: (files, at) => insertObjectFiles(files, at),
+  insertUrl: (url, kind) => insertObjectUrl(url, kind),
+  replaceImage: (id, file) => replaceObjectImage(id, file),
+  pickFiles,
+  ask: askDialog,
+  ensureSid,
+  slideOfSid: (sid) => state.deck?.slides.findIndex((slide) => slide.sid === sid) ?? -1,
+  insertBlankSlide: () => insertSlide(Math.min(state.selected + 1, state.deck.slides.length - 1), defaultSlide("blank")),
+  duplicateSlide: () => { const i = state.selected; if (i > 0 && i < state.deck.slides.length - 1) insertSlide(i + 1, copyOf(state.deck.slides[i])); else toast("表紙と最後のスライドは複製できません"); },
+  openTypeDialog: (mode) => openTypeDialog(mode),
+  setView: (view) => setView(view),
+  openPanel: (panel, focus) => openFormatPanel(focus),
+  showTab: (tab) => editorUi.showTab(tab),
+};
+const editor = createCanvas(editorApp);
+const editorUi = createEditorUi(editor, editorApp);
+// Read-only access for the browser checks (qa/studio-objects.mjs): the deck and the slide on the stage.
+window.__hsej = { deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection };
+
+/** The objects of the slide on the stage changed (one undo step unless told otherwise). */
+function setObjects(list, { undo = true } = {}) {
+  const slide = state.deck?.slides[state.selected];
+  if (!slide) return;
+  if (undo) pushUndo();
+  if (list.length) slide.elements = list; else delete slide.elements;
+  markChanged({ structural: true });
+}
+
+function openFormatPanel(focus = null) {
+  setPanel("format");
+  editorUi.renderPane(focus);
+}
+
+/** The slide id links point at (made when first needed). */
+function ensureSid(index) {
+  const slide = state.deck?.slides[index];
+  if (!slide) return null;
+  if (!slide.sid) slide.sid = `s${Date.now().toString(36).slice(-6)}${Math.random().toString(36).slice(2, 5)}`;
+  return slide.sid;
+}
+
+/** Ask for files with the browser's picker (resolves to an empty list when cancelled). */
+function pickFiles(accept, multiple = false) {
+  return new Promise((resolve) => {
+    const input = h("input", { type: "file", accept, multiple: multiple || null, class: "hidden" });
+    input.addEventListener("change", () => { resolve([...(input.files || [])]); input.remove(); });
+    input.addEventListener("cancel", () => { resolve([]); input.remove(); });
+    document.body.append(input);
+    input.click();
+  });
+}
+
+/** A one-line question in a dialog (resolves to the text, or null when cancelled). */
+function askDialog(title, label = "", value = "") {
+  return new Promise((resolve) => {
+    const dialog = $("askDialog");
+    $("askTitle").textContent = title;
+    $("askLabel").textContent = label;
+    $("askLabel").hidden = !label;
+    const input = $("askInput");
+    input.value = value ?? "";
+    let answer = null;
+    const ok = () => { answer = input.value; dialog.close(); };
+    const onKey = (event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); ok(); } };
+    $("askOk").onclick = ok;
+    input.addEventListener("keydown", onKey);
+    dialog.addEventListener("close", () => { input.removeEventListener("keydown", onKey); resolve(answer); }, { once: true });
+    dialog.showModal();
+    input.focus();
+    input.select();
+  });
+}
+
+const naturalSize = (url) => new Promise((resolve) => {
+  const img = new Image();
+  img.onload = () => resolve([img.naturalWidth || 960, img.naturalHeight || 540]);
+  img.onerror = () => resolve([960, 540]);
+  img.src = url;
+});
+const videoSize = (url) => new Promise((resolve) => {
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.onloadedmetadata = () => resolve([video.videoWidth || 1280, video.videoHeight || 720]);
+  video.onerror = () => resolve([1280, 720]);
+  video.src = url;
+});
+/** A box of the picture's own proportions that fits in w × h (slide pixels). */
+const fitBox = ([w, hh], maxW = 960, maxH = 640) => { const k = Math.min(maxW / w, maxH / hh, 1); return { x: 0, y: 0, w: Math.round(w * k), h: Math.round(hh * k) }; };
+
+/** Pictures, videos and Lottie animations from files → objects on the slide (kept in this browser). */
+async function insertObjectFiles(files, at = null) {
+  if (!state.deck) return [];
+  const made = [];
+  for (const file of files) {
+    try {
+      if (isLottieFile(file)) {
+        const text = await readLottie(file);
+        const src = await putMedia(new Blob([text], { type: "application/json" }), file.name);
+        made.push(ops.makeObject("lottie", { x: 0, y: 0, w: 480, h: 480 }, { src, fileName: file.name }));
+      } else if (file.type.startsWith("video/")) {
+        if (file.size > 400_000_000) { toast("動画が大きすぎます（400MBまで）"); continue; }
+        const src = await putMedia(file, file.name);
+        made.push(ops.makeObject("video", fitBox(await videoSize(mediaUrls[src])), { src, fileName: file.name, autoplay: true, loop: true, muted: true }));
+      } else if (file.type.startsWith("image/")) {
+        const blob = /gif|svg/.test(file.type) ? file : await downscaleImage(file, 2400, /png|webp/.test(file.type) ? "image/png" : "image/jpeg");
+        const src = await putMedia(blob, file.name);
+        made.push(ops.makeObject("image", fitBox(await naturalSize(mediaUrls[src])), { src, fileName: file.name, alt: file.name.replace(/\.[a-z0-9]+$/i, "") }));
+      } else toast(`「${file.name}」は入れられません（画像・動画・Lottie JSON）`);
+    } catch (error) {
+      toast(`読み込めませんでした：${error.message}`);
+    }
+  }
+  if (made.length) editor.insert(made, { at });
+  return made;
+}
+
+/** An image, a video (YouTube, mp4) or a Lottie animation from the web → an object. */
+async function insertObjectUrl(url, kind) {
+  if (!/^https:\/\//i.test(url)) return toast("https:// で始まるURLを入れてください");
+  try {
+    if (/\.json(\?|#|$)/i.test(url) || /^https:\/\/(lottie\.host|[a-z0-9-]+\.lottiefiles\.com)\//i.test(url)) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await readLottie(await response.blob());
+      const src = await putMedia(new Blob([text], { type: "application/json" }), url.split("/").pop());
+      editor.insert([ops.makeObject("lottie", { x: 0, y: 0, w: 480, h: 480 }, { src, fileName: decodeURIComponent(url.split("/").pop().split("?")[0]).slice(0, 60) })]);
+      return;
+    }
+    const yt = E.youtubeId(url);
+    if (yt || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url) || kind === "video") {
+      editor.insert([ops.makeObject("video", { x: 0, y: 0, w: 960, h: 540 }, { src: url, fileName: yt ? "YouTube" : url.split("/").pop().split("?")[0].slice(0, 60), autoplay: !yt, loop: !yt, muted: !yt })]);
+      toast(yt ? "YouTubeを入れました。発表の画面で再生できます" : "動画を入れました");
+      return;
+    }
+    editor.insert([ops.makeObject("image", fitBox(await naturalSize(url)), { src: url, alt: "" })]);
+  } catch (error) {
+    toast(`読み込めませんでした（${error.message}）`);
+  }
+}
+
+async function replaceObjectImage(id, file) {
+  try {
+    const blob = /gif|svg/.test(file.type) ? file : await downscaleImage(file, 2400, /png|webp/.test(file.type) ? "image/png" : "image/jpeg");
+    const src = await putMedia(blob, file.name);
+    const [w, hh] = await naturalSize(mediaUrls[src]);
+    editor.apply((o) => {
+      if (o.id !== id) return null;
+      // The new picture keeps the box's width and takes its own proportions.
+      const height = Math.round(o.w * (hh / w));
+      return { src, fileName: file.name, crop: undefined, h: height, y: o.y + (o.h - height) / 2 };
+    }, { ids: [id] });
+  } catch (error) {
+    toast(`差し替えられませんでした：${error.message}`);
   }
 }
 
@@ -1870,20 +2100,28 @@ function onStageDragOver(event) {
 
 async function onStageDrop(event) {
   const id = event.dataTransfer.getData("text/x-hs-generated-image");
-  const file = event.dataTransfer.files?.[0];
-  if (!id && !file) return;
+  const files = [...(event.dataTransfer.files || [])];
+  if (!id && !files.length) return;
   event.preventDefault();
   const slideEl = event.currentTarget.querySelector(".hs-slide");
   const rect = slideEl.getBoundingClientRect();
-  const w = 0.3;
-  const hh = 0.36;
-  const placement = clampPlacement({ x: (event.clientX - rect.left) / rect.width - w / 2, y: (event.clientY - rect.top) / rect.height - hh / 2, w, h: hh });
+  const at = [((event.clientX - rect.left) / rect.width) * E.W, ((event.clientY - rect.top) / rect.height) * E.H];
   if (id) {
+    // A picture the AI made in the chat becomes an object where it was dropped.
     const message = state.chat.messages.find((entry) => entry.id === id);
-    if (message) applyGeneratedImage(message, placement);
+    const meta = message?.generatedImage;
+    if (!meta?.src) return toast("この画像は配置できません。再生成してください");
+    // Kept in this browser like any other picture (the deck itself stays small).
+    const src = meta.src.startsWith("data:") ? await putMedia(await dataUrlToBlob(meta.src), "AIで作った画像") : meta.src;
+    const [w, hh] = await naturalSize(src.startsWith("idb:") ? mediaUrls[src] : src);
+    editor.insert([ops.makeObject("image", fitBox([w, hh], 760, 560), { src, alt: "AIで作った画像" })], { at });
+    meta.status = "applied";
+    saveChat();
+    renderChat();
     return;
   }
-  if (/^(image|video)\//.test(file.type) || isLottieFile(file) || /\.lottie$/i.test(file.name || "")) addMediaFile(file, { placement });
+  if (files.some((file) => /\.lottie$/i.test(file.name || ""))) return toast("「.lottie」形式は使えません。LottieFilesでは「Lottie JSON」を選んでください");
+  await insertObjectFiles(files, at);
 }
 
 // ---- motion preview on the stage (the editor itself stays still)
@@ -2044,6 +2282,7 @@ function countMatches(needle) {
   let count = 0;
   const visit = (text) => { count += text.split(needle).length - 1; return text; };
   eachText(state.deck.slides, visit);
+  eachObjectText(state.deck.slides, visit);
   visit(state.deck.title || "");
   return count;
 }
@@ -2062,6 +2301,7 @@ function replaceAll() {
   if (!count) return;
   pushUndo();
   state.deck.slides = eachText(state.deck.slides, (text) => text.split(needle).join(replacement));
+  eachObjectText(state.deck.slides, (text) => text.split(needle).join(replacement));
   state.deck.title = (state.deck.title || "").split(needle).join(replacement);
   $("deckTitleInput").value = state.deck.title;
   $("replaceDialog").close();
@@ -3240,7 +3480,15 @@ function restoreImages(slides, previous) {
     if (source?.media && !slide.media) slide.media = clone(source.media);
     if (source?.drillOf && !slide.drillOf && TITLED(slide.type)) slide.drillOf = source.drillOf;
     if (source?.imagePlacement && slide.customImage === source.customImage && !slide.imagePlacement) slide.imagePlacement = source.imagePlacement;
+    // What people placed by hand stays: a 白紙 page comes back as it was, objects stay with their slide.
+    if (source?.type === "blank") { slides[index] = clone(source); return; }
+    for (const key of ["elements", "timeline", "sid"]) if (source?.[key] && slide[key] == null) slide[key] = clone(source[key]);
   });
+  // A slide with objects that found no place in the new deck is kept (before the close), so no work is lost.
+  const placed = new Set(slides.flatMap((slide) => (slide.elements || []).map((o) => o.id)));
+  for (const prev of previous) {
+    if (prev.elements?.length && !prev.elements.some((o) => placed.has(o.id))) slides.splice(Math.max(1, slides.length - 1), 0, clone(prev));
+  }
   // Photos and videos whose slide disappeared float on the first slides that have none.
   const kept = new Set(slides.map((slide) => slide.media?.src).filter(Boolean));
   const orphans = previous.filter((slide) => slide.media?.src && !kept.has(slide.media.src)).map((slide) => slide.media);
@@ -3405,8 +3653,11 @@ function setPanel(panel) {
   if (panel === "chat") $("chatTab").textContent = "✦ AIと話す";
   $("chatPane").hidden = panel !== "chat";
   $("inspector").hidden = panel !== "form";
+  $("formatPane").hidden = panel !== "format";
   $("chatTab").setAttribute("aria-selected", String(panel === "chat"));
   $("formTab").setAttribute("aria-selected", String(panel === "form"));
+  $("formatTab").setAttribute("aria-selected", String(panel === "format"));
+  if (panel === "format") editorUi.renderPane();
   try { localStorage.setItem(STORAGE.panel, panel); } catch { /* optional */ }
   if (panel === "chat") { renderChatContext(); scrollChat(); }
 }
@@ -3860,7 +4111,10 @@ function chooseVariant(id, variant) {
   const message = state.chat.messages.find((item) => item.id === id);
   if (!set || !message) return;
   saveVersion("別案を採用する前");
-  replaceSlide(set.index, clone(variant.slide));
+  const original = state.deck.slides[set.index];
+  const chosen = clone(variant.slide);
+  for (const key of ["elements", "timeline", "sid"]) if (original?.[key] && chosen[key] == null) chosen[key] = clone(original[key]);
+  replaceSlide(set.index, chosen);
   message.variants.status = "chosen";
   message.variants.chosen = variant.label;
   saveChat();
@@ -4202,13 +4456,14 @@ async function fetchText(url) {
 }
 
 async function engineBundle() {
-  const [css, engine, motion] = await Promise.all([
+  const [css, engine, objects, motion] = await Promise.all([
     fetchText(`/engine/engine.css?v=${APP_VERSION}`),
     fetchText(`/engine/engine.js?v=${APP_VERSION}`),
+    fetchText(`/engine/objects.js?v=${APP_VERSION}`),
     fetchText(`/engine/motion.js?v=${APP_VERSION}`),
   ]);
   const js = (text) => text.replace(/<\/script/gi, "<\\/script");
-  return { css: css.replace(/<\/style/gi, "<\\/style"), engine: js(engine), motion: js(motion) };
+  return { css: css.replace(/<\/style/gi, "<\\/style"), engine: js(engine), objects: js(objects), motion: js(motion) };
 }
 
 /** The deck with every photo and video it uses written into it, so the file works anywhere. */
@@ -4230,9 +4485,23 @@ async function portableDeck() {
     if (src?.startsWith("asset:")) await addAsset(src.slice(6));
     if (src?.startsWith("idb:")) {
       const blob = await mediaBlob(src).catch(() => null);
-      if (!blob) { missing.push(index + 1); delete slide.media; continue; }
-      slide.media.src = await blobToDataUrl(blob);
-      bytes += blob.size;
+      if (!blob) { missing.push(index + 1); delete slide.media; }
+      else { slide.media.src = await blobToDataUrl(blob); bytes += blob.size; }
+    }
+    // Pictures, videos and animations placed as objects travel inside the file too.
+    if (slide.elements?.length) {
+      const kept = [];
+      for (const o of slide.elements) {
+        if (o.src?.startsWith("asset:")) await addAsset(o.src.slice(6));
+        if (o.src?.startsWith("idb:")) {
+          const blob = await mediaBlob(o.src).catch(() => null);
+          if (!blob) { if (!missing.includes(index + 1)) missing.push(index + 1); continue; }
+          o.src = await blobToDataUrl(blob);
+          bytes += blob.size;
+        }
+        kept.push(o);
+      }
+      slide.elements = kept;
     }
   }
   return { deck, assets, bytes, missing };
@@ -4242,7 +4511,7 @@ async function standaloneHtml({ title, body, boot, data, background = "#07080c",
   const bundle = await engineBundle();
   const fonts = E.fontHref([data.deck.theme]);
   // The Lottie player travels with the file only when a slide has an animation to play.
-  const lottie = player && data.deck.slides.some((slide) => slide.media?.kind === "lottie") ? (await fetchText("/vendor/lottie.js")).replace(/<\/script/gi, "<\\/script") : "";
+  const lottie = player && data.deck.slides.some((slide) => slide.media?.kind === "lottie" || (slide.elements || []).some((o) => o.kind === "lottie")) ? (await fetchText("/vendor/lottie.js")).replace(/<\/script/gi, "<\\/script") : "";
   return `<!doctype html>
 <html lang="ja">
 <head>
@@ -4259,6 +4528,7 @@ ${fonts ? `<link rel="stylesheet" href="${esc(fonts)}" data-hs-fonts>` : ""}
 <body>
 ${body}
 <script>${bundle.engine}</script>
+<script>${bundle.objects}</script>
 <script>${bundle.motion}</script>
 ${lottie ? `<script>${lottie}</script>` : ""}
 <script type="application/json" id="hs-data">${safeJson(data)}</script>
@@ -4273,6 +4543,10 @@ const EXPORT_BOOT = `(async function () {
   for (var i = 0; i < data.deck.slides.length; i += 1) {
     var media = data.deck.slides[i].media;
     if (media && /^data:/.test(media.src)) { try { media.src = URL.createObjectURL(await (await fetch(media.src)).blob()); } catch (e) {} }
+    var objects = data.deck.slides[i].elements || [];
+    for (var j = 0; j < objects.length; j += 1) {
+      if (objects[j].src && /^data:/.test(objects[j].src)) { try { objects[j].src = URL.createObjectURL(await (await fetch(objects[j].src)).blob()); } catch (e) {} }
+    }
   }
   var boot = document.querySelector(".hs-boot"); if (boot) boot.remove();
   // "#5" opens slide 5; "#static" (or "#5-static") shows every slide finished, without motion.
@@ -4688,6 +4962,12 @@ function bind() {
   $("historyBtn").addEventListener("click", openHistory);
   $("chatTab").addEventListener("click", () => setPanel("chat"));
   $("formTab").addEventListener("click", () => setPanel("form"));
+  $("formatTab").addEventListener("click", () => setPanel("format"));
+  // The clipboard: objects, pictures and text go onto the slide; copying objects copies them.
+  document.addEventListener("copy", (event) => editor.onCopy(event));
+  document.addEventListener("cut", (event) => editor.onCopy(event, true));
+  document.addEventListener("paste", (event) => { editor.onPaste(event); });
+  window.addEventListener("resize", () => { if (state.mode === "edit" && state.view === "single") { editor.applyZoom(); editor.draw(); } });
   $("chatForm").addEventListener("submit", (event) => { event.preventDefault(); sendChat(); });
   $("chatInput").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendChat(); }
@@ -4734,6 +5014,7 @@ function bind() {
   document.querySelectorAll("input[name=view]").forEach((radio) => radio.addEventListener("change", (event) => setView(event.target.value)));
   $("stageBody").addEventListener("click", (event) => {
     if (state.motionPreview || event.target.closest(".inline-tools, .ph-handle")) return;
+    if (editor.consumeClick() || editor.tool || event.target.closest(".hs-obj, .ed-layer")) return;
     const badge = event.target.closest(".slide-wrap .hs-drill-badge[data-drill-to]");
     if (badge) { if (state.inline) finishInlineEdit(true); select(Number(badge.dataset.drillTo)); return; }
     const target = event.target.closest(".slide-wrap .hs-slide.hs-editable [data-field]");
@@ -4799,6 +5080,7 @@ function bind() {
     if (state.player) return; // the player has its own keys
     if (state.motionPreview && event.key === "Escape") { stopMotionPreview(); return; }
     if (state.motionPreview && ["ArrowRight", " ", "Enter"].includes(event.key) && !document.querySelector("dialog[open]")) { event.preventDefault(); state.motionPreview.advance(); return; }
+    if (editor.keydown(event)) return;
     if ((event.key === "F5" || ((event.metaKey || event.ctrlKey) && event.key === "Enter")) && state.mode === "edit" && state.deck) {
       event.preventDefault();
       openPresenter(event.shiftKey ? state.selected : 0);
@@ -4871,7 +5153,7 @@ window.addEventListener("error", (event) => reportClientError(event.message, `${
 window.addEventListener("unhandledrejection", (event) => reportClientError(String(event.reason?.message ?? event.reason), "promise"));
 
 bind();
-try { setPanel(localStorage.getItem(STORAGE.panel) === "form" ? "form" : "chat"); } catch { setPanel("chat"); }
+try { const saved = localStorage.getItem(STORAGE.panel); setPanel(["form", "format"].includes(saved) ? saved : "chat"); } catch { setPanel("chat"); }
 updateBriefCount();
 restore();
 updateTopbar();

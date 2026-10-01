@@ -22,7 +22,7 @@ const port = server.address().port;
 // The session's HTTPS proxy re-signs traffic with its own CA; trust exactly that key (see /root/.ccr/README.md).
 const spki = process.env.PROXY_CA_SPKI || "";
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: spki ? [`--ignore-certificate-errors-spki-list=${spki}`] : [] });
-const page = await browser.newPage({ viewport: { width: 1960, height: 1200 } });
+const page = await browser.newPage({ viewport: { width: Math.max(1960, Number(args.w || 960) * Number(args.cols || 2) + 40), height: 1200 } });
 const themes = (args.themes || "clarity").split(",");
 const deck = args.deck || "/public/samples/ai-rollout.json";
 const per = Number(args.per || 6);

@@ -66,6 +66,13 @@ export const detailSchema = z.object({
   note: z.string().max(200).optional(),
 });
 
+// Objects people place by hand (shapes, text boxes, pictures, lines…), their animations, and a slide's id that
+// links between slides point at. People make them in the editor; the AI never writes them (USER_ONLY_FIELDS) and
+// every AI change keeps them (server/chat.mjs). public/engine/objects.js validates their contents.
+export const OBJECT_KINDS = ["shape", "text", "image", "line", "icon", "video", "lottie", "table", "chart"];
+export const objectSchema = z.object({ id: z.string().min(1).max(32), kind: z.enum(OBJECT_KINDS) }).passthrough();
+export const timelineEntrySchema = z.object({ el: z.string().min(1).max(64) }).passthrough();
+
 const shared = {
   visualAsset: visualAssetSchema.optional(),
   customImage: customImageSchema.optional(),
@@ -82,6 +89,9 @@ const shared = {
   // A deep-dive page: not part of the story, opened by clicking this item ("items[1]") of the slide above.
   drillOf: z.string().max(30).optional(),
   notes: notesSchema,
+  elements: z.array(objectSchema).max(300).optional(),
+  timeline: z.array(timelineEntrySchema).max(400).optional(),
+  sid: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).optional(),
 };
 export const titledShape = {
   title: z.string().min(1).max(90),
@@ -128,7 +138,8 @@ export const chartImageSchema = z.object({
   }),
 });
 
-export const slideSchema = z.discriminatedUnion("type", [
+// The layouts the AI writes. People also have 白紙 (blank): the master and an optional title, filled with objects.
+const AI_SLIDES = [
   z.object({ type: z.literal("title"), title: z.string().min(1).max(100), subtitle: z.string().max(180).optional(), date: z.string().max(32).optional(), ...shared }),
   z.object({ type: z.literal("section"), title: z.string().min(1).max(90), takeaway: z.string().max(160).optional(), sectionNo: z.number().int().min(1).max(99).optional(), ...shared }),
   z.object({ type: z.literal("closing"), title: z.string().max(90).optional(), message: z.string().max(300).optional(), ...shared }),
@@ -184,7 +195,10 @@ export const slideSchema = z.discriminatedUnion("type", [
     targetLabel: z.string().max(20).optional(), target: z.number(), currentLabel: z.string().max(20).optional(), current: z.number(),
     measures: z.array(z.object({ title: z.string().min(1).max(30), value: z.number(), desc: z.string().max(60).optional() })).min(1).max(5),
   }),
-]);
+];
+export const aiSlideSchema = z.discriminatedUnion("type", AI_SLIDES);
+export const blankSlideSchema = z.object({ type: z.literal("blank"), ...titledShape, title: z.string().max(90).optional() });
+export const slideSchema = z.discriminatedUnion("type", [...AI_SLIDES, blankSlideSchema]);
 
 export const THEMES = ["sej", "clarity", "midnight", "editorial", "mono", "forest", "sunset", "aurora", "kinari"];
 export const themeSchema = z.enum(THEMES);
@@ -207,7 +221,7 @@ export const generatedDeckSchema = z.object({
   deckTitle: z.string().min(1).max(100),
   purpose: z.string().max(180),
   audience: z.string().max(80),
-  slideData: z.array(slideSchema).min(2).max(50),
+  slideData: z.array(aiSlideSchema).min(2).max(50),
 });
 export const deckShape = z.object({
   title: z.string().min(1).max(100),
@@ -254,7 +268,7 @@ export const chatRequestSchema = z.object({
 export const chatOperationSchema = z.object({
   op: z.enum(["replace", "insert", "delete"]),
   slide: z.number().int().min(1).max(50),
-  content: slideSchema.optional(),
+  content: aiSlideSchema.optional(),
 });
 export const chatResultSchema = z.object({
   reply: z.string().min(1).max(1500),
@@ -269,7 +283,7 @@ export const chatResultSchema = z.object({
 });
 
 // Fields only people set (uploaded photos and videos, hand placement) are hidden from the AI's output schema.
-const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media"]);
+const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid"]);
 function withoutUserFields(node) {
   if (Array.isArray(node)) return node.map(withoutUserFields);
   if (!node || typeof node !== "object") return node;
@@ -282,11 +296,13 @@ function withoutUserFields(node) {
 }
 export const toCodexSchema = (schema) => withoutUserFields(normalizeCodexOutputSchema(zodToJsonSchema(schema, { target: "openAi", $refStrategy: "none" })));
 export const codexDeckSchema = toCodexSchema(generatedDeckSchema);
-export const codexSlideSchema = toCodexSchema(z.object({ slide: slideSchema }));
+export const codexSlideSchema = toCodexSchema(z.object({ slide: aiSlideSchema }));
 export const codexNotesSchema = toCodexSchema(notesResultSchema);
 export const codexChatSchema = toCodexSchema(chatResultSchema);
 
-export const SLIDE_TYPES = slideSchema.options.map((option) => option.shape.type.value);
+// The layouts the AI chooses from (44); ALL_SLIDE_TYPES adds 白紙.
+export const SLIDE_TYPES = aiSlideSchema.options.map((option) => option.shape.type.value);
+export const ALL_SLIDE_TYPES = slideSchema.options.map((option) => option.shape.type.value);
 
 // Outline-first creation: a quick skeleton the user reshapes before the full deck is written.
 export const outlineItemSchema = z.object({
@@ -309,6 +325,6 @@ export const variantsRequestSchema = z.object({
   instruction: z.string().max(1000).optional().default(""),
 });
 export const variantsResultSchema = z.object({
-  variants: z.array(z.object({ label: z.string().min(1).max(40), slide: slideSchema })).min(2).max(3),
+  variants: z.array(z.object({ label: z.string().min(1).max(40), slide: aiSlideSchema })).min(2).max(3),
 });
 export const codexVariantsSchema = toCodexSchema(variantsResultSchema);

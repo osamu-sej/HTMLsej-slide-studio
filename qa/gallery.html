@@ -7,15 +7,16 @@
 <link id="fonts" rel="stylesheet" data-hs-fonts>
 <style>
 body { margin: 0; background: #8a8f99; }
-.sheet { display: grid; grid-template-columns: repeat(var(--cols, 2), 960px); gap: 10px; padding: 10px; width: fit-content; }
+.sheet { display: grid; grid-template-columns: repeat(var(--cols, 2), var(--cw, 960px)); gap: 10px; padding: 10px; width: fit-content; }
 .cell { position: relative; }
-.cell b { position: absolute; left: 6px; top: 6px; z-index: 9; background: #000c; color: #fff; font: 12px sans-serif; padding: 2px 6px; border-radius: 4px; }
-.cell.bad b { background: #c00; }
+.cell > b { position: absolute; left: 6px; top: 6px; z-index: 9; background: #000c; color: #fff; font: 12px sans-serif; padding: 2px 6px; border-radius: 4px; }
+.cell.bad > b { background: #c00; }
 </style>
 </head>
 <body>
 <div id="out"></div>
 <script src="/public/engine/engine.js"></script>
+<script src="/public/engine/objects.js"></script>
 <script src="/public/engine/motion.js"></script>
 <script>
 (async () => {
@@ -33,6 +34,7 @@ body { margin: 0; background: #8a8f99; }
   const sheet = document.createElement("div");
   sheet.className = "sheet";
   sheet.style.setProperty("--cols", q.get("cols") || "2");
+  sheet.style.setProperty("--cw", `${q.get("w") || 960}px`);
   document.getElementById("out").append(sheet);
   const indices = only || deck.slides.map((_, i) => i).slice(from, from + count);
   for (const i of indices) {
