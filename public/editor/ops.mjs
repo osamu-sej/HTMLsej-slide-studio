@@ -457,15 +457,15 @@ export function duplicate(list, ids, offset = 24) {
     if (o.kind !== "line") continue;
     for (const end of ["from", "to"]) if (o[end] && idMap.has(o[end].id)) copies[i][end] = { ...o[end], id: idMap.get(o[end].id) };
   }
-  return { list: [...list, ...copies], ids: copies.map((o) => o.id) };
+  return { list: [...list, ...copies], ids: copies.map((o) => o.id), idMap, groupMap };
 }
 
 /** Objects copied from elsewhere (the clipboard), with new ids, placed at an offset. */
 export function paste(list, objects, offset = 0) {
   const fake = [...objects];
-  const { list: merged, ids } = duplicate(fake, fake.map((o) => o.id), offset);
+  const { list: merged, ids, idMap, groupMap } = duplicate(fake, fake.map((o) => o.id), offset);
   const added = merged.slice(fake.length);
-  return { list: [...list, ...added], ids };
+  return { list: [...list, ...added], ids, idMap, groupMap };
 }
 
 /** Remove objects; connectors that pointed at them stay where they were drawn. */
@@ -551,3 +551,43 @@ export const toCm = (px) => Math.round((px / PX_PER_CM) * 100) / 100;
 export const fromCm = (cm) => round2(Number(cm) * PX_PER_CM);
 export const toPt = (px) => Math.round((px / PX_PER_PT) * 10) / 10;
 export const fromPt = (pt) => round2(Number(pt) * PX_PER_PT);
+
+// ---------------------------------------------------------------- animations (slide.timeline, engine/animate.js)
+
+/**
+ * Keep a slide's animations in step with its objects: animations of deleted objects go, a group's animation
+ * becomes one per former member when the group is undone (the first keeps its start, the rest play with it),
+ * and a trigger that is gone leaves its animations to play on the slide's clicks.
+ */
+export function reconcileTimeline(timeline, before, after) {
+  if (!Array.isArray(timeline) || !timeline.length) return timeline;
+  const ids = new Set(after.map((o) => o.id));
+  const groups = new Set(after.map((o) => o.group).filter(Boolean));
+  const out = [];
+  for (const e of timeline) {
+    if (!e || typeof e.el !== "string") continue;
+    let entries = [e];
+    if (e.el.startsWith("grp:") && !groups.has(e.el.slice(4))) {
+      const members = before.filter((o) => o.group === e.el.slice(4) && ids.has(o.id));
+      entries = members.map((o, i) => ({ ...e, id: i ? `${e.id}-${i}`.slice(0, 32) : e.id, el: o.id, ...(i ? { start: "with", delay: e.delay || 0 } : {}) }));
+    } else if (!e.el.startsWith("@") && !e.el.startsWith("grp:") && !ids.has(e.el)) entries = [];
+    for (const entry of entries) {
+      if (entry.trigger && !ids.has(entry.trigger)) { const { trigger: _, ...rest } = entry; out.push(rest); } else out.push(entry);
+    }
+  }
+  return out;
+}
+
+/** Move animations up or down the list (PowerPoint's 順番を前にする / 後にする). */
+export function moveAnimations(timeline, ids, step) {
+  const list = [...timeline];
+  const set = new Set(ids);
+  const order = step < 0 ? list.map((_, i) => i) : list.map((_, i) => list.length - 1 - i);
+  for (const i of order) {
+    if (!set.has(list[i].id)) continue;
+    const j = i + (step < 0 ? -1 : 1);
+    if (j < 0 || j >= list.length || set.has(list[j].id)) continue;
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list;
+}

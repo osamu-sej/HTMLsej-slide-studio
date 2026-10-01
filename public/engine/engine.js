@@ -1808,7 +1808,9 @@
     // the "which slide is this a deep dive of" line.
     ctx.eyebrow = strip(slide?.subhead || (drillParent != null ? `↳ ${strip(slides[drillParent]?.title || slides[drillParent]?.message || "")}` : chapter && !sej ? `${pad2(chapter.sectionNo || chapterNo)}  ${strip(chapter.title)}` : ""));
 
-    const build = BUILDS.includes(slide?.animation) && slide.animation !== "auto" ? slide.animation : recommendedBuild(type);
+    // Animations put on the layout's own items (animate.js) take over from its click build.
+    const takeover = Boolean(Engine.timelineTakesLayout?.(slide));
+    const build = takeover ? "none" : BUILDS.includes(slide?.animation) && slide.animation !== "auto" ? slide.animation : recommendedBuild(type);
     const root = h("div", {
       class: ["hs-slide", mode === "thumb" || mode === "print" ? "hs-static" : "", mode === "edit" ? "hs-editable" : "", mode === "print" ? "hs-print" : "", live ? "hs-live" : "", motion.numbers !== false ? "hs-numbers" : "", STILL.has(type) ? "hs-stage" : "", drillParent != null ? "hs-drill" : ""],
       "data-theme": theme, "data-type": type, "data-build": build, "data-tone": meta.dark ? "dark" : "light",
@@ -1885,15 +1887,17 @@
         source ? h("span", { class: "hs-source", "data-field": "source" }, `出所：${source}`) : h("span", {}, strip(deck.title || "")),
         h("span", { class: "hs-page" }, drillParent != null ? `${pad2(pageNo)} ・ 深掘り` : `${pad2(pageNo)} / ${pad2(total)}`)));
     }
-    assignGroups(root, build);
+    assignGroups(root, build, { groups: takeover });
     markDetails(root, slide);
     if (drillParent == null) markDrills(root, story.drills[index]);
+    Engine.timelineMount?.(root, slide, ctx);
     return root;
   }
 
   /** Build steps: each list item is one step; parts marked data-step follow the items. */
-  function assignGroups(root, build) {
-    if (build === "none") { root.dataset.steps = "0"; return; }
+  function assignGroups(root, build, { groups = false } = {}) {
+    // Without a build the items still get their numbers when animations point at them ("@g0").
+    if (build === "none" && !groups) { root.dataset.steps = "0"; return; }
     const keys = [];
     const byKey = new Map();
     const bodyEl = root.querySelector(".hs-body") || root.querySelector(".hs-frame");

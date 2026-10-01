@@ -80,7 +80,10 @@
 .hs-obj .hs-obj-icon { position: absolute; inset: 0; width: 100%; height: 100%; }
 .hs-obj-missing { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: #f2f2f2; color: #808080; font-size: 22px; }
 .hs-obj-missing .hs-icon { font-size: 64px; }
-.hs-slide.hs-live .hs-obj[data-action] { pointer-events: auto; cursor: pointer; }
+.hs-slide.hs-live .hs-obj[data-action], .hs-slide.hs-live .hs-obj[data-trigger] { pointer-events: auto; cursor: pointer; }
+/* animations (animate.js): what waits for its entrance is hidden; words and letters animated one by one */
+.hs-anim-hide { visibility: hidden; }
+.hs-u { display: inline-block; white-space: pre; }
 .hs-slide.hs-live .hs-obj-video, .hs-slide.hs-live .hs-obj-lottie { pointer-events: auto; }
 /* an empty title in the editor shows where to type */
 .hs-slide.hs-editable .hs-title[data-placeholder]:empty::before { content: attr(data-placeholder); color: #b3b3b3; font-weight: 400; }

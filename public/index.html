@@ -165,6 +165,7 @@
           <button id="chatTab" class="side-tab" type="button" role="tab" aria-selected="true">✦ AIと話す</button>
           <button id="formTab" class="side-tab" type="button" role="tab" aria-selected="false">編集</button>
           <button id="formatTab" class="side-tab" type="button" role="tab" aria-selected="false" title="選んだ図形・文字・画像の書式と、オブジェクトの一覧">書式</button>
+          <button id="animTab" class="side-tab" type="button" role="tab" aria-selected="false" title="アニメーション ウィンドウ：このスライドのアニメーションの順番・タイミング・効果">アニメーション</button>
         </div>
         <section id="chatPane" class="chat-pane" aria-label="AIとの会話">
           <div class="chat-head">
@@ -191,6 +192,7 @@
         </section>
         <aside id="inspector" class="inspector" aria-label="スライドの編集" hidden></aside>
         <aside id="formatPane" class="format-pane" aria-label="図形の書式" hidden></aside>
+        <aside id="animPane" class="format-pane anim-pane" aria-label="アニメーション ウィンドウ" hidden></aside>
       </div>
     </main>
 
@@ -425,8 +427,17 @@
           <tr><td><kbd>⇧</kbd>+<kbd>⌘</kbd>+<kbd>C</kbd> / <kbd>⇧</kbd>+<kbd>⌘</kbd>+<kbd>V</kbd></td><td>書式のコピー / 書式の貼り付け</td></tr>
           <tr><td><kbd>⌘</kbd>+<kbd>B</kbd> <kbd>I</kbd> <kbd>U</kbd> / <kbd>⇧</kbd>+<kbd>⌘</kbd>+<kbd>&gt;</kbd> <kbd>&lt;</kbd></td><td>太字・斜体・下線 / 文字を大きく・小さく</td></tr>
           <tr><td><kbd>⌘</kbd>+<kbd>L</kbd> <kbd>E</kbd> <kbd>R</kbd> <kbd>J</kbd></td><td>左揃え・中央揃え・右揃え・両端揃え</td></tr>
-          <tr><td>右クリック</td><td>切り取り・コピー・順序・ロック・書式設定・リンクなどのメニュー</td></tr>
+          <tr><td>右クリック</td><td>切り取り・コピー・順序・ロック・書式設定・リンク・アニメーションなどのメニュー</td></tr>
         </table>
+        <h4>アニメーションと画面切り替え</h4>
+        <ul>
+          <li>図形・文字・画像を選び、リボンの「アニメーション」で効果を選びます（開始・強調・終了・アニメーションの軌跡）。もう1つ付けるときは「アニメーションの追加」。方向などは「効果のオプション」、開始（クリック時・直前の動作と同時・直前の動作の後）・継続時間・遅延は右側で</li>
+          <li>右の「アニメーション」タブ（アニメーション ウィンドウ）で、順番をドラッグで入れ替え、タイミングの棒で長さを見比べ、繰り返し・巻き戻し・滑らかさ・トリガー（ほかの図形をクリックしたときに再生）を設定。「選択から」でその場所から再生できます</li>
+          <li>軌跡はスライド上の点をドラッグして形を変えられます（Shift＋終点で全体を回転・拡大）。「ユーザー設定パス」はクリックで点を打ち、ダブルクリックで終わります</li>
+          <li>タイトルや本文の項目にも、アニメーション ウィンドウの「＋ レイアウトの部品」から付けられます</li>
+          <li>「画面切り替え」タブで、このスライドへの切り替え・期間・自動的に切り替え（秒）。「すべてに適用」で全スライドに</li>
+          <li>発表中はクリックごとに次のアニメーションへ。再生中にクリックすると、まずその再生を終わらせます</li>
+        </ul>
         <h4>発表中のショートカット</h4>
         <table class="help-keys">
           <tr><td><kbd>→</kbd> <kbd>Space</kbd> クリック</td><td>次へ（「クリックで順番に」のスライドは1項目ずつ、「不足と打ち手」は打ち手を1つずつオン）</td></tr>
@@ -464,6 +475,7 @@
 
     <script src="/engine/engine.js?v=__APP_VERSION__"></script>
     <script src="/engine/objects.js?v=__APP_VERSION__"></script>
+    <script src="/engine/animate.js?v=__APP_VERSION__"></script>
     <script src="/engine/motion.js?v=__APP_VERSION__"></script>
     <script type="module" src="/app.js?v=__APP_VERSION__"></script>
   </body>

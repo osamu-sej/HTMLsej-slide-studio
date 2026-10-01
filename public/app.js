@@ -524,8 +524,11 @@ function normalizeSlide(raw, index, total) {
   // Objects placed by hand, their animations, and the id that links to this slide point at.
   const objects = E.normalizeObjects(slide.elements);
   if (objects.length) slide.elements = objects; else delete slide.elements;
-  if (Array.isArray(slide.timeline) && slide.timeline.length) slide.timeline = slide.timeline.filter((entry) => entry && typeof entry === "object" && typeof entry.el === "string").slice(0, 400);
-  else delete slide.timeline;
+  const timeline = E.normalizeTimeline(slide.timeline, slide).slice(0, 400);
+  if (timeline.length) slide.timeline = timeline; else delete slide.timeline;
+  // 画面切り替え: how long the way in takes (ms) and moving on by itself after some seconds.
+  if (Number(slide.transitionDur) >= 100 && Number(slide.transitionDur) <= 10000) slide.transitionDur = Math.round(Number(slide.transitionDur)); else delete slide.transitionDur;
+  if (slide.advance != null && Number.isFinite(Number(slide.advance)) && Number(slide.advance) >= 0) slide.advance = Math.min(600, Math.round(Number(slide.advance) * 10) / 10); else delete slide.advance;
   if (!(typeof slide.sid === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(slide.sid))) delete slide.sid;
   if (index === 0 && total > 1 && type !== "title") return { type: "title", title: strip(slide.title) || "無題の資料" };
   return slide;
@@ -703,8 +706,8 @@ function extractUnits(slide) {
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid"]) {
-    if (slide[key] && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
+  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "advance"]) {
+    if (slide[key] != null && slide[key] !== "" && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
   if (type === "statement") next.text = strip(slide.takeaway) ? slide.takeaway : next.text;
@@ -1444,7 +1447,7 @@ const PLACEHOLDERS = new Set([
   "工程", "項目", "補足", "説明", "伝えたいひと言", "写真に重ねて見せる補足の一文", "ポイント", "いちばん伝えたい**ひと言**を大きく",
 ]);
 const FULLWIDTH_NUMBER = /[０-９％．，]/;
-const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula", "elements", "timeline", "sid"]);
+const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula", "elements", "timeline", "sid", "transitionDur", "advance"]);
 
 function textEntries(value, path = [], out = []) {
   if (typeof value === "string") out.push([path, value]);
@@ -1792,6 +1795,14 @@ const editorApp = {
   slide: () => (state.deck ? state.deck.slides[state.selected] ?? null : null),
   index: () => state.selected,
   setObjects,
+  setTimeline,
+  setSlideFields,
+  previewMotion: (opts) => previewMotion(opts),
+  previewTransition: () => previewTransition(),
+  stopPreview: () => stopMotionPreview(),
+  previewing: () => Boolean(state.motionPreview),
+  openAnimationPane: () => setPanel("anim"),
+  panel: () => state.panel,
   renderOptions: () => renderOptions(),
   rerender: () => { if (state.deck && state.mode === "edit" && state.view === "single") renderStage(); },
   toast,
@@ -1817,12 +1828,41 @@ const editorUi = createEditorUi(editor, editorApp);
 // Read-only access for the browser checks (qa/studio-objects.mjs): the deck and the slide on the stage.
 window.__hsej = { deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection };
 
-/** The objects of the slide on the stage changed (one undo step unless told otherwise). */
-function setObjects(list, { undo = true } = {}) {
+/**
+ * The objects of the slide on the stage changed (one undo step unless told otherwise). Their animations follow:
+ * `timeline` replaces them in the same step, and animations of objects that are gone go with them.
+ */
+function setObjects(list, { undo = true, timeline = undefined } = {}) {
   const slide = state.deck?.slides[state.selected];
   if (!slide) return;
   if (undo) pushUndo();
+  const before = slide.elements || [];
   if (list.length) slide.elements = list; else delete slide.elements;
+  const next = ops.reconcileTimeline(timeline !== undefined ? timeline : slide.timeline, before, list);
+  if (next?.length) slide.timeline = next; else delete slide.timeline;
+  markChanged({ structural: true });
+}
+
+/** The animations of the slide on the stage changed (the animation pane and ribbon). */
+function setTimeline(list, { undo = true } = {}) {
+  const slide = state.deck?.slides[state.selected];
+  if (!slide) return;
+  if (undo) pushUndo();
+  const clean = E.normalizeTimeline(list, slide);
+  if (clean.length) slide.timeline = clean; else delete slide.timeline;
+  markChanged({ structural: true });
+}
+
+/** Slide settings set from the ribbon (画面切り替え): one undo step, then the stage and thumbnails redraw. */
+function setSlideFields(patch, { all = false } = {}) {
+  if (!state.deck) return;
+  pushUndo();
+  const targets = all ? state.deck.slides : [state.deck.slides[state.selected]];
+  for (const slide of targets) {
+    for (const [key, value] of Object.entries(patch)) {
+      if (value == null || value === "") delete slide[key]; else slide[key] = value;
+    }
+  }
   markChanged({ structural: true });
 }
 
@@ -2126,7 +2166,12 @@ async function onStageDrop(event) {
 
 // ---- motion preview on the stage (the editor itself stays still)
 
-function previewMotion() {
+/**
+ * Play the slide on the stage as in a presentation (「動きを確認」, the animation tab's 「プレビュー」).
+ * `from`: start at that click step with the earlier ones already done (the animation pane's 「ここから再生」);
+ * `auto: false` waits for clicks instead of playing the clicks by itself.
+ */
+function previewMotion({ from = 0, auto = true, brief = false } = {}) {
   if (!state.deck || state.view !== "single") { setView("single"); }
   const wrap = document.querySelector("#stageBody .slide-wrap");
   if (!wrap) return;
@@ -2137,28 +2182,61 @@ function previewMotion() {
   const el = E.render(slide, renderOptions({ index, mode: "present", fit: fitFor(index) ?? undefined }));
   const scaler = E.mount(el);
   const steps = () => E.stepsOf(el);
-  let step = 0;
+  let step = Math.max(0, Math.min(from, steps()));
   const count = h("span", {});
   const updateCount = () => { count.textContent = steps() ? `クリックで次へ（${step}/${steps()}）` : "マウスを乗せる・クリックで詳細"; };
   const banner = h("div", { class: "motion-banner" }, "▶ 動きを確認中", count,
-    h("button", { class: "btn", type: "button", onclick: (event) => { event.stopPropagation(); previewMotion(); } }, "もう一度"),
+    h("button", { class: "btn", type: "button", onclick: (event) => { event.stopPropagation(); previewMotion({ auto }); } }, "もう一度"),
     h("button", { class: "btn", type: "button", onclick: (event) => { event.stopPropagation(); stopMotionPreview(); } }, "編集に戻る"));
   wrap.replaceChildren(scaler, banner);
-  E.play(el, { step: 0 });
+  // Starting later, what comes before is already done; the step itself then plays.
+  let first = 0;
+  if (step > 0) { E.play(el, { step: step - 1, animate: false }); first = E.reveal(el, step) || 0; } else first = E.play(el, { step: 0 }) || 0;
   const act = E.activate(el, { details: slide.details || [] });
   E.playMedia(el);
+  // A click while animations still play finishes them first, as in a presentation. Returns the next step's length.
   const advance = () => {
-    if (act.detailOpen) return;
-    if (step < steps()) { step += 1; E.reveal(el, step); updateCount(); }
+    if (act.detailOpen) return 0;
+    if (E.animBusy?.(el)) { E.animFinish(el); return 0; }
+    if (step < steps()) { step += 1; const ms = E.reveal(el, step) || 0; updateCount(); return ms; }
+    return 0;
   };
   scaler.addEventListener("click", advance);
   updateCount();
-  state.motionPreview = { el, act, advance };
-  // Click builds play themselves once, so the whole sequence can be seen without clicking.
-  if (steps()) {
-    const auto = () => { if (state.motionPreview?.el !== el) return; if (step < steps()) { advance(); state.motionPreview.timer = setTimeout(auto, 900); } };
-    state.motionPreview.timer = setTimeout(auto, 1100);
+  state.motionPreview = { el, act, advance, brief };
+  // Click steps play themselves once (each after the one before has finished), so the whole sequence can be
+  // seen without clicking.
+  if (steps() && auto) {
+    const next = () => {
+      if (state.motionPreview?.el !== el) return;
+      if (E.animBusy?.(el)) { state.motionPreview.timer = setTimeout(next, 150); return; }
+      if (step < steps()) { advance(); state.motionPreview.timer = setTimeout(next, 700); }
+    };
+    state.motionPreview.timer = setTimeout(next, Math.max(1100, first + 500));
   }
+}
+
+/** The 画面切り替え tab's 「プレビュー」: the slide before gives way to this one, with this slide's transition. */
+async function previewTransition() {
+  if (!state.deck) return;
+  if (state.view !== "single") setView("single");
+  const wrap = document.querySelector("#stageBody .slide-wrap");
+  if (!wrap) return;
+  if (state.inline) finishInlineEdit(true);
+  stopMotionPreview({ render: false });
+  const index = state.selected;
+  const slide = state.deck.slides[index];
+  const type = TRANSITIONS.includes(slide.transition) ? slide.transition : state.deck.transition || "fade";
+  const before = index > 0 ? index - 1 : index;
+  const from = E.render(state.deck.slides[before], renderOptions({ index: before, mode: "thumb", fit: fitFor(before) ?? undefined }));
+  const to = E.render(slide, renderOptions({ index, mode: "present", fit: fitFor(index) ?? undefined }));
+  const host = h("div", { class: "hs-player-stage transition-preview" });
+  wrap.replaceChildren(host);
+  state.motionPreview = { el: to, act: null, advance: () => 0, transition: true };
+  await E.transitionPreview(host, from, to, type, { dur: slide.transitionDur });
+  if (state.motionPreview?.el !== to) return;
+  E.play(to, { step: 0 });
+  state.motionPreview.timer = setTimeout(() => { if (state.motionPreview?.el === to) stopMotionPreview(); }, 1600);
 }
 
 function stopMotionPreview({ render = true } = {}) {
@@ -3482,7 +3560,7 @@ function restoreImages(slides, previous) {
     if (source?.imagePlacement && slide.customImage === source.customImage && !slide.imagePlacement) slide.imagePlacement = source.imagePlacement;
     // What people placed by hand stays: a 白紙 page comes back as it was, objects stay with their slide.
     if (source?.type === "blank") { slides[index] = clone(source); return; }
-    for (const key of ["elements", "timeline", "sid"]) if (source?.[key] && slide[key] == null) slide[key] = clone(source[key]);
+    for (const key of ["elements", "timeline", "sid", "transitionDur", "advance"]) if (source?.[key] != null && slide[key] == null) slide[key] = clone(source[key]);
   });
   // A slide with objects that found no place in the new deck is kept (before the close), so no work is lost.
   const placed = new Set(slides.flatMap((slide) => (slide.elements || []).map((o) => o.id)));
@@ -3654,10 +3732,15 @@ function setPanel(panel) {
   $("chatPane").hidden = panel !== "chat";
   $("inspector").hidden = panel !== "form";
   $("formatPane").hidden = panel !== "format";
+  $("animPane").hidden = panel !== "anim";
+  $("animTab").setAttribute("aria-selected", String(panel === "anim"));
   $("chatTab").setAttribute("aria-selected", String(panel === "chat"));
   $("formTab").setAttribute("aria-selected", String(panel === "form"));
   $("formatTab").setAttribute("aria-selected", String(panel === "format"));
   if (panel === "format") editorUi.renderPane();
+  if (panel === "anim") editorUi.renderAnimPane();
+  // The animation order marks on the stage show while the animation pane is open.
+  editor.draw();
   try { localStorage.setItem(STORAGE.panel, panel); } catch { /* optional */ }
   if (panel === "chat") { renderChatContext(); scrollChat(); }
 }
@@ -4113,7 +4196,7 @@ function chooseVariant(id, variant) {
   saveVersion("別案を採用する前");
   const original = state.deck.slides[set.index];
   const chosen = clone(variant.slide);
-  for (const key of ["elements", "timeline", "sid"]) if (original?.[key] && chosen[key] == null) chosen[key] = clone(original[key]);
+  for (const key of ["elements", "timeline", "sid", "transitionDur", "advance"]) if (original?.[key] != null && chosen[key] == null) chosen[key] = clone(original[key]);
   replaceSlide(set.index, chosen);
   message.variants.status = "chosen";
   message.variants.chosen = variant.label;
@@ -4456,14 +4539,15 @@ async function fetchText(url) {
 }
 
 async function engineBundle() {
-  const [css, engine, objects, motion] = await Promise.all([
+  const [css, engine, objects, animate, motion] = await Promise.all([
     fetchText(`/engine/engine.css?v=${APP_VERSION}`),
     fetchText(`/engine/engine.js?v=${APP_VERSION}`),
     fetchText(`/engine/objects.js?v=${APP_VERSION}`),
+    fetchText(`/engine/animate.js?v=${APP_VERSION}`),
     fetchText(`/engine/motion.js?v=${APP_VERSION}`),
   ]);
   const js = (text) => text.replace(/<\/script/gi, "<\\/script");
-  return { css: css.replace(/<\/style/gi, "<\\/style"), engine: js(engine), objects: js(objects), motion: js(motion) };
+  return { css: css.replace(/<\/style/gi, "<\\/style"), engine: js(engine), objects: js(objects), animate: js(animate), motion: js(motion) };
 }
 
 /** The deck with every photo and video it uses written into it, so the file works anywhere. */
@@ -4529,6 +4613,7 @@ ${fonts ? `<link rel="stylesheet" href="${esc(fonts)}" data-hs-fonts>` : ""}
 ${body}
 <script>${bundle.engine}</script>
 <script>${bundle.objects}</script>
+<script>${bundle.animate}</script>
 <script>${bundle.motion}</script>
 ${lottie ? `<script>${lottie}</script>` : ""}
 <script type="application/json" id="hs-data">${safeJson(data)}</script>
@@ -4963,6 +5048,7 @@ function bind() {
   $("chatTab").addEventListener("click", () => setPanel("chat"));
   $("formTab").addEventListener("click", () => setPanel("form"));
   $("formatTab").addEventListener("click", () => setPanel("format"));
+  $("animTab").addEventListener("click", () => setPanel("anim"));
   // The clipboard: objects, pictures and text go onto the slide; copying objects copies them.
   document.addEventListener("copy", (event) => editor.onCopy(event));
   document.addEventListener("cut", (event) => editor.onCopy(event, true));
@@ -5076,8 +5162,19 @@ function bind() {
   document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); }));
   $("sampleChips").append(...SAMPLES.map((sample) => h("button", { class: "chip", type: "button", onclick: () => { applyForm({ brief: sample.brief, audience: sample.audience, purpose: sample.purpose, slideCount: sample.slideCount, density: sample.density, tone: sample.tone }); saveCurrent(); } }, sample.label)));
 
+  // A brief preview (an effect just chosen) gives way to whatever the person does next, as in PowerPoint.
+  // A click on the slide itself only ends it; a click elsewhere (the film strip, the ribbon) also does its own job,
+  // so the page is not redrawn under the pointer before that click lands.
+  document.addEventListener("pointerdown", (event) => {
+    if (!state.motionPreview?.brief || event.target.closest?.(".motion-banner")) return;
+    const onStage = event.target.closest?.("#stageBody .slide-wrap");
+    stopMotionPreview({ render: false });
+    if (onStage) { event.preventDefault(); event.stopPropagation(); }
+    requestAnimationFrame(() => { if (!state.motionPreview) renderStage(); });
+  }, true);
   document.addEventListener("keydown", (event) => {
     if (state.player) return; // the player has its own keys
+    if (state.motionPreview?.brief && !["Shift", "Control", "Meta", "Alt"].includes(event.key)) stopMotionPreview();
     if (state.motionPreview && event.key === "Escape") { stopMotionPreview(); return; }
     if (state.motionPreview && ["ArrowRight", " ", "Enter"].includes(event.key) && !document.querySelector("dialog[open]")) { event.preventDefault(); state.motionPreview.advance(); return; }
     if (editor.keydown(event)) return;
@@ -5153,7 +5250,7 @@ window.addEventListener("error", (event) => reportClientError(event.message, `${
 window.addEventListener("unhandledrejection", (event) => reportClientError(String(event.reason?.message ?? event.reason), "promise"));
 
 bind();
-try { const saved = localStorage.getItem(STORAGE.panel); setPanel(["form", "format"].includes(saved) ? saved : "chat"); } catch { setPanel("chat"); }
+try { const saved = localStorage.getItem(STORAGE.panel); setPanel(["form", "format", "anim"].includes(saved) ? saved : "chat"); } catch { setPanel("chat"); }
 updateBriefCount();
 restore();
 updateTopbar();

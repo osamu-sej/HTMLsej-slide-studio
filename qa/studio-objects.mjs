@@ -65,7 +65,7 @@ await step("a blank slide from the ribbon (白紙)", async () => {
   await page.waitForSelector(".film-item");
   await page.waitForSelector("#ribbon:not([hidden]) .rb-tabs");
   const tabs = await page.$$eval(".rb-tabs [role=tab]", (els) => els.map((el) => el.textContent));
-  assert(tabs.join() === "ホーム,挿入,表示", `tabs: ${tabs}`);
+  assert(tabs.join() === "ホーム,挿入,画面切り替え,アニメーション,表示", `tabs: ${tabs}`);
   await ribbon("新しいスライド");
   await menuItem("白紙");
   await page.waitForTimeout(400);
