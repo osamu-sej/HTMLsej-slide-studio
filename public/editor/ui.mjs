@@ -4,6 +4,7 @@
 
 import * as ops from "./ops.mjs";
 import { ico } from "./icons.mjs";
+import { createAnimations } from "./anim.mjs";
 
 const SIZES_PT = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const LINE_WIDTHS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 8, 12];
@@ -257,12 +258,15 @@ export function createEditorUi(editor, app) {
 
   // ---------------------------------------------------------------- the ribbon
 
+  // PowerPoint's order: the tabs that are always there, then the ones the selection brings (図形の書式・図の形式).
   const TABS = [
     { id: "home", label: "ホーム" },
     { id: "insert", label: "挿入" },
+    { id: "transition", label: "画面切り替え" },
+    { id: "animation", label: "アニメーション" },
+    { id: "view", label: "表示" },
     { id: "shape", label: "図形の書式", contextual: () => hasShape() },
     { id: "picture", label: "図の形式", contextual: () => hasImage() },
-    { id: "view", label: "表示" },
   ];
 
   function signature() {
@@ -282,7 +286,7 @@ export function createEditorUi(editor, app) {
     built = sig;
     updaters = [];
     const head = h("div", { class: "rb-tabs", role: "tablist" },
-      tabs.map((t) => h("button", { type: "button", role: "tab", class: t.contextual ? "contextual" : "", "aria-selected": String(t.id === tab), onclick: () => { tab = t.id; collapsed = false; renderRibbon(true); }, ondblclick: () => { collapsed = !collapsed; renderRibbon(true); } }, t.label)),
+      tabs.map((t) => h("button", { type: "button", role: "tab", class: t.contextual ? "contextual" : "", "aria-selected": String(t.id === tab), onclick: () => { tab = t.id; collapsed = false; renderRibbon(true); editor.draw(); }, ondblclick: () => { collapsed = !collapsed; renderRibbon(true); } }, t.label)),
       h("span", { class: "rb-spacer" }),
       h("span", { class: "rb-hint" }, editor.tool ? "描画中（Escでやめる）" : editor.painter ? "書式を貼り付ける図形をクリック（Esc）" : ""),
       h("button", { type: "button", class: "rb-collapse", title: collapsed ? "リボンを表示" : "リボンを折りたたむ", onclick: () => { collapsed = !collapsed; renderRibbon(true); } }, collapsed ? "▾" : "▴"));
@@ -595,7 +599,7 @@ export function createEditorUi(editor, app) {
   }
 
   function buildTab(id) {
-    return { home: homeTab, insert: insertTab, shape: shapeTab, picture: pictureTab, view: viewTab }[id]();
+    return { home: homeTab, insert: insertTab, transition: anim.transitionTab, animation: anim.animationTab, shape: shapeTab, picture: pictureTab, view: viewTab }[id]();
   }
 
   function showTab(id) {
@@ -811,7 +815,10 @@ export function createEditorUi(editor, app) {
     return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", lottie: "lottie" }[o.kind] || "shapes", 16);
   }
 
+  // アニメーション・画面切り替え (anim.mjs) build their tabs and the animation pane with these same parts.
+  const anim = createAnimations(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), tabNow: () => tab, refreshRibbon: () => refresh() });
+
   editor.subscribe(() => { renderRibbon(); renderPane(); });
 
-  return { renderRibbon, renderPane, showTab, closePop, openPop, shapeGallery, iconGallery, photoGallery, get tab() { return tab; } };
+  return { renderRibbon, renderPane, renderAnimPane: () => anim.renderPane(), showTab, closePop, openPop, shapeGallery, iconGallery, photoGallery, get tab() { return tab; } };
 }

@@ -125,6 +125,7 @@ function loadStatic() {
   for (const name of readdirSync(join(PUBLIC, "editor")).filter((n) => /^[a-z0-9-]+\.mjs$/.test(n))) add(`/editor/${name}`, readFileSync(join(PUBLIC, "editor", name), "utf8"), TYPES[".js"]);
   add("/engine/engine.js", readFileSync(join(PUBLIC, "engine", "engine.js"), "utf8").replace("/*__ICONS__*/{}", () => icons).replace("/*__SEJ__*/{}", () => sejArt), TYPES[".js"]);
   add("/engine/objects.js", readFileSync(join(PUBLIC, "engine", "objects.js"), "utf8"), TYPES[".js"]);
+  add("/engine/animate.js", readFileSync(join(PUBLIC, "engine", "animate.js"), "utf8"), TYPES[".js"]);
   add("/engine/motion.js", readFileSync(join(PUBLIC, "engine", "motion.js"), "utf8"), TYPES[".js"]);
   add("/engine/engine.css", readFileSync(join(PUBLIC, "engine", "engine.css"), "utf8"), TYPES[".css"]);
   for (const name of readdirSync(join(PUBLIC, "assets")).filter((n) => /^[a-z0-9-]+\.jpg$/.test(n))) add(`/assets/${name}`, readFileSync(join(PUBLIC, "assets", name)), TYPES[".jpg"]);

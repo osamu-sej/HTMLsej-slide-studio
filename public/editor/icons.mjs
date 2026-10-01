@@ -89,6 +89,22 @@ const P = {
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
+  starPlus: '<path d="m10 4 2.1 4.4 4.8.7-3.5 3.4.8 4.8-4.2-2.3-4.3 2.3.8-4.8L3.1 9.1l4.8-.7z"/><path d="M19 14v6M16 17h6"/>',
+  motionPath: '<circle cx="5" cy="18" r="2" fill="currentColor"/><path d="M7 17c4-1 3-9 8-10s4 5 5 5" stroke-dasharray="2.5 2"/><path d="m17.5 9.5 2.8 2.6 1.4-3.6"/>',
+  media: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z" fill="currentColor"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  mouse: '<path d="M6 3.5 18 12l-5.3 1.3 3.1 6.2-2.4 1.1-3-6.3L6 18.2z"/>',
+  bolt: '<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
+  animPane: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M7 9h3M7 13h3M7 17h3M12 9h6M12 13h4M12 17h5"/>',
+  effectOpts: '<path d="m10 4 1.8 3.8 4.2.6-3 2.9.7 4.1L10 13.4 6.3 15.4l.7-4.1-3-2.9 4.2-.6z"/><path d="M15 18h6M18 15v6" />',
+  previewPlay: '<circle cx="12" cy="12" r="9"/><path d="m10 8.5 5.5 3.5-5.5 3.5z" fill="currentColor"/>',
+  transition: '<rect x="2.5" y="6" width="12" height="9" rx="1"/><rect x="9.5" y="9" width="12" height="9" rx="1" fill="currentColor" fill-opacity=".2"/><path d="M12 3.5h3.5V6"/>',
+  applyAll: '<rect x="3" y="3" width="8" height="6" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="11" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="6" rx="1"/><path d="M8 21h8"/>',
+  pen: '<path d="M4 20 15.5 8.5l-4-4L4 16z"/><path d="m11.5 4.5 2-2 4 4-2 2"/>',
 };
 
 export function ico(name, size = 18) {

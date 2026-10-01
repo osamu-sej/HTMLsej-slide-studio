@@ -92,6 +92,9 @@ const shared = {
   elements: z.array(objectSchema).max(300).optional(),
   timeline: z.array(timelineEntrySchema).max(400).optional(),
   sid: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).optional(),
+  // 画面切り替え set by hand: the way in's length (ms) and moving on by itself after some seconds.
+  transitionDur: z.number().min(100).max(10000).optional(),
+  advance: z.number().min(0).max(600).optional(),
 };
 export const titledShape = {
   title: z.string().min(1).max(90),
@@ -283,7 +286,7 @@ export const chatResultSchema = z.object({
 });
 
 // Fields only people set (uploaded photos and videos, hand placement) are hidden from the AI's output schema.
-const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid"]);
+const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "advance"]);
 function withoutUserFields(node) {
   if (Array.isArray(node)) return node.map(withoutUserFields);
   if (!node || typeof node !== "object") return node;

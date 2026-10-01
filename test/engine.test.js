@@ -16,11 +16,13 @@ async function loadEngine() {
   const icons = (await readFile(join(root, "public", "engine", "icons.json"), "utf8")).trim();
   const engine = (await readFile(join(root, "public", "engine", "engine.js"), "utf8")).replace("/*__ICONS__*/{}", () => icons);
   const objects = await readFile(join(root, "public", "engine", "objects.js"), "utf8");
+  const animate = await readFile(join(root, "public", "engine", "animate.js"), "utf8");
   const motion = await readFile(join(root, "public", "engine", "motion.js"), "utf8");
   const context = vm.createContext(window);
   window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
   vm.runInContext(engine, context, { filename: "engine.js" });
   vm.runInContext(objects, context, { filename: "objects.js" });
+  vm.runInContext(animate, context, { filename: "animate.js" });
   vm.runInContext(motion, context, { filename: "motion.js" });
   return { E: window.SlideEngine, window };
 }

@@ -195,26 +195,36 @@
 
   // ---------------------------------------------------------------- entrance & builds
 
+  // Click steps: the layout's own build first (data-lsteps of them), then one per group of the slide's
+  // animations (animate.js). data-steps counts both.
   const stepsOf = (slide) => Number(slide.dataset.steps || 0);
+  const layoutSteps = (slide) => Number(slide.dataset.lsteps ?? slide.dataset.steps ?? 0);
 
-  /** Start a slide's entrance. With a click build, `step` groups are already shown (going back shows all). */
-  function play(slide, { step = 0, animate = true } = {}) {
+  /**
+   * Start a slide's entrance. With a click build, `step` groups are already shown (going back shows all).
+   * Returns how long the slide's first animations take (ms), for a preview that waits for them.
+   */
+  function play(slide, { step = 0, animate = true, delay = 0 } = {}) {
     slide.classList.remove("hs-play");
-    const toggling = measuresBuild(slide, step);
+    const lsteps = layoutSteps(slide);
+    const lstep = Math.min(step, lsteps);
+    const toggling = measuresBuild(slide, lstep);
     const click = slide.dataset.build === "click" && !toggling;
     for (const el of slide.querySelectorAll("[data-g]")) {
       el.classList.remove("hs-in");
-      el.classList.toggle("hs-hidden", click && Number(el.dataset.g) >= step);
+      el.classList.toggle("hs-hidden", click && Number(el.dataset.g) >= lstep);
     }
-    spotlight(slide, step);
-    if (!animate || reduced()) return;
+    spotlight(slide, lstep);
+    const timed = E.animStart?.(slide, Math.max(0, step - lsteps), { animate: animate && !reduced(), delay }) || 0;
+    if (!animate || reduced()) return timed;
     kinetic(slide);
     void slide.offsetWidth;
     slide.classList.add("hs-play");
     if (click) {
       countWithin(slide.querySelector(".hs-head") || slide, 300);
-      for (const el of slide.querySelectorAll("[data-g]")) if (Number(el.dataset.g) < step) countWithin(el, 0);
+      for (const el of slide.querySelectorAll("[data-g]")) if (Number(el.dataset.g) < lstep) countWithin(el, 0);
     } else countWithin(slide);
+    return timed;
   }
 
   /** A spotlight build keeps everything on screen and puts group `step - 1` in focus (0: nothing in focus). */
@@ -241,17 +251,20 @@
     return true;
   }
 
-  /** Show the next click step (1-based: step 1 shows group 0). */
+  /** Show the next click step (1-based: step 1 shows group 0). Returns how long its animations take (ms). */
   function reveal(slide, step) {
-    if (measuresBuild(slide, step, { exact: false })) return;
+    const lsteps = layoutSteps(slide);
+    if (step > lsteps) return E.animStep?.(slide, step - lsteps, { animate: !reduced() }) || 0;
+    if (measuresBuild(slide, step, { exact: false })) return 0;
     // In a spotlight build the item in focus counts its figure up again.
-    if (spotlight(slide, step)) { for (const el of slide.querySelectorAll(".hs-spot")) countWithin(el, 120); return; }
+    if (spotlight(slide, step)) { for (const el of slide.querySelectorAll(".hs-spot")) countWithin(el, 120); return 0; }
     for (const el of slide.querySelectorAll(`[data-g="${step - 1}"]`)) {
       el.classList.remove("hs-hidden", "hs-in");
       void el.getBoundingClientRect();
       if (!reduced()) el.classList.add("hs-in");
       countWithin(el, 120);
     }
+    return 0;
   }
 
   // ---------------------------------------------------------------- Lottie (motion graphics made in After Effects, LottieFiles…)
@@ -337,6 +350,7 @@
   }
 
   function stopMedia(slide) {
+    E.animStop?.(slide);
     for (const video of slide.querySelectorAll("video")) { try { video.pause(); } catch { /* detached */ } }
     for (const frame of slide.querySelectorAll("iframe")) frame.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
     stopLottie(slide);
@@ -613,6 +627,7 @@
     let back = null;
     let hinted = false;
     let demoRun = null;
+    let autoTimer = null;
     const still = Boolean(opts.static);
     const started = Date.now();
 
@@ -664,8 +679,27 @@
       pick(".hs-foot", "hs-foot");
     }
 
+    /**
+     * 「自動的に切り替え」: after the slide's seconds, the clicks it still has play one after another (each
+     * waiting for its animations), then the talk moves on.
+     */
+    function scheduleAdvance(slideEl, i) {
+      clearTimeout(autoTimer);
+      const secs = Number(slides[i]?.advance);
+      if (slides[i]?.advance == null || !Number.isFinite(secs) || secs < 0 || still) return;
+      const tick = () => {
+        if (current?.firstElementChild !== slideEl || demoRun) return;
+        if (E.animBusy?.(slideEl)) { autoTimer = setTimeout(tick, 200); return; }
+        const more = step < stepsOf(slideEl);
+        next();
+        if (more) autoTimer = setTimeout(tick, 400);
+      };
+      autoTimer = setTimeout(tick, secs * 1000);
+    }
+
     async function show(i, { dir = 1, fullStep = false, atStep = null, via = null, at = null } = {}) {
       if (busy) await busy;
+      clearTimeout(autoTimer);
       const prevScaler = current;
       const prevSlide = prevScaler?.firstElementChild;
       if (prevSlide) { interaction?.destroy(); stopMedia(prevSlide); }
@@ -677,13 +711,19 @@
       // A slide may have its own way in; going back plays the way in of the slide being left, in reverse.
       const own = slides[dir < 0 ? from : i]?.transition;
       const type = still || reduced() || !prevScaler ? "none" : via || (TRANSITIONS.has(own) ? own : transition);
+      // A slide may set how long its transition takes (画面切り替えの「期間」).
+      const ownDur = Number(slides[dir < 0 ? from : i]?.transitionDur);
+      const trMs = !via && ownDur >= 100 && ownDur <= 10000 ? ownDur : null;
       // A deep-dive page grows out of the item that opened it, and shrinks back into it.
       if (type === "drill" && at) for (const el of [next, prevScaler]) { el.style.setProperty("--ox", `${at.x}px`); el.style.setProperty("--oy", `${at.y}px`); }
       const enter = () => {
         // Coming back from a deep-dive page, the slide is shown as it was left, without its entrance again.
-        play(slide, { step, animate: atStep == null && !still });
+        // Animations that start with the slide wait for its way in (as in PowerPoint).
+        const wayIn = type === "none" || type === "morph" ? 0 : Math.round((trMs ?? TRANSITION_MS[type] ?? 620) * 0.85);
+        play(slide, { step, animate: atStep == null && !still, delay: wayIn });
         interaction = activate(slide, { details: slides[i]?.details || [], onDrill: back ? null : (to, el) => openDrill(to, el) });
         playMedia(slide, { sound: gesture });
+        scheduleAdvance(slide, i);
         if (still) return;
         // The first slide with clickable items says how to use them (once per presentation), and every page
         // rings what can be clicked once, right after it has arrived.
@@ -735,8 +775,9 @@
         origin = null;
         entering.className += ` hs-tr-in-${type}${suffix}`;
         prevScaler.className += ` hs-tr-out-${type}${suffix}`;
+        if (trMs) for (const el of [entering, prevScaler, band].filter(Boolean)) el.style.animationDuration = `${trMs}ms`;
         enter();
-        busy = new Promise((resolve) => setTimeout(resolve, TRANSITION_MS[type] ?? 620)).then(() => {
+        busy = new Promise((resolve) => setTimeout(resolve, trMs ? trMs + 40 : TRANSITION_MS[type] ?? 620)).then(() => {
           prevScaler.remove();
           band?.remove();
           entering.classList.remove(`hs-tr-in-${type}`, "rev");
@@ -750,6 +791,8 @@
       if (!black.hidden) { black.hidden = true; return; }
       if (interaction?.detailOpen) { interaction.closeDetail(); return; }
       const slide = current?.firstElementChild;
+      // A click while animations still play finishes them first (as PowerPoint does).
+      if (slide && E.animBusy?.(slide)) { E.animFinish(slide); return; }
       if (slide && step < stepsOf(slide)) {
         step += 1;
         reveal(slide, step);
@@ -943,6 +986,8 @@
           let slide = slideNow();
           // Steps: items that appear (or measures that switch on) one per click.
           while (slide && step < stepsOf(slide)) {
+            // Animations still playing are left to finish.
+            for (let n = 0; n < 40 && E.animBusy?.(slide); n += 1) await wait(150);
             const target = slide.querySelector(`[data-measure="${step}"]`) || [...slide.querySelectorAll(`[data-g="${step}"]`)].find((el) => el.getBoundingClientRect().width);
             if (target) await tap(target, () => next()); else next();
             await wait(900);
@@ -1074,6 +1119,7 @@
 
     function destroy() {
       if (demoRun) demoRun.stopped = true;
+      clearTimeout(autoTimer);
       doc.removeEventListener("keydown", onKey);
       interaction?.destroy();
       if (current?.firstElementChild) stopMedia(current.firstElementChild);
@@ -1093,6 +1139,36 @@
     };
   }
 
+  /**
+   * Play one slide transition in a box (the studio's 画面切り替え「プレビュー」): `from` gives way to `to`, as the
+   * player would show it. Resolves when it is over.
+   */
+  function transitionPreview(host, fromEl, toEl, type, { dur = null } = {}) {
+    const kind = TRANSITIONS.has(type) && type !== "morph" ? type : type === "morph" ? "fade" : "none";
+    host.replaceChildren();
+    const prev = E.mount(fromEl, { contain: true, className: "hs-player-slide" });
+    const next = E.mount(toEl, { contain: true, className: "hs-player-slide" });
+    host.append(prev);
+    E.scale(prev);
+    if (kind === "none") { prev.remove(); host.append(next); E.scale(next); return Promise.resolve(); }
+    host.append(next);
+    E.scale(next);
+    const entering = CLIPPED.has(kind) ? toEl : next;
+    let band = null;
+    if (kind === "wipe") {
+      const tone = getComputedStyle(toEl);
+      band = h("div", { class: "hs-tr-band" });
+      band.style.setProperty("--band", tone.getPropertyValue("--accent").trim() || "#2451e6");
+      band.style.setProperty("--band2", tone.getPropertyValue("--accent2").trim() || "#13a89e");
+      toEl.append(band);
+    }
+    entering.className += ` hs-tr-in-${kind}`;
+    prev.className += ` hs-tr-out-${kind}`;
+    const ms = dur >= 100 ? dur : TRANSITION_MS[kind] ?? 620;
+    if (dur >= 100) for (const el of [entering, prev, band].filter(Boolean)) el.style.animationDuration = `${dur}ms`;
+    return new Promise((resolve) => setTimeout(() => { prev.remove(); band?.remove(); entering.classList.remove(`hs-tr-in-${kind}`); resolve(); }, ms + 40));
+  }
+
   const PV_CSS = `
 html,body{margin:0;height:100%;background:#0d1017;color:#e8ecf4;font-family:"Noto Sans JP","Hiragino Sans",sans-serif}
 .pv{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);grid-template-rows:minmax(0,1fr) minmax(140px,34%);gap:14px;height:100%;padding:14px;box-sizing:border-box}
@@ -1104,5 +1180,8 @@ html,body{margin:0;height:100%;background:#0d1017;color:#e8ecf4;font-family:"Not
 .pv-notes{grid-row:2;grid-column:1/-1;overflow:auto;padding:16px 20px;border-radius:10px;background:#161b26;font-size:22px;line-height:1.75;white-space:pre-wrap}
 .pv .hs-slide{position:absolute;top:0;left:0}`;
 
-  Object.assign(E, { play, reveal, stepsOf, countUp, activate, playMedia, stopMedia, mountLottie, stopLottie, splitKinetic, createPlayer, engineCss });
+  /** How long a transition takes when the slide does not say (ms). */
+  const transitionMs = (type) => (type === "none" ? 0 : TRANSITION_MS[type] ?? 620);
+
+  Object.assign(E, { play, reveal, stepsOf, countUp, activate, playMedia, stopMedia, mountLottie, stopLottie, splitKinetic, createPlayer, engineCss, transitionPreview, transitionMs });
 })(typeof window !== "undefined" ? window : globalThis);

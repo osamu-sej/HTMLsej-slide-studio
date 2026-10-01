@@ -20,7 +20,7 @@ export function createCanvas(app) {
     sel: [], slideIndex: -1, entered: null, typing: null, tool: null, drag: null,
     wrap: null, slideEl: null, layer: null, painter: null, clipboard: null, pasteCount: 0, suppressClick: false,
     zoom: stored("zoom", "fit"), grid: stored("grid", false), snapGrid: stored("snapGrid", false), smart: stored("smart", true), guides: stored("guides", true),
-    menu: null, range: null,
+    menu: null, range: null, picker: null,
   };
   const subs = new Set();
   const emit = () => { for (const fn of subs) { try { fn(); } catch (error) { console.error(error); } } };
@@ -34,11 +34,13 @@ export function createCanvas(app) {
   const visible = (list = objects()) => list.filter((o) => !o.hidden);
   const ends = (list) => (o) => E.lineEnds(o, list);
 
-  function commit(next, { select = null, undo = true } = {}) {
+  // `timeline` replaces the slide's animations in the same undo step (copies of animated objects bring theirs).
+  function commit(next, { select = null, undo = true, timeline = undefined } = {}) {
     if (select) ed.sel = [...select];
-    app.setObjects(next.map((o) => E.normalizeObject(o) || o).filter(Boolean), { undo });
+    app.setObjects(next.map((o) => E.normalizeObject(o) || o).filter(Boolean), { undo, timeline });
     emit();
   }
+  const timeline = () => (Array.isArray(slide()?.timeline) ? slide().timeline : []);
   function change(fn, opts) {
     const list = objects();
     const next = fn(list);
@@ -164,6 +166,15 @@ export function createCanvas(app) {
     if (extra) layer.append(...extra);
   }
   const overlays = new Set();
+  const handles = new Map();
+  // "Click an object" mode (the animation painter, a trigger): the next object clicked is handed over.
+  function pick(fn, hint) {
+    ed.picker = fn ? { fn, hint } : null;
+    wrapClass();
+    if (fn && hint) app.toast(hint);
+    emit();
+  }
+  function wrapClass() { ed.wrap?.classList.toggle("ed-picking", Boolean(ed.picker)); }
 
   function outline(o, list, k, { quiet = false, typing = false } = {}) {
     if (o.kind === "line") {
@@ -276,6 +287,9 @@ export function createCanvas(app) {
     if (ed.typing && event.target.closest(".ed-typing-tx")) return;
     if (ed.typing) stopTyping(true);
     if (ed.tool) { start(event, { type: "draw", tool: ed.tool, from: p, list }); return; }
+    // Handles drawn by others on the overlay (a motion path's points) drag themselves.
+    const external = handle && [...handles.entries()].find(([prefix]) => handle.startsWith(prefix));
+    if (external) { event.preventDefault(); external[1](event, handle, p); return; }
     if (handle) { start(event, { type: handle === "rotate" ? "rotate" : handle.startsWith("adj") ? "adjust" : handle.startsWith("end") ? "end" : "resize", handle, from: p, list }); return; }
     const hit = hitObject(event, list);
     if (hit) {
@@ -284,6 +298,7 @@ export function createCanvas(app) {
       if (ed.entered && hit.group !== ed.entered) ed.entered = null;
       const ids = hit.group && ed.entered !== hit.group ? ops.withGroups(list, [hit.id]) : [hit.id];
       if (ed.painter) { pasteFormat([hit.id]); event.preventDefault(); return; }
+      if (ed.picker) { const fn = ed.picker.fn; ed.picker = null; wrapClass(); fn(hit.id, ids); event.preventDefault(); emit(); return; }
       if (additive) {
         const on = ids.every((id) => ed.sel.includes(id));
         ed.sel = on ? ed.sel.filter((id) => !ids.includes(id)) : [...new Set([...ed.sel, ...ids])];
@@ -778,6 +793,7 @@ export function createCanvas(app) {
       if (ed.menu) { closeMenu(); return true; }
       if (ed.tool) { setTool(null); return true; }
       if (ed.painter) { ed.painter = null; app.toast("書式のコピーを終えました"); emit(); return true; }
+      if (ed.picker) { pick(null); return true; }
       if (ed.entered) { const g = ed.entered; ed.entered = null; ed.sel = objects().filter((o) => o.group === g).map((o) => o.id); draw(); emit(); return true; }
       if (ed.sel.length) { ed.sel = []; draw(); emit(); return true; }
       return false;
@@ -838,12 +854,19 @@ export function createCanvas(app) {
   // ---------------------------------------------------------------- clipboard
 
   const CLIP_TYPE = "application/x-hsej-objects";
+  // A copy carries the objects' animations ({ objects, anims }); an older copy is a plain list of objects.
+  const payloadObjects = (payload) => (Array.isArray(payload) ? payload : Array.isArray(payload?.objects) ? payload.objects : []);
   function copyPayload() {
     const list = objects();
     const chosen = selected(list);
     if (!chosen.length) return null;
     // Connectors keep their drawn ends when copied without the objects they were attached to.
     const ids = new Set(chosen.map((o) => o.id));
+    const groups = new Set(chosen.map((o) => o.group).filter(Boolean));
+    const anims = timeline().filter((e) => ids.has(e.el) || (e.el?.startsWith("grp:") && groups.has(e.el.slice(4)))).map((e) => JSON.parse(JSON.stringify(e)));
+    return { objects: copyObjects(list, chosen, ids), anims };
+  }
+  function copyObjects(list, chosen, ids) {
     return chosen.map((o) => {
       if (o.kind !== "line") return JSON.parse(JSON.stringify(o));
       const [[x1, y1], [x2, y2]] = E.lineEnds(o, list);
@@ -852,6 +875,18 @@ export function createCanvas(app) {
       if (copy.to && !ids.has(copy.to.id)) delete copy.to;
       return copy;
     });
+  }
+  /** The copied objects' animations, pointed at the copies (appended after the slide's own). */
+  function copiedAnims(anims, idMap, groupMap) {
+    const out = [];
+    for (const e of anims || []) {
+      const el = e.el?.startsWith("grp:") ? (groupMap.has(e.el.slice(4)) ? `grp:${groupMap.get(e.el.slice(4))}` : null) : idMap.get(e.el);
+      if (!el) continue;
+      const copy = { ...JSON.parse(JSON.stringify(e)), id: ops.newId().replace(/^o/, "a"), el };
+      if (copy.trigger) { if (idMap.has(copy.trigger)) copy.trigger = idMap.get(copy.trigger); else delete copy.trigger; }
+      out.push(copy);
+    }
+    return out;
   }
   function onCopy(event, cut = false) {
     if (!app.canEdit() || ed.typing || !ed.sel.length) return false;
@@ -862,12 +897,12 @@ export function createCanvas(app) {
     ed.clipboard = payload;
     ed.pasteCount = 0;
     try { localStorage.setItem("hsej-editor-clipboard", JSON.stringify(payload)); } catch { /* too big */ }
-    const text = payload.map((o) => E.objectText(o)).filter(Boolean).join("\n");
+    const text = payload.objects.map((o) => E.objectText(o)).filter(Boolean).join("\n");
     event.clipboardData?.setData(CLIP_TYPE, JSON.stringify(payload));
     event.clipboardData?.setData("text/plain", text || " ");
     event.preventDefault();
     if (cut) removeSelection();
-    app.toast(cut ? "切り取りました" : `${payload.length}個のオブジェクトをコピーしました`);
+    app.toast(cut ? "切り取りました" : `${payload.objects.length}個のオブジェクトをコピーしました`);
     return true;
   }
   async function onPaste(event) {
@@ -891,19 +926,21 @@ export function createCanvas(app) {
     return false;
   }
   function pasteObjects(payload, { at = null } = {}) {
-    if (!Array.isArray(payload) || !payload.length) return;
+    const pasted = payloadObjects(payload);
+    if (!pasted.length) return;
     ed.pasteCount += 1;
     let offset = ed.pasteCount * 20;
     const list = objects();
     // Pasted on another slide, the objects keep their place; pasted again, each copy steps down a little.
-    if (!list.some((o) => payload.some((p) => p.id === o.id))) offset = (ed.pasteCount - 1) * 20;
-    const { list: next, ids } = ops.paste(list, payload, offset);
+    if (!list.some((o) => pasted.some((p) => p.id === o.id))) offset = (ed.pasteCount - 1) * 20;
+    const { list: next, ids, idMap, groupMap } = ops.paste(list, pasted, offset);
     let out = next;
     if (at) {
       const b = ops.bounds(out.filter((o) => ids.includes(o.id)), ends(out));
       out = ops.moveBy(out, ids, at[0] - (b.x + b.w / 2), at[1] - (b.y + b.h / 2));
     }
-    commit(out, { select: ids });
+    const anims = copiedAnims(payload?.anims, idMap, groupMap);
+    commit(out, { select: ids, ...(anims.length ? { timeline: [...timeline(), ...anims] } : {}) });
   }
   function pasteFromMemory() {
     let payload = ed.clipboard;
@@ -921,8 +958,12 @@ export function createCanvas(app) {
     commit(ops.remove(list, ids, ends(list)), { select: [] });
   }
   function duplicateSelection() {
-    const { list, ids } = ops.duplicate(objects(), ed.sel);
-    commit(list, { select: ids });
+    const source = objects();
+    const chosen = new Set(ed.sel);
+    const groups = new Set(source.filter((o) => chosen.has(o.id)).map((o) => o.group).filter(Boolean));
+    const { list, ids, idMap, groupMap } = ops.duplicate(source, ed.sel);
+    const anims = copiedAnims(timeline().filter((e) => chosen.has(e.el) || (e.el?.startsWith("grp:") && groups.has(e.el.slice(4)))), idMap, groupMap);
+    commit(list, { select: ids, ...(anims.length ? { timeline: [...timeline(), ...anims] } : {}) });
   }
   function groupSelection() {
     if (ed.sel.length < 2) return app.toast("グループ化するには2つ以上選んでください");
@@ -1129,6 +1170,7 @@ export function createCanvas(app) {
       any && { label: locked ? "ロックを解除" : "ロック（動かないようにする）", run: () => setLocked(!locked) },
       any && { label: "図形の書式設定…", run: () => app.openPanel("format") },
       one && { label: "リンク・動作の設定…", run: () => app.openPanel("format", "action") },
+      any && { label: "アニメーション…", run: () => { app.showTab("animation"); app.openAnimationPane(); } },
       !any && { label: "すべて選択", keys: "⌘A", run: () => { ed.sel = visible().map((o) => o.id); draw(); emit(); } },
       !any && { label: "図形を描く…", run: () => app.showTab?.("insert") },
     ].filter(Boolean);
@@ -1194,6 +1236,9 @@ export function createCanvas(app) {
     attach, draw, emit,
     subscribe(fn) { subs.add(fn); return () => subs.delete(fn); },
     overlay(fn) { overlays.add(fn); return () => overlays.delete(fn); },
+    handle(prefix, fn) { handles.set(prefix, fn); return () => handles.delete(prefix); },
+    pick, get picking() { return Boolean(ed.picker); },
+    toSlide, scale, timeline,
     select(ids) { ed.sel = [...ids]; ed.entered = null; draw(); emit(); },
     clear() { if (ed.typing) stopTyping(true); ed.sel = []; ed.entered = null; ed.tool = null; draw(); emit(); },
     setTool, get tool() { return ed.tool; },
