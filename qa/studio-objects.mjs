@@ -277,6 +277,20 @@ await step("selection pane: hide and show; lock keeps it still", async () => {
   assert(!(await objects()).find((o) => o.kind === "text").locked, "unlocked");
 });
 
+await step("link: the text box goes to slide 5 when clicked in the presentation", async () => {
+  await pickFromPane("text");
+  await tab("挿入");
+  await ribbon("リンク・動作");
+  await page.waitForSelector(".rb-pop .rb-form");
+  await page.selectOption('.rb-pop select[aria-label="クリックしたときの動作"]', "slide");
+  await page.selectOption('.rb-pop select[aria-label="移動先のスライド"]', "4");
+  await page.click('.rb-pop .rb-form button:has-text("設定する")');
+  await page.waitForTimeout(300);
+  const action = (await objects()).find((o) => o.kind === "text").action;
+  const sid = await page.evaluate(() => window.__hsej.deck().slides[4].sid);
+  assert(action?.type === "slide" && action.to && action.to === sid, `action ${JSON.stringify(action)} → ${sid}`);
+});
+
 await step("the work comes back after a reload", async () => {
   const before = await objects();
   await page.waitForTimeout(1200);
@@ -294,8 +308,19 @@ await step("present: the objects are on the slide", async () => {
   const n = await page.locator(".hs-player .hs-slide .hs-objects .hs-obj").count();
   assert(n === (await objects()).filter((o) => !o.hidden).length, `objects in the presentation: ${n}`);
   await shot("present");
+  // The linked text box jumps to slide 5 instead of advancing.
+  const linked = page.locator(".hs-player .hs-slide .hs-obj[data-action='slide']");
+  assert((await linked.count()) === 1, "the link is clickable in the presentation");
+  await linked.click();
+  await page.waitForTimeout(900);
+  const expected = await page.evaluate(() => window.__hsej.deck().slides.slice(0, 5).filter((slide) => !slide.drillOf).length);
+  const count = await page.textContent(".hs-player-count");
+  assert(count.startsWith(`${expected} /`), `went to slide 5: ${count}`);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(400);
+  await page.locator(".film-item").nth(1).click();
+  await page.waitForSelector(".slide-wrap .hs-objects .hs-obj");
+  await measure();
 });
 
 await step("export: one HTML file with the objects and their engine", async () => {
