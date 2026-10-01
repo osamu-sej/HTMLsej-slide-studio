@@ -15,10 +15,12 @@ async function loadEngine() {
   const { window } = parseHTML("<!doctype html><html><head></head><body></body></html>");
   const icons = (await readFile(join(root, "public", "engine", "icons.json"), "utf8")).trim();
   const engine = (await readFile(join(root, "public", "engine", "engine.js"), "utf8")).replace("/*__ICONS__*/{}", () => icons);
+  const objects = await readFile(join(root, "public", "engine", "objects.js"), "utf8");
   const motion = await readFile(join(root, "public", "engine", "motion.js"), "utf8");
   const context = vm.createContext(window);
   window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
   vm.runInContext(engine, context, { filename: "engine.js" });
+  vm.runInContext(objects, context, { filename: "objects.js" });
   vm.runInContext(motion, context, { filename: "motion.js" });
   return { E: window.SlideEngine, window };
 }
@@ -29,9 +31,11 @@ test("the engine renders every layout in every theme with editable, animatable p
   const { E } = await loadEngine();
   assert.equal(E.THEMES.length, 9);
   assert.equal(E.THEMES[0].id, "sej", "the SEJ template comes first");
-  assert.equal(Object.keys(E.TYPE_LABELS).length, 44);
+  // 44 layouts the AI writes, and 白紙 (blank) for pages people build from objects.
+  assert.equal(Object.keys(E.TYPE_LABELS).length, 45);
+  assert.equal(E.TYPE_LABELS.blank, "白紙（自由配置）");
   const types = new Set(allLayoutSlides.map((slide) => slide.type));
-  assert.equal(types.size, 44, "the fixture covers every layout");
+  assert.equal(types.size, 44, "the fixture covers every layout the AI writes");
   for (const theme of E.THEMES) {
     const deck = deckOf(allLayoutSlides, { theme: theme.id });
     deck.slides.forEach((slide, index) => {

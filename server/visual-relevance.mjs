@@ -1,5 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 
+import { objectWords } from "./objects.mjs";
+
 // A stock photo is a claim about what this slide depicts. Require evidence in the
 // slide's message (or in an explicit user instruction), not just the deck title.
 const PHOTO_TOPICS = {
@@ -16,9 +18,11 @@ const PHOTO_TOPICS = {
 };
 
 export function slideMeaning(slide) {
-  const skip = new Set(["type", "notes", "customImage", "imagePlacement", "image", "visualAsset", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "formula", "media", "details", "date", "drillOf"]);
+  const skip = new Set(["type", "notes", "customImage", "imagePlacement", "image", "visualAsset", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "formula", "media", "details", "date", "drillOf", "timeline", "sid"]);
   const parts = [];
   const visit = (value, key = "") => {
+    // Objects placed by hand count for their words only.
+    if (key === "elements") { const words = objectWords(value); if (words) parts.push(words); return; }
     if (skip.has(key) || value == null) return;
     if (typeof value === "string") { if (!value.startsWith("data:")) parts.push(value); }
     else if (Array.isArray(value)) value.forEach((item) => visit(item));

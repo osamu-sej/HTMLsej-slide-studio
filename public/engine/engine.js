@@ -1,6 +1,7 @@
 /*
  * HTML SEJ Slide Studio — slide engine.
- * Turns a deck (JSON) into 1920×1080 HTML slides: themes, 44 layouts, SVG charts, text fitting.
+ * Turns a deck (JSON) into 1920×1080 HTML slides: themes, 45 layouts, SVG charts, text fitting. Objects placed by
+ * hand (shapes, text boxes, pictures, lines) are drawn by objects.js on a layer above the layout.
  * Motion and the presentation player live in motion.js; both attach to window.SlideEngine.
  * The file is also inlined into exported presentations, so it has no dependencies.
  */
@@ -64,7 +65,7 @@
     bulletCards: "要点カード", headerTwoColumn: "2列比較", headerThreeSummary: "3列＋まとめ", grid2x2: "2×2グリッド", matrix: "マトリクス",
     swot: "SWOT", diagram: "レーン図", cycle: "サイクル", pyramid: "ピラミッド", funnel: "ファネル", stepUp: "ステップアップ",
     triangle: "トライアングル", venn: "ベン図", orgChart: "組織図", checklist: "チェックリスト", faq: "FAQ", quote: "引用",
-    simulator: "試算（条件を動かす）", gap: "不足と打ち手",
+    simulator: "試算（条件を動かす）", gap: "不足と打ち手", blank: "白紙（自由配置）",
   };
 
   // Builds: step-by-step content appears on click, parallel content cascades in, the rest fades once.
@@ -76,7 +77,7 @@
   // spotlight: everything is on screen, and each click puts one item in focus while the rest step back.
   const BUILDS = ["auto", "none", "fade", "cascade", "click", "spotlight"];
   function recommendedBuild(type) {
-    if (STILL.has(type)) return "none";
+    if (STILL.has(type) || type === "blank") return "none";
     if (CLICK.has(type)) return "click";
     if (CASCADE.has(type)) return "cascade";
     return "fade";
@@ -777,7 +778,7 @@
     // SEJ: the title lives in the master's band above the green rule; the key message opens the body under it.
     if (ctx.theme === "sej") {
       return h("header", { class: "hs-head" },
-        sejTitlebar(slide.title, "title"),
+        sejTitlebar(slide.title, "title", ctx.mode === "edit" ? "タイトルを入力" : ""),
         ctx.eyebrow ? h("div", { class: "hs-eyebrow" }, ctx.eyebrow) : null,
         slide.takeaway ? t("p", "hs-takeaway", slide.takeaway, "takeaway", { emphasis: true }) : null);
     }
@@ -797,6 +798,11 @@
   // Each returns the slide body; `ctx.photo` is the slide's media element when it has one.
 
   const LAYOUTS = {
+    // 白紙: the master and (optionally) a title; everything else is objects placed by hand.
+    blank() {
+      return body("hs-blank");
+    },
+
     content(slide, ctx) {
       const points = arr(slide.points).map(strip).filter(Boolean);
       const photo = ctx.media && !ctx.media.placement ? mediaEl(ctx.media, ctx) : null;
@@ -1417,7 +1423,7 @@
   const SEJ_BOX = { logo: [1798.2, 28.8, 64.8, 68.2], secret: [1503.1, 37.4, 253.5, 57.5], internal: [48.5, 989.3, 253.5, 57.5], copyright: [843.9, 1028.5, 230.0, 18.2], page: [1734.4, 1012.8, 129.1, 57.5] };
   const box = ([x, y, w, hh]) => ({ left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${hh}px` });
 
-  /** The master's parts, above the backdrop and below the content (they never overlap it). */
+  /** The master's parts, above the content (they never overlap it) and above objects placed by hand. */
   function sejChrome(master, pageLabel) {
     const m = SEJ_MASTER[master];
     const [sx, sy, sw, sh, align] = m.slogan;
@@ -1517,9 +1523,10 @@
   }
 
   /** The page title on the content master: one line, in the band above the green rule, left of 秘（B）. */
-  function sejTitlebar(text, field) {
+  function sejTitlebar(text, field, placeholder = "") {
     const title = t("h2", "hs-title", text, field, { emphasis: true });
     title.dataset.lines = "1";
+    if (placeholder && !strip(text)) title.dataset.placeholder = placeholder;
     return h("div", { class: "hs-sej-titlebar" }, title);
   }
 
@@ -1856,6 +1863,9 @@
       placed.dataset.placed = "";
       overlay.append(placed);
     }
+    // Objects placed by hand (objects.js) sit above the layout and below the master's marks.
+    const objects = Engine.objectLayer?.(slide, ctx, { fit: opts.fit });
+    if (objects) root.append(objects);
     root.append(overlay);
     if (sej) {
       // The master: the cover and chapters use the title master, every other page the content master
@@ -2074,7 +2084,9 @@
         issues.push({ kind: "overflow", severity: "error", field: el.dataset.field || "title", message: `タイトルが${maxLines(el)}行に収まりません。短くしてください` });
       }
     }
-    return { fs, ts, issues };
+    // Text in objects set to "shrink on overflow" gets its own scale.
+    const objs = Engine.fitObjects?.(slideEl) ?? null;
+    return objs ? { fs, ts, issues, objs } : { fs, ts, issues };
   }
 
   // ---------------------------------------------------------------- SEJ brand check
@@ -2112,9 +2124,12 @@
     const issues = [];
     const seen = new Set();
     const add = (el, message) => {
-      const field = el.closest("[data-field]")?.dataset.field || "body";
-      if (seen.has(message)) return;
-      seen.add(message);
+      // Text in an object points at the object (the studio selects it); layout text at its field.
+      const obj = el.closest(".hs-obj")?.dataset.el;
+      const field = obj ? `obj:${obj}` : el.closest("[data-field]")?.dataset.field || "body";
+      const key = obj ? `${field}|${message}` : message;
+      if (seen.has(key)) return;
+      seen.add(key);
       issues.push({ kind: "brand", severity: "warning", field, message });
     };
     const fillOf = new Map();
@@ -2127,7 +2142,7 @@
       return fillOf.get(el);
     };
     for (const el of slideEl.querySelectorAll("*")) {
-      if (el.closest(".hs-sej, .hs-media, .hs-placed, .hs-detail-badge, .hs-drill-badge, .hs-control")) continue;
+      if (el.closest(".hs-sej, .hs-media, .hs-placed, .hs-detail-badge, .hs-drill-badge, .hs-control, .hs-obj-img, .hs-obj-media")) continue;
       const style = root.getComputedStyle(el);
       if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
       if (dropShadow(style.boxShadow)) add(el, "影は付けません（SEJテンプレート）");
@@ -2138,8 +2153,27 @@
       if (color && color !== "transparent" && !SEJ_TEXT.has(color) && !SEJ_DECO.has(color)) {
         add(el, color === "ffffff" ? "白抜き文字は使いません（SEJテンプレート）" : `文字の色 #${color} はSEJの文字色（黒・濃紺・グレー）ではありません`);
       }
-      const ground = svg ? null : paint(el);
+      // Text in a shape stands on the shape's own fill (drawn in SVG, not as a background).
+      const shapeFill = el.closest(".hs-obj")?.dataset.fill;
+      const ground = svg ? null : shapeFill ? shapeFill.slice(1) : paint(el);
       if (ground && luminance(ground) < 0.25) add(el, "濃い色の面に文字を載せません（SEJテンプレート）");
+    }
+    // Objects placed by hand: the brand's fills and lines, no outline on a tinted box, and never over the master.
+    const master = SEJ_MASTER[slideEl.dataset.master] || SEJ_MASTER.content;
+    const marks = [SEJ_BOX.logo, SEJ_BOX.secret, SEJ_BOX.internal, SEJ_BOX.copyright, master.slogan, master.rule, master.page ? SEJ_BOX.page : null].filter(Boolean);
+    for (const obj of slideEl.querySelectorAll(".hs-obj")) {
+      const field = `obj:${obj.dataset.el}`;
+      const flag = (message) => { const key = `${field}|${message}`; if (seen.has(key)) return; seen.add(key); issues.push({ kind: "brand", severity: "warning", field, message }); };
+      const fill = obj.dataset.fill ? obj.dataset.fill.slice(1).toLowerCase() : null;
+      const stroke = obj.dataset.stroke && obj.dataset.stroke !== "none" ? obj.dataset.stroke.slice(1).toLowerCase() : null;
+      if (fill && Engine.BRAND_FILLS && !Engine.BRAND_FILLS.has(fill)) flag(`図形の塗りの色 #${fill} はSEJの面の色（淡青・グレー・淡茶）ではありません`);
+      if (stroke && Engine.BRAND_LINES && !Engine.BRAND_LINES.has(stroke)) flag(`線の色 #${stroke} はSEJの線の色（濃紺・黒・グレー）ではありません`);
+      if (fill && fill !== "ffffff" && stroke) flag("色の付いた図形に枠線を付けません（SEJテンプレート）");
+      const box = String(obj.dataset.bbox || "").split(",").map(Number);
+      if (box.length === 4 && box.every(Number.isFinite)) {
+        const [x, y, w, hh] = box;
+        if (marks.some(([mx, my, mw, mh]) => x < mx + mw && x + w > mx && y < my + mh && y + hh > my)) flag("ロゴ・秘（B）・社内限り・スローガン・緑線などテンプレートの要素に重なっています。重ならない位置に動かしてください");
+      }
     }
     return issues;
   }
@@ -2174,7 +2208,7 @@
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },
     setSejArt(art) { SEJ_ART = art || {}; },
-    render, mount, fit, brandCheck, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
+    render, mount, fit, brandCheck, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, mediaEl, resolveSrc, chart, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
     evalFormula, formulaTokens, rankShow, simUpdate, gapUpdate, fmtNum,
   });
   root.SlideEngine = Engine;

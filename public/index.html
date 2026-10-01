@@ -156,12 +156,15 @@
             </div>
           </details>
         </div>
+        <!-- PowerPoint-style ribbon for objects placed by hand (public/editor/ui.mjs) -->
+        <div id="ribbon" class="ribbon" hidden></div>
         <div id="stageBody" class="stage-body"></div>
       </section>
       <div class="side-panel">
         <div class="side-tabs" role="tablist" aria-label="右パネル">
           <button id="chatTab" class="side-tab" type="button" role="tab" aria-selected="true">✦ AIと話す</button>
           <button id="formTab" class="side-tab" type="button" role="tab" aria-selected="false">編集</button>
+          <button id="formatTab" class="side-tab" type="button" role="tab" aria-selected="false" title="選んだ図形・文字・画像の書式と、オブジェクトの一覧">書式</button>
         </div>
         <section id="chatPane" class="chat-pane" aria-label="AIとの会話">
           <div class="chat-head">
@@ -187,6 +190,7 @@
           </form>
         </section>
         <aside id="inspector" class="inspector" aria-label="スライドの編集" hidden></aside>
+        <aside id="formatPane" class="format-pane" aria-label="図形の書式" hidden></aside>
       </div>
     </main>
 
@@ -392,9 +396,10 @@
       <div class="dialog-body help-body">
         <h4>基本の流れ</h4>
         <ol>
-          <li>「作成」で素材を入れてテーマを選び「骨子を作る」→ 骨子を整えて「この骨子でスライドを作る」（雛形・取り込み・サンプルからも始められます）</li>
+          <li>「作成」で素材を入れて「骨子を作る」→ 骨子を整えて「この骨子でスライドを作る」（雛形・取り込み・サンプルからも始められます）。デザインはいつもSEJテンプレートです</li>
           <li>右の「✦ AIと話す」で直してほしいことを書く。変更は提案として届くので、確認して採用・却下します。「工程をクリックで1つずつ出して」「各カードにクリックで開く補足を付けて」のように動きも頼めます</li>
           <li>スライド上の文字をクリックすると、その場で書き換えられます。写真・動画・動き・クリックで開く詳細は「編集」タブで</li>
+          <li>スライドの上のリボン（ホーム・挿入・図形の書式・表示）で、PowerPointのように図形・テキストボックス・画像・アイコン・線を置いて仕上げられます。「新しいスライド」→「白紙」なら、何もないところから自由に作れます。細かい設定は右の「書式」タブで</li>
           <li>「▶ 発表」でそのままZoomなどで画面共有。「HTML出力」で動きごと1つのファイルに書き出せます</li>
         </ol>
         <h4>編集のショートカット</h4>
@@ -405,6 +410,22 @@
           <tr><td><kbd>⌘</kbd>+<kbd>K</kbd></td><td>検索・コマンド（AIへの依頼もここから）</td></tr>
           <tr><td>文字の編集中 <kbd>Enter</kbd> / <kbd>Esc</kbd></td><td>確定 / 取り消し</td></tr>
           <tr><td><kbd>?</kbd></td><td>このヘルプ</td></tr>
+        </table>
+        <h4>図形・文字・画像（自由配置）</h4>
+        <table class="help-keys">
+          <tr><td>ドラッグ / 四隅・辺 / 上の丸 / 黄色の点</td><td>移動 / サイズ / 回転 / 形の調整（角の丸み・矢印の太さなど）</td></tr>
+          <tr><td><kbd>⇧</kbd>+ドラッグ</td><td>縦横比を保つ・まっすぐ動かす・15°ずつ回す・正方形や正円を描く</td></tr>
+          <tr><td><kbd>⌘</kbd>（<kbd>Ctrl</kbd>）+ドラッグ / <kbd>Alt</kbd>+ドラッグ</td><td>コピーしながら動かす / 吸着しない</td></tr>
+          <tr><td>ダブルクリック / <kbd>Enter</kbd> / そのまま入力</td><td>図形に文字を入れる（<kbd>Esc</kbd>で確定）。グループはダブルクリックで中の1つを選ぶ</td></tr>
+          <tr><td><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd>（<kbd>⇧</kbd>：大きく、<kbd>⌘</kbd>：少しだけ）</td><td>少しずつ動かす</td></tr>
+          <tr><td><kbd>Tab</kbd> / <kbd>⌘</kbd>+<kbd>A</kbd> / <kbd>Esc</kbd></td><td>次のオブジェクト / すべて選択 / 選択を外す</td></tr>
+          <tr><td><kbd>⌘</kbd>+<kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd> / <kbd>⌘</kbd>+<kbd>D</kbd> / <kbd>Delete</kbd></td><td>コピー・切り取り・貼り付け / 複製 / 削除</td></tr>
+          <tr><td><kbd>⌘</kbd>+<kbd>G</kbd> / <kbd>⇧</kbd>+<kbd>⌘</kbd>+<kbd>G</kbd></td><td>グループ化 / グループ解除</td></tr>
+          <tr><td><kbd>⌘</kbd>+<kbd>]</kbd> <kbd>[</kbd>（<kbd>⇧</kbd>で最前面・最背面）</td><td>前面へ / 背面へ</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>⌘</kbd>+<kbd>C</kbd> / <kbd>⇧</kbd>+<kbd>⌘</kbd>+<kbd>V</kbd></td><td>書式のコピー / 書式の貼り付け</td></tr>
+          <tr><td><kbd>⌘</kbd>+<kbd>B</kbd> <kbd>I</kbd> <kbd>U</kbd> / <kbd>⇧</kbd>+<kbd>⌘</kbd>+<kbd>&gt;</kbd> <kbd>&lt;</kbd></td><td>太字・斜体・下線 / 文字を大きく・小さく</td></tr>
+          <tr><td><kbd>⌘</kbd>+<kbd>L</kbd> <kbd>E</kbd> <kbd>R</kbd> <kbd>J</kbd></td><td>左揃え・中央揃え・右揃え・両端揃え</td></tr>
+          <tr><td>右クリック</td><td>切り取り・コピー・順序・ロック・書式設定・リンクなどのメニュー</td></tr>
         </table>
         <h4>発表中のショートカット</h4>
         <table class="help-keys">
@@ -423,8 +444,15 @@
           <li>アップロードした動画はこのブラウザの中に保存されます。HTML出力するとファイルの中に入ります（大きな動画はファイルも大きくなります）</li>
           <li>Zoomで動画の音を流すときは、画面共有の「音声を共有」をオンにしてください</li>
           <li>作業中の資料はこのブラウザに自動保存されます。別のPCへ移すときは「その他」→「JSONで保存」</li>
+          <li>手で置いた図形・文字・画像は、AIに頼んで直しても消えません（AIには「自由配置」の要約だけを伝えます）。SEJの色以外を使うと「チェック」で知らせます</li>
         </ul>
       </div>
+    </dialog>
+
+    <dialog id="askDialog" class="ask-dialog">
+      <div class="dialog-head"><h3 id="askTitle">入力</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
+      <div class="dialog-body"><label class="field"><span id="askLabel" class="field-label"></span><input id="askInput" type="text" autocomplete="off" /></label></div>
+      <div class="dialog-foot"><button class="btn" type="button" data-close>やめる</button><button id="askOk" class="btn btn-primary" type="button">OK</button></div>
     </dialog>
 
     <div id="presenter" class="presenter hidden" role="dialog" aria-label="発表モード"></div>
@@ -435,6 +463,7 @@
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <script src="/engine/engine.js?v=__APP_VERSION__"></script>
+    <script src="/engine/objects.js?v=__APP_VERSION__"></script>
     <script src="/engine/motion.js?v=__APP_VERSION__"></script>
     <script type="module" src="/app.js?v=__APP_VERSION__"></script>
   </body>

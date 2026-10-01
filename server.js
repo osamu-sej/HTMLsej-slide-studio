@@ -46,7 +46,7 @@ import {
   generatedDeckSchema,
   reviseRequestSchema,
   rewriteRequestSchema,
-  slideSchema,
+  aiSlideSchema,
   studioSettingsSchema,
 } from "./server/schemas.mjs";
 
@@ -121,7 +121,10 @@ function loadStatic() {
   add("/auto-images.mjs", readFileSync(join(PUBLIC, "auto-images.mjs"), "utf8"), TYPES[".js"]);
   add("/app.css", readFileSync(join(PUBLIC, "app.css"), "utf8"), TYPES[".css"]);
   add("/layout-looks.mjs", readFileSync(join(PUBLIC, "layout-looks.mjs"), "utf8"), TYPES[".js"]);
+  // The PowerPoint-style editor (objects placed by hand).
+  for (const name of readdirSync(join(PUBLIC, "editor")).filter((n) => /^[a-z0-9-]+\.mjs$/.test(n))) add(`/editor/${name}`, readFileSync(join(PUBLIC, "editor", name), "utf8"), TYPES[".js"]);
   add("/engine/engine.js", readFileSync(join(PUBLIC, "engine", "engine.js"), "utf8").replace("/*__ICONS__*/{}", () => icons).replace("/*__SEJ__*/{}", () => sejArt), TYPES[".js"]);
+  add("/engine/objects.js", readFileSync(join(PUBLIC, "engine", "objects.js"), "utf8"), TYPES[".js"]);
   add("/engine/motion.js", readFileSync(join(PUBLIC, "engine", "motion.js"), "utf8"), TYPES[".js"]);
   add("/engine/engine.css", readFileSync(join(PUBLIC, "engine", "engine.css"), "utf8"), TYPES[".css"]);
   for (const name of readdirSync(join(PUBLIC, "assets")).filter((n) => /^[a-z0-9-]+\.jpg$/.test(n))) add(`/assets/${name}`, readFileSync(join(PUBLIC, "assets", name)), TYPES[".jpg"]);
@@ -427,7 +430,7 @@ function startReviseJob(session, request) {
     maxAttempts: 2,
     effort: revisionEffort(request.instruction || ""),
     async finalize(candidate, attempt) {
-      const { slide: proposed } = z.object({ slide: slideSchema }).parse(omitNullObjectValues(candidate));
+      const { slide: proposed } = z.object({ slide: aiSlideSchema }).parse(omitNullObjectValues(candidate));
       const inserting = request.mode === "insert";
       const { answer: checked, warnings } = reconcileChatVisuals(deck, { operations: [{ op: inserting ? "insert" : "replace", slide: slideIndex + 1, content: proposed }] }, request.instruction || "");
       let slide = checked.operations[0]?.content ?? deck.slides[slideIndex];

@@ -1025,10 +1025,28 @@
       else if (key === "b" || key === "B" || key === ".") { black.style.background = "#000"; black.hidden = !black.hidden; }
       else if (key === "w" || key === "W") { black.style.background = "#fff"; black.hidden = !black.hidden; }
     }
+    /** A shape, picture or text box with a link or an action (the editor's 「リンク・動作」) does that instead of advancing. */
+    function act(el) {
+      const action = (slides[index]?.elements || []).find((o) => o.id === el.dataset.el)?.action;
+      if (!action) return false;
+      if (action.type === "next") next();
+      else if (action.type === "prev") prev();
+      else if (action.type === "first") go(order[0]);
+      else if (action.type === "last") go(order[order.length - 1]);
+      else if (action.type === "end") { if (opts.closable !== false) close(); }
+      else if (action.type === "slide") {
+        const to = slides.findIndex((slide) => slide.sid === action.to);
+        if (to >= 0) go(to);
+        else flash("リンク先のスライドが見つかりません");
+      } else if (action.type === "url") win.open(action.href, "_blank", "noopener");
+      return true;
+    }
     const onStageClick = (event) => {
       if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes, .hs-control")) return;
       gesture = true;
       origin = { x: event.clientX, y: event.clientY };
+      const actor = event.target.closest(".hs-obj[data-action]");
+      if (actor && act(actor)) return;
       next();
     };
     let touchX = null;
