@@ -68,6 +68,15 @@
       kf: () => [{ opacity: 0, transform: "rotate(-720deg) scale(0)" }, { opacity: 1, transform: "rotate(0deg) scale(1)" }] },
     expand: { label: "エクスパンド", out: "コントラクト", dur: 800, ease: "out", origin: "center",
       kf: () => [{ opacity: 0, transform: "scale(0.6, 1)" }, { opacity: 1, transform: "scale(1, 1)" }] },
+    // What only HTML can do (html: true; the gallery's 「HTMLならでは」). They draw their own frames (custom).
+    typewriter: { label: "タイプライター", out: "タイプライター（消す）", html: true, dur: 1600, ease: "linear", custom: (c, exit) => typewriter(c, exit) },
+    decode: { label: "デコード", html: true, noExit: true, dur: 1400, ease: "linear", custom: (c) => decode(c) },
+    maskRise: { label: "マスクから立ち上がる", out: "マスクへ沈む", html: true, dur: 900, ease: "out", custom: (c, exit) => maskRise(c, exit) },
+    blurIn: { label: "ぼかしから", out: "ぼかして消える", html: true, dur: 800, ease: "out", origin: "center",
+      kf: () => [{ opacity: 0, filter: "blur(28px)", transform: "scale(1.05)" }, { opacity: 1, filter: "blur(0px)", transform: "scale(1)" }] },
+    draw: { label: "線を描く", out: "線を消す", html: true, dur: 1500, ease: "smooth", custom: (c, exit) => drawIn(c, exit) },
+    countUp: { label: "カウントアップ", html: true, noExit: true, dur: 1400, ease: "out", custom: (c) => countUp(c) },
+    chartGrow: { label: "グラフが伸びる", html: true, noExit: true, dur: 1300, ease: "out", custom: (c) => chartGrow(c) },
   };
 
   // Emphasis: what changes for a moment (or stays changed) on something already on the slide.
@@ -93,6 +102,10 @@
     blink: { label: "点滅", dur: 600, ease: "linear", run: (c) => box(c, (el) => { const o = getComputedStyle(el).opacity; return [{ opacity: o }, { opacity: "0", offset: 0.25 }, { opacity: o, offset: 0.5 }, { opacity: "0", offset: 0.75 }, { opacity: o }]; }) },
     wave: { label: "ウェーブ", dur: 1000, ease: "smooth", by: "char", run: (c) => box(c, [{ translate: "0px 0px" }, { translate: "0px -28px" }, { translate: "0px 0px" }], { composite: "add" }) },
     underline: { label: "下線", dur: 300, ease: "linear", lasting: true, run: (c) => text(c, [{ textDecorationLine: "none" }, { textDecorationLine: "underline" }]) },
+    shine: { label: "光が走る", html: true, dur: 1000, ease: "smooth", run: (c) => shine(c) },
+    ripple: { label: "波紋", html: true, dur: 1100, ease: "out", run: (c) => ripple(c) },
+    marker: { label: "マーカーを引く", html: true, dur: 800, ease: "smooth", lasting: true, run: (c) => marker(c) },
+    spotlight: { label: "スポットライト", html: true, dur: 500, ease: "smooth", lasting: true, run: (c, state) => spotlight(c, state) },
   };
 
   // Motion paths: points in slide pixels from where the object is, scaled to the object when it is added.
@@ -153,6 +166,7 @@
       if (!cls || !el || !isTarget(el, objectIds, groupIds)) continue;
       const fx = Object.hasOwn(FX[cls], raw.fx) ? raw.fx : null;
       if (!fx) continue;
+      if (cls === "out" && IN[fx].noExit) continue;
       if (cls === "media" && !["video", "lottie"].includes(kinds.get(el))) continue;
       let id = typeof raw.id === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(raw.id) ? raw.id : "";
       while (!id || seen.has(id)) id = `a${Math.random().toString(36).slice(2, 9)}`;
@@ -168,7 +182,7 @@
       if (raw.rewind === true) entry.rewind = true;
       if (raw.autoReverse === true && cls !== "media") entry.autoReverse = true;
       if (EASES[raw.ease] && raw.ease !== "auto") entry.ease = raw.ease;
-      if (BY[raw.by] && raw.by !== "all" && ["in", "out", "em"].includes(cls) && (objectIds.has(el) ? ["shape", "text"].includes(kinds.get(el)) : LAYOUT_TARGET.test(el))) entry.by = raw.by;
+      if (BY[raw.by] && raw.by !== "all" && ["in", "out", "em"].includes(cls) && !def.custom && !def.html && (objectIds.has(el) ? ["shape", "text"].includes(kinds.get(el)) : LAYOUT_TARGET.test(el))) entry.by = raw.by;
       if (typeof raw.trigger === "string" && objectIds.has(raw.trigger)) entry.trigger = raw.trigger;
       if (cls === "path") {
         const pts = (Array.isArray(raw.path?.pts) ? raw.path.pts : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 2000).map(([x, y]) => [Math.round(num(x, -6000, 6000, 0) * 10) / 10, Math.round(num(y, -6000, 6000, 0) * 10) / 10]);
@@ -556,6 +570,334 @@
     return out;
   }
 
+
+  // ---------------------------------------------------------------- what only HTML can do
+
+  const textHost = (part) => (part.object ? part.node.querySelector(".hs-obj-tx") : part.node);
+  /** The box shown while an effect draws its own frames (and hidden at the end of an exit). */
+  function holdVisible(c, part, exit) {
+    return animateEl({ ...c, easing: "linear", iterations: 1, direction: "normal" }, part.fx,
+      exit ? [{ visibility: "visible" }, { visibility: "visible", offset: 0.999 }, { visibility: "hidden" }] : [{ visibility: "visible" }, { visibility: "visible" }], { fill: c.fill });
+  }
+  /**
+   * An effect drawn frame by frame (letters changing, numbers counting): `clock` is the Web Animation that keeps
+   * its time, so finishing a click early (or seeking) lands on the last frame and a reset puts things back.
+   */
+  function driven(clock, { frame, end, cancel }) {
+    if (!clock) { end(); return; }
+    let done = false;
+    const tick = () => {
+      if (done || clock.playState === "idle" || clock.playState === "finished") return;
+      const t = Number(clock.currentTime) || 0;
+      frame(clamp(t / (clock.effect?.getTiming?.().duration || 1), 0, 1));
+      requestAnimationFrame(tick);
+    };
+    clock.finished.then(() => { done = true; end(); }, () => { done = true; cancel(); });
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(tick);
+  }
+  const easeOut = (p) => 1 - (1 - p) ** 3;
+
+  /** タイプライター: the letters come one by one behind a blinking caret (an exit deletes them from the end). */
+  function typewriter(c, exit) {
+    const out = [];
+    for (const part of c.parts) {
+      const [clock] = holdVisible(c, part, exit);
+      const chars = units(part, "char");
+      if (!chars.length) { out.push(clock); continue; }
+      const doc = part.node.ownerDocument;
+      const caret = doc.createElement("span");
+      caret.className = "hs-caret";
+      const show = (k) => chars.forEach((ch, i) => ch.classList.toggle("hs-anim-hide", exit ? i >= chars.length - k : i >= k));
+      show(0);
+      driven(clock, {
+        frame: (p) => {
+          const k = Math.round(p * chars.length);
+          show(k);
+          const at = exit ? chars[chars.length - k - 1] : chars[k - 1];
+          if (at) at.after(caret); else chars[0].before(caret);
+        },
+        end: () => { show(chars.length); caret.remove(); },
+        cancel: () => { for (const ch of chars) ch.classList.remove("hs-anim-hide"); caret.remove(); },
+      });
+      out.push(clock);
+    }
+    return out.filter(Boolean);
+  }
+
+  const GLYPHS = { wide: "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン", upper: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", lower: "abcdefghijklmnopqrstuvwxyz", digit: "0123456789" };
+  const glyphPool = (ch) => (/[぀-ヿ㐀-鿿！-～]/u.test(ch) ? GLYPHS.wide : /[A-Z]/.test(ch) ? GLYPHS.upper : /[a-z]/.test(ch) ? GLYPHS.lower : /\d/.test(ch) ? GLYPHS.digit : null);
+  /** デコード: each letter flickers through random letters of its kind, then settles, left to right. */
+  function decode(c) {
+    const out = [];
+    for (const part of c.parts) {
+      const [clock] = holdVisible(c, part, false);
+      const chars = units(part, "char");
+      if (!chars.length) { out.push(clock); continue; }
+      for (const ch of chars) if (ch.dataset.t == null) ch.dataset.t = ch.textContent;
+      const n = chars.length;
+      let swapped = 0;
+      driven(clock, {
+        frame: (p) => {
+          const now = Date.now();
+          const flicker = now - swapped > 55;
+          if (flicker) swapped = now;
+          chars.forEach((ch, i) => {
+            const start = (i / n) * 0.62;
+            const settle = start + 0.34;
+            if (p < start) ch.classList.add("hs-anim-hide");
+            else if (p >= settle) { ch.classList.remove("hs-anim-hide"); ch.textContent = ch.dataset.t; }
+            else {
+              ch.classList.remove("hs-anim-hide");
+              if (flicker) ch.textContent = [...ch.dataset.t].map((x) => { const pool = glyphPool(x); return pool ? pool[Math.floor(Math.random() * pool.length)] : x; }).join("");
+            }
+          });
+        },
+        end: () => { for (const ch of chars) { ch.classList.remove("hs-anim-hide"); ch.textContent = ch.dataset.t; } },
+        cancel: () => { for (const ch of chars) { ch.classList.remove("hs-anim-hide"); ch.textContent = ch.dataset.t; } },
+      });
+      out.push(clock);
+    }
+    return out.filter(Boolean);
+  }
+
+  /** マスクから立ち上がる: each word rises out of a slit under its own line (without words: the box rises). */
+  function maskRise(c, exit) {
+    const out = [];
+    for (const part of c.parts) {
+      out.push(...holdVisible(c, part, exit));
+      const words = units(part, "word");
+      if (!words.length) {
+        let frames = [{ clipPath: "inset(100% 0 0 0)", transform: "translate(0px, 60px)" }, { clipPath: "inset(0% 0 0 0)", transform: "translate(0px, 0px)" }];
+        if (exit) frames = frames.reverse();
+        out.push(...animateEl(c, part.fx, frames));
+        continue;
+      }
+      const n = words.length;
+      const each = c.dur * (n > 1 ? 0.62 : 1);
+      const gap = n > 1 ? (c.dur - each) / (n - 1) : 0;
+      words.forEach((word, i) => {
+        let frames = [{ transform: "translate(0px, 105%)", clipPath: "inset(0 0 100% 0)" }, { transform: "translate(0px, 0%)", clipPath: "inset(0 0 0% 0)" }];
+        if (exit) frames = frames.reverse();
+        const order = exit ? n - 1 - i : i;
+        try { out.push(word.animate(frames, { duration: each, delay: order * gap, easing: c.easing, fill: exit ? "forwards" : "both" })); } catch { /* detached */ }
+      });
+    }
+    return out;
+  }
+
+  /** 線を描く: outlines and lines are drawn as with a pen, then the fill and the words come in. */
+  function drawIn(c, exit) {
+    const out = [];
+    const dir = (frames) => (exit ? [...frames].reverse().map((f) => { const g = { ...f }; if (g.offset != null) g.offset = 1 - g.offset; return g; }) : frames);
+    for (const part of c.parts) {
+      out.push(...holdVisible(c, part, exit));
+      const node = part.node;
+      if (node.querySelector?.(".hs-ochart, .hs-chart")) { out.push(...chartGrow({ ...c, parts: [part] }, { skipHold: true })); continue; }
+      const stroked = (el) => el.getAttribute("stroke") && el.getAttribute("stroke") !== "none";
+      // Lines and icons are all pen; a shape's outline is pen when it has one.
+      const strokes = [...node.querySelectorAll(".hs-obj-geom path, .hs-obj-line path")].filter(stroked)
+        .concat([...node.querySelectorAll(".hs-obj-icon :is(path, line, circle, rect, polyline, polygon, ellipse)")])
+        .filter((el) => typeof el.getTotalLength === "function");
+      const fills = [...node.querySelectorAll(".hs-obj-geom path")].filter((el) => el.getAttribute("fill") && el.getAttribute("fill") !== "none");
+      const words = node.querySelector(".hs-obj-text");
+      // A shape with a fill but no outline gets a pen line of its own, which fades as the fill comes in.
+      const temp = [];
+      if (!strokes.length && fills.length) {
+        for (const el of fills) {
+          if (typeof el.getTotalLength !== "function") continue;
+          const pen = el.cloneNode(false);
+          pen.setAttribute("fill", "none");
+          pen.setAttribute("stroke", "#1f3864");
+          pen.setAttribute("stroke-width", "4");
+          pen.removeAttribute("stroke-dasharray");
+          pen.classList.add("hs-pen");
+          el.after(pen);
+          temp.push(pen);
+        }
+      }
+      const pens = strokes.length ? strokes : temp;
+      if (!pens.length) {
+        // Nothing to draw (a picture, a table): it is uncovered from the left.
+        out.push(...animateEl(c, part.fx, dir([{ clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)" }])));
+        continue;
+      }
+      for (const el of pens) {
+        let len = 0;
+        try { len = el.getTotalLength(); } catch { len = 0; }
+        if (!len) continue;
+        const dash = `${len} ${len}`;
+        const frames = temp.includes(el)
+          ? [{ strokeDasharray: dash, strokeDashoffset: `${len}`, opacity: 1 }, { strokeDasharray: dash, strokeDashoffset: "0", opacity: 1, offset: 0.65 }, { strokeDasharray: dash, strokeDashoffset: "0", opacity: 0 }]
+          : [{ strokeDasharray: dash, strokeDashoffset: `${len}` }, { strokeDasharray: dash, strokeDashoffset: "0", offset: 0.7 }, { strokeDasharray: dash, strokeDashoffset: "0" }];
+        out.push(...animateEl(c, el, dir(frames)));
+      }
+      if (temp.length) out[out.length - 1]?.finished.then(() => temp.forEach((pen) => pen.remove()), () => temp.forEach((pen) => pen.remove()));
+      for (const el of fills) out.push(...animateEl(c, el, dir([{ fillOpacity: 0 }, { fillOpacity: 0, offset: 0.45 }, { fillOpacity: Number(el.getAttribute("fill-opacity") ?? 1) }])));
+      if (words) out.push(...animateEl(c, words, dir([{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }])));
+      for (const el of node.querySelectorAll(".hs-obj-geom path:not(.hs-pen)")) if (!strokes.includes(el) && !fills.includes(el)) out.push(...animateEl(c, el, dir([{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }])));
+    }
+    return out;
+  }
+
+  const NUMBER = /[-+−▲▼]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|[-+−▲▼]?\d+(?:\.\d+)?/g;
+  /** The numbers in a text, each wrapped once in a span that remembers its words. */
+  function numberSpans(host) {
+    if (!host) return [];
+    if (!host.dataset.hsCount) {
+      host.dataset.hsCount = "1";
+      const walker = host.ownerDocument.createTreeWalker(host, 4);
+      const texts = [];
+      while (walker.nextNode()) if (/\d/.test(walker.currentNode.nodeValue)) texts.push(walker.currentNode);
+      for (const node of texts) {
+        const frag = host.ownerDocument.createDocumentFragment();
+        let last = 0;
+        const value = node.nodeValue;
+        for (const m of value.matchAll(NUMBER)) {
+          if (m.index > last) frag.append(value.slice(last, m.index));
+          const span = host.ownerDocument.createElement("span");
+          span.className = "hs-cnt";
+          span.dataset.count = m[0];
+          span.textContent = m[0];
+          frag.append(span);
+          last = m.index + m[0].length;
+        }
+        if (last < value.length) frag.append(value.slice(last));
+        node.replaceWith(frag);
+      }
+    }
+    return [...host.querySelectorAll(".hs-cnt")];
+  }
+  function countText(target, p) {
+    const clean = target.replace(/[,\s]/g, "").replace("−", "-").replace(/^[▲+]/, "").replace(/^▼/, "-");
+    const value = parseFloat(clean);
+    if (!Number.isFinite(value)) return target;
+    const decimals = (clean.split(".")[1] || "").length;
+    const sign = /^[-−▼▲+]/.test(target) ? target[0] : "";
+    const v = Math.abs(value) * p;
+    const fixed = v.toFixed(decimals);
+    const [int, frac] = fixed.split(".");
+    return `${sign}${target.includes(",") ? Number(int).toLocaleString("en-US") : int}${frac ? `.${frac}` : ""}`;
+  }
+  /** カウントアップ: every number in the words counts up from zero (the words around them stay). */
+  function countUp(c) {
+    const out = [];
+    for (const part of c.parts) {
+      const [clock] = holdVisible(c, part, false);
+      const spans = numberSpans(textHost(part));
+      if (!spans.length) { out.push(...animateEl(c, part.fx, [{ opacity: 0 }, { opacity: 1 }]), clock); continue; }
+      const set = (p) => { for (const sp of spans) sp.textContent = p >= 1 ? sp.dataset.count : countText(sp.dataset.count, easeOut(p)); };
+      set(0);
+      driven(clock, { frame: set, end: () => set(1), cancel: () => set(1) });
+      out.push(clock);
+    }
+    return out.filter(Boolean);
+  }
+
+  /** グラフが伸びる: bars grow from their axis one after another, lines are drawn, slices open, then the labels. */
+  function chartGrow(c, { skipHold = false } = {}) {
+    const out = [];
+    for (const part of c.parts) {
+      if (!skipHold) out.push(...holdVisible(c, part, false));
+      const node = part.node;
+      const at = (el, frames, k = 0, span = 0.7) => {
+        try { out.push(el.animate(frames, { duration: c.dur * span, delay: c.dur * (1 - span) * k, easing: c.easing, fill: "both" })); } catch { /* detached */ }
+      };
+      const bars = [...node.querySelectorAll(".hs-obar, .hs-bar")];
+      const n = Math.max(1, bars.length - 1);
+      bars.forEach((bar, i) => {
+        const horizontal = bar.classList.contains("h");
+        bar.style.transformBox = "fill-box";
+        bar.style.transformOrigin = horizontal ? (bar.dataset.neg ? "100% 50%" : "0% 50%") : (bar.dataset.neg ? "50% 0%" : "50% 100%");
+        at(bar, [{ transform: horizontal ? "scale(0, 1)" : "scale(1, 0)" }, { transform: "scale(1, 1)" }], i / n);
+      });
+      for (const line of node.querySelectorAll(".hs-oline, .hs-draw")) {
+        let len = 0;
+        try { len = line.getTotalLength(); } catch { len = 0; }
+        if (len) at(line, [{ strokeDasharray: `${len} ${len}`, strokeDashoffset: `${len}` }, { strokeDasharray: `${len} ${len}`, strokeDashoffset: "0" }], 0, 0.85);
+      }
+      for (const area of node.querySelectorAll(".hs-oarea")) at(area, [{ clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)" }], 0, 0.85);
+      const pie = node.querySelector(".hs-ochart-pie");
+      const slices = [...node.querySelectorAll(".hs-oslice, .hs-arc")];
+      const [cx, cy] = (pie?.dataset.c || "").split(",").map(Number);
+      slices.forEach((slice, i) => {
+        if (Number.isFinite(cx)) { slice.style.transformBox = "view-box"; slice.style.transformOrigin = `${cx}px ${cy}px`; }
+        at(slice, [{ opacity: 0, transform: "scale(0.55) rotate(-25deg)" }, { opacity: 1, transform: "scale(1) rotate(0deg)" }], i / Math.max(1, slices.length - 1), 0.6);
+      });
+      for (const el of node.querySelectorAll(".hs-ochart-labels text, .hs-omark, .hs-chart .hs-val, .hs-chart circle")) at(el, [{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 1 }], 0, 1);
+      if (!bars.length && !slices.length && !node.querySelector(".hs-oline, .hs-draw, .hs-oarea")) out.push(...animateEl(c, part.fx, [{ opacity: 0 }, { opacity: 1 }]));
+    }
+    return out;
+  }
+
+  /** 光が走る: a band of light sweeps across. */
+  function shine(c) {
+    const out = [];
+    for (const part of c.parts) {
+      const band = part.fx.ownerDocument.createElement("span");
+      band.className = "hs-fx-shine";
+      part.fx.append(band);
+      const [a] = animateEl({ ...c, iterations: c.iterations }, band, [{ backgroundPosition: "130% 0" }, { backgroundPosition: "-30% 0" }], { fill: "none" });
+      if (!a) { band.remove(); continue; }
+      a.finished.then(() => band.remove(), () => band.remove());
+      out.push(a);
+    }
+    return out;
+  }
+  /** 波紋: a ring spreads out from the object and fades. */
+  function ripple(c) {
+    const out = [];
+    for (const part of c.parts) {
+      const host = part.object ? part.node : part.node;
+      const ring = host.ownerDocument.createElement("span");
+      ring.className = "hs-fx-ripple";
+      const size = Math.max(part.self.w, part.self.h);
+      Object.assign(ring.style, { width: `${size}px`, height: `${size}px`, left: `${part.self.w / 2 - size / 2}px`, top: `${part.self.h / 2 - size / 2}px` });
+      host.append(ring);
+      const [a] = animateEl(c, ring, [{ transform: "scale(0.7)", opacity: 0.85 }, { transform: "scale(1.9)", opacity: 0 }], { fill: "none" });
+      if (!a) { ring.remove(); continue; }
+      a.finished.then(() => ring.remove(), () => ring.remove());
+      out.push(a);
+    }
+    return out;
+  }
+  /** マーカーを引く: a pale-blue marker is drawn under the words, line by line. */
+  function marker(c) {
+    const out = [];
+    for (const part of c.parts) {
+      const host = textHost(part);
+      if (!host) continue;
+      const blocks = [...host.querySelectorAll(":scope > p, :scope > ul > li, :scope > ol > li")];
+      for (const block of blocks.length ? blocks : [host]) {
+        let mark = block.querySelector(":scope > .hs-mk");
+        if (!mark) {
+          mark = block.ownerDocument.createElement("span");
+          mark.className = "hs-mk";
+          while (block.firstChild) mark.append(block.firstChild);
+          block.append(mark);
+        }
+        out.push(...animateEl(c, mark, [{ backgroundSize: "0% 100%" }, { backgroundSize: "100% 100%" }]));
+      }
+    }
+    return out;
+  }
+  /** スポットライト: everything else on the slide dims until the next click. */
+  function spotlight(c, state) {
+    const slideEl = state?.slideEl;
+    if (!slideEl) return [];
+    const keep = new Set(c.parts.map((p) => p.node));
+    const out = [];
+    const others = [...slideEl.querySelectorAll(".hs-objects > .hs-obj")].filter((n) => !keep.has(n)).map((n) => n.querySelector(".hs-obj-move") || n);
+    const frame = slideEl.querySelector(":scope > .hs-frame");
+    for (const el of [...others, ...(frame && !c.parts.some((p) => !p.object) ? [frame] : [])]) out.push(...animateEl({ ...c, iterations: 1, direction: "normal" }, el, [{ filter: "opacity(1)" }, { filter: "opacity(0.16)" }], { fill: "forwards" }));
+    state.spots = [...(state.spots || []), ...out];
+    return out;
+  }
+  /** At the next click the spotlight lifts. */
+  function releaseSpots(state) {
+    for (const a of state.spots || []) { try { a.reverse(); } catch { a.cancel(); } }
+    state.spots = [];
+  }
+
   /** Start one animation now: the entrance/exit/emphasis/path/media it describes, on everything it moves. */
   function runEntry(state, e, { instant = false } = {}) {
     const { parts, unit } = targetsOf(state.slideEl, state.plan, e.el);
@@ -576,8 +918,8 @@
     else if (e.cls === "em") {
       if (!def.lasting && !e.rewind && c.fill === "forwards") c.fill = "none";
       const by = e.by || def.by;
-      if (by) started = byUnits(c, by, (cc) => def.run(cc));
-      else started = def.run(c);
+      if (by) started = byUnits(c, by, (cc) => def.run(cc, state));
+      else started = def.run(c, state);
     } else if (e.cls === "path") {
       const pts = pathPoints(e.path);
       const frames = pts.map(([x, y]) => ({ translate: `${px(x)} ${px(y)}` }));
@@ -590,6 +932,7 @@
 
   /** An entrance (or, played backwards, an exit) on each part — or on its words or letters. */
   function entrance(c, def, exit) {
+    if (def.custom) return def.custom(c, exit);
     const frameFor = (cc) => {
       let frames = def.kf(cc).map((f) => ({ ...f }));
       // Entrances keep the element shown from their first frame on; exits hide it at their last.
@@ -683,7 +1026,9 @@
     state.pending = [];
     state.triggerAt = new Map();
     const slideEl = state.slideEl;
-    for (const el of slideEl.querySelectorAll(".hs-obj-fx, .hs-obj-move, .hs-obj-tx, .hs-obj-geom *, [data-field], [data-g], .hs-u")) for (const a of el.getAnimations?.() || []) a.cancel();
+    for (const el of slideEl.querySelectorAll(".hs-obj-fx, .hs-obj-move, .hs-obj-tx, .hs-obj-text, .hs-obj-geom *, .hs-obj-icon *, .hs-obj-line path, .hs-ochart *, .hs-chart *, .hs-mk, .hs-frame, [data-field], [data-g], .hs-u")) for (const a of el.getAnimations?.() || []) a.cancel();
+    for (const el of slideEl.querySelectorAll(".hs-pen, .hs-caret, .hs-fx-shine, .hs-fx-ripple")) el.remove();
+    state.spots = [];
     for (const el of slideEl.querySelectorAll(".hs-anim-hide")) el.classList.remove("hs-anim-hide");
     for (const target of firstEntrances(state.plan)) for (const part of targetsOf(slideEl, state.plan, target).parts) part.fx.classList.add("hs-anim-hide");
   }
@@ -754,6 +1099,7 @@
     const state = stateOf(slideEl);
     if (!state) return 0;
     animFinish(slideEl);
+    releaseSpots(state);
     const group = state.plan.main[n];
     if (!group) return 0;
     const reduced = root.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -836,7 +1182,7 @@
 
   Object.assign(E, {
     ANIM_CLASSES: CLASSES, ANIM_STARTS: STARTS, ANIM_EASES: EASES, ANIM_BY: BY, ANIM_REPEATS: REPEATS, ANIM_SPEEDS: SPEEDS,
-    ANIM_IN: IN, ANIM_EM: EM, ANIM_PATHS: PATHS, ANIM_MEDIA: MEDIA, animLabel: fxLabel, animDirs: dirsOf, animDefaultDur: defaultDur,
+    ANIM_IN: IN, ANIM_EM: EM, ANIM_PATHS: PATHS, ANIM_MEDIA: MEDIA, animLabel: fxLabel, animDirs: dirsOf, animDefaultDur: defaultDur, animIsHtml: (cls, fx) => Boolean((cls === "out" ? IN[fx] : FX[cls]?.[fx])?.html),
     normalizeTimeline, timelinePlan, timelineTakesLayout, timelineMount, layoutTargets,
     animStart, animStep, animSeek, animStop, animBusy, animFinish,
     pathPreset, pathPoints, pathD, pathEnd,

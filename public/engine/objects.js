@@ -1180,6 +1180,11 @@
   const ROUTES = { straight: "直線", elbow: "カギ線", curve: "曲線" };
   const AUTOFIT = { none: "自動調整なし", shrink: "はみ出す場合だけ自動調整する", grow: "テキストに合わせて図形のサイズを調整する" };
   const FITS = { fill: "図形に合わせる", cover: "トリミングして埋める", contain: "全体を入れる" };
+  // What only HTML can do with an object (インタラクション): how it answers the mouse, what a click on it shows,
+  // and the motion it keeps while the slide is on screen. They work while presenting and in the exported file.
+  const IX_HOVERS = { lift: "浮き上がる", zoom: "拡大する", glow: "光る", tilt: "3Dで傾く", focus: "ほかを薄くする" };
+  const IX_LOOPS = { float: "ふわふわ浮く", pulse: "鼓動する", sway: "ゆらゆら揺れる", spin: "回り続ける", shine: "光が走る", bounce: "弾む" };
+  const IX_CLICKS = { popup: "詳細を開く", zoom: "拡大して見せる", flip: "裏返す", reveal: "ほかの部品を表示・非表示", spot: "スポットライトを当てる" };
 
   const DEFAULTS = {
     shape: { shape: "rect", fill: "#dce4f2", stroke: "none", strokeW: 2, fs: 36, color: "#1a1a1a", align: "center", valign: "middle", pad: [7, 14, 7, 14], autofit: "none", lh: 1.35, wrap: true },
@@ -1342,7 +1347,33 @@
       if (["next", "prev", "first", "last", "end"].includes(action.type)) o.action = { type: action.type };
       else if (action.type === "slide" && /^[A-Za-z0-9_-]{1,32}$/.test(action.to ?? "")) o.action = { type: "slide", to: action.to };
       else if (action.type === "url" && /^(https?:\/\/|mailto:)/i.test(String(action.href || "").trim())) o.action = { type: "url", href: String(action.href).trim().slice(0, 2000) };
+      else if (action.type === "popup") {
+        // A card (or, with a breakdown or a source, a panel from the right) with words of its own.
+        const pop = { type: "popup" };
+        if (typeof action.title === "string" && action.title.trim()) pop.title = action.title.trim().slice(0, 80);
+        const words = sanitizeRich(typeof action.text === "string" ? action.text : "");
+        if (words && richToText(words).trim()) pop.text = words;
+        const rows = (Array.isArray(action.rows) ? action.rows : []).filter((r) => r && String(r.label ?? "").trim()).slice(0, 8).map((r) => ({ label: String(r.label).trim().slice(0, 40), value: String(r.value ?? "").trim().slice(0, 40) }));
+        if (rows.length) pop.rows = rows;
+        if (typeof action.source === "string" && action.source.trim()) pop.source = action.source.trim().slice(0, 120);
+        if (pop.title || pop.text || pop.rows) o.action = pop;
+      } else if (action.type === "zoom" || action.type === "spot") o.action = { type: action.type };
+      else if (action.type === "flip") {
+        // The back of the card: its words and its colour (the front's colour when none is set).
+        const back = sanitizeRich(typeof action.back === "string" ? action.back : "");
+        o.action = { type: "flip", back: back && richToText(back).trim() ? back : "<p>（裏の文字）</p>" };
+        const fill = hexColor(action.fill);
+        if (fill) o.action.fill = fill;
+      } else if (action.type === "reveal") {
+        // Objects that wait hidden until this one is clicked (clicking again hides them); "only" hides what the
+        // slide's other reveal buttons showed, so a row of them works as tabs.
+        const targets = [...new Set((Array.isArray(action.targets) ? action.targets : []).filter((id) => typeof id === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(id) && id !== o.id))].slice(0, 40);
+        if (targets.length) o.action = { type: "reveal", targets, ...(action.only === true ? { only: true } : {}) };
+      }
     }
+    if (IX_HOVERS[raw.hover]) o.hover = raw.hover;
+    if (IX_LOOPS[raw.loop]) o.loop = raw.loop;
+    if (typeof raw.tip === "string" && raw.tip.trim()) o.tip = raw.tip.trim().slice(0, 200);
     return o;
   }
 
@@ -1681,12 +1712,17 @@
       const sw = f.size * 0.75;
       const itemW = (it) => sw + f.size * 0.4 + textWidth(it.label, f.size) + f.size * 1.1;
       const g = s("g", { class: "hs-ochart-legend" });
+      // While presenting, a series' key shows or hides it (motion.js); a pie's keys only name its slices.
+      const keys = !isPie && legendItems.length > 1;
       const drawItem = (it, x, y) => {
+        const key = keys ? s("g", { class: "hs-ochart-key hs-control", "data-series": String(it.i) }) : g;
+        if (keys) g.append(key);
+        if (keys) key.append(s("rect", { x: r2(x - 6), y: r2(y - f.size * 0.75), width: r2(itemW(it) - f.size * 0.6), height: r2(f.size * 1.5), fill: "transparent" }));
         if (it.kind === "line") {
-          g.append(s("line", { x1: r2(x), x2: r2(x + sw * 1.6), y1: r2(y), y2: r2(y), stroke: it.color, "stroke-width": Math.max(2, sts(it.i).width || 3) }));
+          key.append(s("line", { x1: r2(x), x2: r2(x + sw * 1.6), y1: r2(y), y2: r2(y), stroke: it.color, "stroke-width": Math.max(2, sts(it.i).width || 3) }));
           x += sw * 0.6;
-        } else g.append(s("rect", { x: r2(x), y: r2(y - sw / 2), width: r2(sw), height: r2(sw), fill: it.color }));
-        g.append(textEl(x + sw + f.size * 0.4, y + f.size * 0.36, it.label, f));
+        } else key.append(s("rect", { x: r2(x), y: r2(y - sw / 2), width: r2(sw), height: r2(sw), fill: it.color }));
+        key.append(textEl(x + sw + f.size * 0.4, y + f.size * 0.36, it.label, f));
       };
       const pos = st.legend.pos;
       if (pos === "b" || pos === "t") {
@@ -1827,7 +1863,7 @@
       const text = l.runs ? l.runs.map((r) => r.t).join("") : parts.join(", ");
       const width = textWidth(text, Math.max(f.size, ...(l.runs || []).map((r) => r.font?.size || 0)));
       const { x, y, anchor } = where(l.pos, width, f);
-      const el = textEl(x, y, l.runs ? "" : text, f, anchor);
+      const el = textEl(x, y, l.runs ? "" : text, f, anchor, { "data-s": String(si) });
       if (l.runs) for (const r of l.runs) { const rf = fontOf(r.font); el.append(s("tspan", { fill: rf.color, style: { "font-size": `${rf.size}px`, "font-weight": rf.bold ? 700 : 400 } }, r.t)); }
       labelsLayer.append(el);
     };
@@ -1849,7 +1885,7 @@
         const rect = horizontal
           ? { x: Math.min(p0, p1), y: start, width: Math.abs(p1 - p0), height: bw }
           : { x: start, y: Math.min(p0, p1), width: bw, height: Math.abs(p1 - p0) };
-        bars.append(s("rect", { class: `hs-obar${horizontal ? " h" : ""}`, x: r2(rect.x), y: r2(rect.y), width: r2(Math.max(0, rect.width)), height: r2(Math.max(0, rect.height)), fill: color, "data-paint": color.startsWith("#") ? color : null, "data-tip": `${label}・${c.series[si].name}：${numFormat(raw, sts(si).label?.format)}`, style: { "--i": String(i) } }));
+        bars.append(s("rect", { class: `hs-obar hs-mark${horizontal ? " h" : ""}`, x: r2(rect.x), y: r2(rect.y), width: r2(Math.max(0, rect.width)), height: r2(Math.max(0, rect.height)), fill: color, "data-paint": color.startsWith("#") ? color : null, "data-s": String(si), "data-neg": to < from ? "1" : null, "data-tip": `${label}・${c.series[si].name}：${numFormat(raw, sts(si).label?.format)}`, style: { "--i": String(i) } }));
         labelFor(si, i, raw, (pos, width, f) => {
           const where = pos || (stack ? "ctr" : "outEnd");
           const up = to >= from;
@@ -1880,16 +1916,19 @@
       if (kindOf(si) === "area") {
         const zx = horizontal ? zero : null;
         const close = horizontal ? ` L${P(zx, pts.at(-1)[1])} L${P(zx, pts[0][1])} Z` : ` L${P(pts.at(-1)[0], zero)} L${P(pts[0][0], zero)} Z`;
-        lines.append(s("path", { class: "hs-oarea", d: d + close, fill: color, "data-paint": color.startsWith("#") ? color : null }));
+        lines.append(s("path", { class: "hs-oarea", d: d + close, fill: color, "data-paint": color.startsWith("#") ? color : null, "data-s": String(si) }));
       } else {
         const width = ss.width ?? 4.5;
         const dash = DASHES[ss.dash]?.[1];
-        lines.append(s("path", { class: "hs-oline", d, fill: "none", stroke: color, "stroke-width": r2(width), "stroke-linejoin": "round", "stroke-linecap": "round", "stroke-dasharray": dash ? dash.map((v) => r2(v * width)).join(" ") : null, "data-paint": color.startsWith("#") ? color : null }));
+        lines.append(s("path", { class: "hs-oline", d, fill: "none", stroke: color, "stroke-width": r2(width), "stroke-linejoin": "round", "stroke-linecap": "round", "stroke-dasharray": dash ? dash.map((v) => r2(v * width)).join(" ") : null, "data-paint": color.startsWith("#") ? color : null, "data-s": String(si) }));
       }
       const m = ss.marker || (c.type === "combo" || kindOf(si) === "area" ? { s: "none" } : { s: "circle", z: 10 });
       pts.forEach(([x, y], i) => {
         const on = m.s !== "none" || m.at?.includes(i);
-        if (on) lines.append(marker(m.s === "none" ? "circle" : m.s, x, y, m.z || 10, m.color || color, `${c.labels[i]}・${c.series[si].name}：${numFormat(valuesOf(si)[i] || 0, ss.label?.format)}`));
+        const tip = `${c.labels[i]}・${c.series[si].name}：${numFormat(valuesOf(si)[i] || 0, ss.label?.format)}`;
+        if (on) lines.append(marker(m.s === "none" ? "circle" : m.s, x, y, m.z || 10, m.color || color, tip, si));
+        // Every point answers the mouse while presenting, marked or not (an invisible target).
+        else lines.append(s("circle", { class: "hs-mark hs-ohit", cx: r2(x), cy: r2(y), r: 16, "data-s": String(si), "data-tip": tip }));
         labelFor(si, i, valuesOf(si)[i] || 0, (pos, width, f) => {
           const where = pos || "r";
           const r = (m.z || 10) / 2 + 6;
@@ -1936,16 +1975,16 @@
     return d;
   }
 
-  function marker(kind, x, y, size, color, tip) {
+  function marker(kind, x, y, size, color, tip, si = 0) {
     const r = size / 2;
-    const attrs = { class: "hs-omark", fill: color, "data-tip": tip };
+    const attrs = { class: "hs-omark hs-mark", fill: color, "data-tip": tip, "data-s": String(si) };
     if (kind === "square") return s("rect", { ...attrs, x: r2(x - r), y: r2(y - r), width: r2(size), height: r2(size) });
     if (kind === "diamond") return s("path", { ...attrs, d: `M${P(x, y - r)} L${P(x + r, y)} L${P(x, y + r)} L${P(x - r, y)} Z` });
     if (kind === "triangle") return s("path", { ...attrs, d: `M${P(x, y - r)} L${P(x + r, y + r)} L${P(x - r, y + r)} Z` });
     if (kind === "dash") return s("rect", { ...attrs, x: r2(x - r), y: r2(y - size / 8), width: r2(size), height: r2(size / 4) });
     if (kind === "x" || kind === "plus" || kind === "star") {
       const d = kind === "plus" ? `M${P(x - r, y)} L${P(x + r, y)} M${P(x, y - r)} L${P(x, y + r)}` : `M${P(x - r, y - r)} L${P(x + r, y + r)} M${P(x + r, y - r)} L${P(x - r, y + r)}${kind === "star" ? ` M${P(x, y - r)} L${P(x, y + r)}` : ""}`;
-      return s("path", { class: "hs-omark", d, stroke: color, "stroke-width": Math.max(1.5, size / 6), fill: "none", "data-tip": tip });
+      return s("path", { class: "hs-omark hs-mark", d, stroke: color, "stroke-width": Math.max(1.5, size / 6), fill: "none", "data-tip": tip, "data-s": String(si) });
     }
     return s("circle", { ...attrs, cx: r2(x), cy: r2(y), r: r2(kind === "dot" ? r / 2 : r) });
   }
@@ -1958,7 +1997,7 @@
     const R = Math.max(4, Math.min(area.w, area.h) / 2 - 4);
     const hole = (st.type && st.type !== c.type ? 50 : st.hole ?? 50) / 100;
     let a = ((st.angle || 0) - 90) * (Math.PI / 180);
-    const g = s("g", { class: "hs-ochart-pie" });
+    const g = s("g", { class: "hs-ochart-pie", "data-c": `${r2(cx)},${r2(cy)}` });
     const labels = s("g", { class: "hs-ochart-labels" });
     const ss = sts(0);
     values.forEach((v, i) => {
@@ -1971,7 +2010,7 @@
       if (sweep >= Math.PI * 2 - 1e-6) d = hole ? `M${pt(R, 0)} A${r2(R)} ${r2(R)} 0 1 1 ${pt(R, Math.PI)} A${r2(R)} ${r2(R)} 0 1 1 ${pt(R, 0)} M${pt(R * hole, 0)} A${r2(R * hole)} ${r2(R * hole)} 0 1 0 ${pt(R * hole, Math.PI)} A${r2(R * hole)} ${r2(R * hole)} 0 1 0 ${pt(R * hole, 0)} Z` : `M${pt(R, 0)} A${r2(R)} ${r2(R)} 0 1 1 ${pt(R, Math.PI)} A${r2(R)} ${r2(R)} 0 1 1 ${pt(R, 0)} Z`;
       else if (hole) d = `M${pt(R, a)} A${r2(R)} ${r2(R)} 0 ${large} 1 ${pt(R, a1)} L${pt(R * hole, a1)} A${r2(R * hole)} ${r2(R * hole)} 0 ${large} 0 ${pt(R * hole, a)} Z`;
       else d = `M${P(cx, cy)} L${pt(R, a)} A${r2(R)} ${r2(R)} 0 ${large} 1 ${pt(R, a1)} Z`;
-      if (v > 0) g.append(s("path", { class: "hs-oslice", d, fill: color, "fill-rule": "evenodd", stroke: "#ffffff", "stroke-width": 2, "data-paint": color.startsWith("#") ? color : null, "data-tip": `${c.labels[i]}：${numFormat(c.series[0].values[i], ss.label?.format)}（${Math.round((v / total) * 100)}%）`, style: { "--i": String(i) } }));
+      if (v > 0) g.append(s("path", { class: "hs-oslice hs-mark", d, fill: color, "fill-rule": "evenodd", stroke: "#ffffff", "stroke-width": 2, "data-paint": color.startsWith("#") ? color : null, "data-tip": `${c.labels[i]}：${numFormat(c.series[0].values[i], ss.label?.format)}（${Math.round((v / total) * 100)}%）`, style: { "--i": String(i) } }));
       const own = ss.pointLabels?.find((p) => p.i === i);
       const l = { ...(ss.label || {}), ...(own || {}) };
       const show = own ? own.show !== false : ss.label && ss.label.show !== false;
@@ -2021,8 +2060,13 @@
       out.push(o);
       if (out.length >= 5000) break;
     }
-    // Connectors only stay attached to objects that exist.
+    // Connectors only stay attached to objects that exist; reveal buttons only show objects that exist.
     for (const o of out) for (const end of ["from", "to"]) if (o[end] && !seen.has(o[end].id)) delete o[end];
+    for (const o of out) {
+      if (o.action?.type !== "reveal") continue;
+      o.action.targets = o.action.targets.filter((id) => seen.has(id));
+      if (!o.action.targets.length) delete o.action;
+    }
     return out;
   }
 
@@ -2342,11 +2386,33 @@
       if (o.kind === "lottie") desc.fit = o.fit === "cover" ? "cover" : "contain";
       rot.append(E.mediaEl(desc, ctx, "hs-obj-media"));
     }
-    fx.append(rot);
+    if (o.action?.type === "flip") {
+      // A card that turns over on a click: the front and the back share one 3D turn (the back is its mirror).
+      const flip = h("div", { class: "hs-obj-flip" });
+      const back = h("div", { class: "hs-obj-rot hs-obj-back" });
+      back.style.transform = ["rotateY(180deg)", transform].filter(Boolean).join(" ");
+      const backFill = o.action.fill || (o.fill && o.fill !== "none" ? o.fill : "#f1f5fb");
+      shapeBody(withDefaults({ ...o, kind: "shape", shape: o.kind === "shape" ? o.shape : "roundRect", text: o.action.back, fill: backFill, flipH: false, flipV: false, autofit: "none", valign: "middle", align: o.kind === "shape" || o.kind === "text" ? o.align : "center" }), back, scale);
+      flip.append(rot, back);
+      fx.append(flip);
+    } else fx.append(rot);
     move.append(fx);
     el.append(move);
     if (o.opacity != null) el.style.opacity = String(o.opacity);
-    if (o.action && ctx.live) { el.dataset.action = o.action.type; el.title = o.action.type === "url" ? o.action.href : ""; }
+    if (ctx.live) {
+      if (o.action) { el.dataset.action = o.action.type; el.title = o.action.type === "url" ? o.action.href : ""; }
+      if (o.action?.type === "popup") el.dataset.detail = `obj:${o.id}`;
+      if (o.hover) el.dataset.hover = o.hover;
+      if (o.loop) el.dataset.loop = o.loop;
+      if (o.tip) el.dataset.tip = o.tip;
+      if (o.group) el.dataset.group = o.group;
+      // A looping group turns about the group's centre, not each member's own.
+      if ((o.loop || o.hover) && ctx.groupBoxes?.[o.group]) {
+        const g = ctx.groupBoxes[o.group];
+        el.style.setProperty("--ix-ox", `${r2(g.x + g.w / 2 - o.x)}px`);
+        el.style.setProperty("--ix-oy", `${r2(g.y + g.h / 2 - o.y)}px`);
+      }
+    }
     return el;
   }
 
@@ -2356,14 +2422,34 @@
     if (!list.length) return null;
     const layer = h("div", { class: "hs-objects" });
     const scales = opts.fit?.objs || {};
+    // While presenting, what a reveal button shows waits hidden until it is clicked.
+    const waiting = new Set(ctx.live ? list.flatMap((o) => (o?.action?.type === "reveal" && !o.hidden ? o.action.targets : [])) : []);
+    const groupBoxes = {};
+    if (ctx.live) {
+      for (const o of list) {
+        if (!o?.group || !(o.loop || o.hover) || groupBoxes[o.group]) continue;
+        const boxes = list.filter((m) => m?.group === o.group && m.kind !== "line").map((m) => bounds(m));
+        const x = Math.min(...boxes.map((b) => b.x));
+        const y = Math.min(...boxes.map((b) => b.y));
+        groupBoxes[o.group] = { x, y, w: Math.max(...boxes.map((b) => b.x + b.w)) - x, h: Math.max(...boxes.map((b) => b.y + b.h)) - y };
+      }
+    }
+    const live = { ...ctx, groupBoxes };
     for (const o of list) {
       if (!o || o.hidden || !KINDS.includes(o.kind)) continue;
       try {
-        const node = objectNode(o, ctx, list, scales[o.id]);
+        const node = objectNode(o, live, list, scales[o.id]);
+        if (node && waiting.has(o.id)) node.classList.add("hs-ix-wait");
         if (node) layer.append(node);
       } catch { /* a broken object never takes the slide down */ }
     }
     return layer;
+  }
+
+  /** The cards a slide's objects open on a click (「詳細を開く」), as the player's details: [{ target: "obj:<id>", … }]. */
+  function objectDetails(slide) {
+    return (Array.isArray(slide?.elements) ? slide.elements : []).filter((o) => o?.action?.type === "popup" && !o.hidden)
+      .map((o) => ({ target: `obj:${o.id}`, title: o.action.title || "", text: o.action.text || "", html: true, rows: o.action.rows || [], source: o.action.source || "" }));
   }
 
   /** Shrink the text of objects set to "shrink on overflow" until it fits (the slide must be in the document). */
@@ -2400,8 +2486,8 @@
   }
 
   Object.assign(E, {
-    PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS,
-    TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD,
+    PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
+    TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, objectNode, fitObjects, objectText, objectName,
   });

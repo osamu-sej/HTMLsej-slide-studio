@@ -397,10 +397,40 @@
   }
 
   /** Wire a presented slide. Returns a function that removes everything again. */
-  function activate(slide, { details = [], onOpen, onClose, onDrill, onControl } = {}) {
+  function activate(slide, { details = [], elements = [], onOpen, onClose, onDrill, onControl } = {}) {
     const overlay = slide.querySelector(".hs-overlay");
     let hotKey = null;
     let tip = null;
+    // インタラクション (what only HTML does with an object): the object under the mouse, the one zoomed into, the
+    // one in the spotlight.
+    let hotObj = null;
+    let zoomed = null;
+    let spotted = null;
+    const objNode = (id) => slide.querySelector(`.hs-obj[data-el="${E.cssEscape(id)}"]`);
+    const objData = (node) => elements.find((o) => o.id === node?.dataset.el);
+    // An object and the members of its group that answer the mouse the same way move together.
+    const mates = (node) => {
+      const group = node.dataset.group;
+      return group ? [...slide.querySelectorAll(`.hs-obj[data-group="${E.cssEscape(group)}"]`)].filter((n) => n.dataset.hover === node.dataset.hover) : [node];
+    };
+    const setHotObj = (node) => {
+      if (node === hotObj) return;
+      if (hotObj) for (const n of slide.querySelectorAll(".hs-ix-hot")) { n.classList.remove("hs-ix-hot"); n.style.removeProperty("--rx"); n.style.removeProperty("--ry"); }
+      slide.querySelector(".hs-objects")?.classList.remove("hs-ix-focusing");
+      hotObj = node;
+      if (!node) return;
+      for (const n of mates(node)) n.classList.add("hs-ix-hot");
+      if (node.dataset.hover === "focus") slide.querySelector(".hs-objects")?.classList.add("hs-ix-focusing");
+    };
+    const showObjTip = (node) => {
+      if (!tip) { tip = h("div", { class: "hs-tip hs-tip-obj" }); overlay.append(tip); }
+      tip.replaceChildren(...node.dataset.tip.split("\n").map((line) => h("span", {}, line)));
+      const box = rectIn(slide, node);
+      const above = box.y > 160;
+      tip.classList.toggle("below", !above);
+      tip.style.left = `${Math.max(160, Math.min(E.W - 160, box.x + box.w / 2))}px`;
+      tip.style.top = `${above ? box.y : box.y + box.h}px`;
+    };
     const setHot = (key) => {
       if (key === hotKey) return;
       for (const el of slide.querySelectorAll(".hs-hot")) el.classList.remove("hs-hot");
@@ -414,29 +444,43 @@
     const showTip = (mark, event) => {
       if (!tip) { tip = h("div", { class: "hs-tip" }); overlay.append(tip); }
       // Value and name, and where the figure comes from when the slide says so.
-      tip.replaceChildren(h("span", {}, mark.dataset.tip), slide.dataset.source ? h("small", {}, `出所：${slide.dataset.source}`) : null);
+      tip.replaceChildren(...[h("span", {}, mark.dataset.tip), slide.dataset.source ? h("small", {}, `出所：${slide.dataset.source}`) : null].filter(Boolean));
       const [x, y] = toSlide(slide, event.clientX, event.clientY);
       tip.style.left = `${Math.max(120, Math.min(E.W - 120, x))}px`;
       tip.style.top = `${Math.max(90, y)}px`;
-      mark.closest(".hs-chart, .hs-wf")?.classList.add("hs-has-hot");
+      mark.closest(".hs-chart, .hs-wf, .hs-ochart")?.classList.add("hs-has-hot");
       for (const other of slide.querySelectorAll(".hs-mark.hs-hot")) other.classList.remove("hs-hot");
       mark.classList.add("hs-hot");
     };
     const hideTip = () => {
       tip?.remove(); tip = null;
       slide.querySelectorAll(".hs-mark.hs-hot").forEach((el) => el.classList.remove("hs-hot"));
-      slide.querySelectorAll(".hs-chart.hs-has-hot, .hs-wf.hs-has-hot").forEach((el) => el.classList.remove("hs-has-hot"));
+      slide.querySelectorAll(".hs-chart.hs-has-hot, .hs-wf.hs-has-hot, .hs-ochart.hs-has-hot").forEach((el) => el.classList.remove("hs-has-hot"));
     };
     const onOver = (event) => {
       if (event.target.closest?.(".hs-popover")) return;
+      if (zoomed) return;
       const mark = event.target.closest?.(".hs-mark");
-      if (mark) showTip(mark, event); else hideTip();
+      const obj = event.target.closest?.(".hs-obj");
+      if (mark) showTip(mark, event);
+      else if (obj?.dataset.tip && !obj.classList.contains("hs-ix-wait")) showObjTip(obj);
+      else hideTip();
+      setHotObj(obj?.dataset.hover && !obj.classList.contains("hs-ix-wait") ? obj : null);
       const itemEl = event.target.closest?.("[data-item]");
       setHot(itemEl && !itemEl.closest(".hs-popover") ? itemEl.dataset.item : null);
     };
     const onMove = (event) => {
       const mark = event.target.closest?.(".hs-mark");
       if (mark && tip) showTip(mark, event);
+      // An object set to "tilt" leans towards the mouse (with the rest of its group).
+      if (hotObj?.dataset.hover === "tilt") {
+        const r = hotObj.getBoundingClientRect();
+        if (r.width && r.height) {
+          const ry = `${(((event.clientX - r.left) / r.width - 0.5) * 16).toFixed(2)}deg`;
+          const rx = `${((0.5 - (event.clientY - r.top) / r.height) * 12).toFixed(2)}deg`;
+          for (const n of slide.querySelectorAll(".hs-ix-hot")) { n.style.setProperty("--ry", ry); n.style.setProperty("--rx", rx); }
+        }
+      }
       // "Tilt" leans the item under the mouse towards it.
       if (slide.dataset.hover === "tilt") {
         const card = event.target.closest?.("[data-item]");
@@ -457,22 +501,24 @@
         }
       }
     };
-    const onLeave = () => { setHot(null); hideTip(); };
+    const onLeave = () => { setHot(null); hideTip(); setHotObj(null); };
     const anchorOf = (target) => (target === "takeaway" ? slide.querySelector('[data-detail="takeaway"]')
-      : [...slide.querySelectorAll(`[data-item="${E.cssEscape(target)}"]`)].find((el) => !(el instanceof SVGElement)) || slide.querySelector(`[data-item="${E.cssEscape(target)}"]`));
+      : target.startsWith("obj:") ? objNode(target.slice(4))
+        : [...slide.querySelectorAll(`[data-item="${E.cssEscape(target)}"]`)].find((el) => !(el instanceof SVGElement)) || slide.querySelector(`[data-item="${E.cssEscape(target)}"]`));
     // Evidence (a breakdown, a source, assumptions) slides in from the right over a dimmed slide.
     const openPanel = (detail) => {
       const rows = (detail.rows || []).filter((row) => row && E.strip(row.label));
       const source = E.strip(detail.source || "");
       const note = E.strip(detail.note || "");
-      const where = [E.strip(slide.querySelector(".hs-title")?.textContent || ""), detail.target === "takeaway" ? "キーメッセージの根拠" : nameOf(anchorOf(detail.target))].filter(Boolean).join(" › ");
+      const anchorName = detail.target.startsWith("obj:") ? E.strip(anchorOf(detail.target)?.textContent || "").replace(/\s+/g, " ").slice(0, 28) : nameOf(anchorOf(detail.target));
+      const where = [E.strip(slide.querySelector(".hs-title")?.textContent || "") || E.strip(slide.dataset.title || ""), detail.target === "takeaway" ? "キーメッセージの根拠" : anchorName].filter(Boolean).join(" › ");
       const tabs = [rows.length ? ["rows", "内訳"] : null, source || note ? ["source", "出所と前提"] : null].filter(Boolean);
       const close = (event) => { event.stopPropagation(); closeDetail(); };
       const panel = h("aside", { class: "hs-evidence", role: "dialog", "aria-label": E.strip(detail.title || "根拠") },
         h("button", { class: "hs-popover-close", type: "button", "aria-label": "閉じる", onclick: close }, "×"),
         h("div", { class: "hs-ev-where" }, where),
         detail.title ? h("div", { class: "hs-ev-title" }, E.strip(detail.title)) : null,
-        h("div", { class: "hs-ev-text" }, E.rich(detail.text)),
+        h("div", { class: "hs-ev-text" }, detail.html ? E.richNodes(detail.text) : E.rich(detail.text)),
         tabs.length > 1 ? h("div", { class: "hs-ev-tabs", role: "tablist" }, tabs.map(([key, label], i) => h("button", { type: "button", role: "tab", "data-tab": key, "aria-selected": String(i === 0) }, label))) : null,
         rows.length ? h("div", { class: "hs-ev-pane", "data-pane": "rows" }, evidenceRows(rows)) : null,
         source || note ? h("div", { class: "hs-ev-pane", "data-pane": "source", hidden: rows.length > 0 },
@@ -502,7 +548,7 @@
       const pop = h("div", { class: "hs-popover", role: "dialog", "aria-label": E.strip(detail.title || "詳細") },
         h("button", { class: "hs-popover-close", type: "button", "aria-label": "閉じる", onclick: (event) => { event.stopPropagation(); closeDetail(); } }, "×"),
         detail.title ? h("div", { class: "hs-popover-title" }, E.strip(detail.title)) : null,
-        h("div", { class: "hs-popover-text" }, E.rich(detail.text)));
+        h("div", { class: "hs-popover-text" }, detail.html ? E.richNodes(detail.text) : E.rich(detail.text)));
       pop.addEventListener("click", (event) => event.stopPropagation());
       const right = box.x + box.w + 32;
       const x = right + width < E.W - 48 ? right : Math.max(48, box.x - width - 32);
@@ -515,12 +561,92 @@
     const closeDetail = () => {
       overlay.querySelectorAll(".hs-popover, .hs-scrim, .hs-evidence").forEach((el) => el.remove());
       if (slide.dataset.detailOpen) { delete slide.dataset.detailOpen; onClose?.(); }
+      unzoom();
+      unspot();
+    };
+    // 「拡大して見せる」: the slide moves in on the object (a camera), any click or Esc goes back.
+    const zoomHint = h("div", { class: "hs-ix-zoomhint" }, "クリックで戻る");
+    const zoomInto = (node) => {
+      hideTip(); setHotObj(null);
+      const b = rectIn(slide, node);
+      const k = Math.min(3.4, (E.W * 0.84) / Math.max(1, b.w), (E.H * 0.84) / Math.max(1, b.h));
+      if (k <= 1.04) return;
+      const s = parseFloat(getComputedStyle(slide).getPropertyValue("--hs-s")) || slideScale(slide);
+      const tx = (E.W / 2 - (b.x + b.w / 2) * k) * s;
+      const ty = (E.H / 2 - (b.y + b.h / 2) * k) * s;
+      zoomed = node;
+      slide.classList.add("hs-ix-zoomed");
+      slide.style.transition = "transform .75s cubic-bezier(.22,.61,.36,1)";
+      slide.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) scale(${(s * k).toFixed(5)})`;
+      slide.parentElement?.append(zoomHint);
+    };
+    function unzoom() {
+      if (!zoomed) return;
+      zoomed = null;
+      slide.style.transform = "";
+      zoomHint.remove();
+      setTimeout(() => { if (!zoomed) { slide.style.transition = ""; slide.classList.remove("hs-ix-zoomed"); } }, 800);
+    }
+    // 「スポットライトを当てる」: everything else dims until the next click.
+    const spot = (node) => {
+      unspot();
+      spotted = node;
+      for (const n of mates(node).concat(node.dataset.group ? [...slide.querySelectorAll(`.hs-obj[data-group="${E.cssEscape(node.dataset.group)}"]`)] : [])) n.classList.add("hs-ix-spot");
+      slide.classList.add("hs-ix-spotting");
+    };
+    function unspot() {
+      if (!spotted) return;
+      spotted = null;
+      slide.classList.remove("hs-ix-spotting");
+      for (const n of slide.querySelectorAll(".hs-ix-spot")) n.classList.remove("hs-ix-spot");
+    }
+    // 「ほかの部品を表示・非表示」: the objects a button names come and go; with "only", it works as a tab.
+    const reveal = (node) => {
+      const action = objData(node)?.action;
+      if (!action?.targets) return;
+      const targets = action.targets.map(objNode).filter(Boolean);
+      const showing = targets.length && targets.every((n) => n.classList.contains("hs-ix-shown"));
+      if (action.only) {
+        for (const other of slide.querySelectorAll('.hs-obj[data-action="reveal"]')) {
+          if (other === node) continue;
+          other.classList.remove("is-on");
+          for (const id of objData(other)?.action?.targets || []) if (!action.targets.includes(id)) objNode(id)?.classList.remove("hs-ix-shown");
+        }
+      }
+      for (const n of targets) n.classList.toggle("hs-ix-shown", !showing);
+      node.classList.toggle("is-on", !showing);
+    };
+    /** What a click on an object does that only HTML can (a link or a jump is the player's). True when handled. */
+    const objectClick = (node) => {
+      const type = node?.dataset.action;
+      if (type === "zoom") { if (zoomed) unzoom(); else zoomInto(node); return true; }
+      if (type === "flip") { node.classList.toggle("is-flipped"); return true; }
+      if (type === "reveal") { reveal(node); return true; }
+      if (type === "spot") { if (spotted === node) unspot(); else spot(node); return true; }
+      return false;
     };
     const onClick = (event) => {
+      // While zoomed in (or in a spotlight), a click comes back first.
+      if (zoomed || (spotted && !event.target.closest?.('.hs-obj[data-action="spot"]'))) {
+        event.stopPropagation();
+        event.preventDefault();
+        unzoom();
+        unspot();
+        return;
+      }
       // Controls change the slide in place (and never advance it): a view of a ranking, a measure switched on or off.
       const control = event.target.closest?.(".hs-control");
       if (control && !event.target.closest(".hs-popover, .hs-evidence")) {
         event.stopPropagation();
+        // A chart's legend key shows or hides its series.
+        const key = event.target.closest("[data-series]");
+        if (key) {
+          const svg = key.closest("svg");
+          const off = !key.classList.contains("hs-off");
+          key.classList.toggle("hs-off", off);
+          for (const el of svg.querySelectorAll(`[data-s="${key.dataset.series}"]`)) el.classList.toggle("hs-off", off);
+          onControl?.("series");
+        }
         const view = event.target.closest("[data-view]");
         if (view) { E.rankShow(view.closest(".hs-rank"), Number(view.dataset.view)); onControl?.("view"); }
         const measure = event.target.closest("[data-measure]");
@@ -532,6 +658,12 @@
         event.stopPropagation();
         event.preventDefault();
         onDrill(Number(drill.dataset.drill), drill);
+        return;
+      }
+      const actor = event.target.closest?.(".hs-obj[data-action]");
+      if (actor && !actor.classList.contains("hs-ix-wait") && !event.target.closest(".hs-popover") && objectClick(actor)) {
+        event.stopPropagation();
+        event.preventDefault();
         return;
       }
       const host = event.target.closest?.("[data-detail]");
@@ -567,9 +699,9 @@
     return {
       openDetail,
       closeDetail,
-      get detailOpen() { return Boolean(slide.dataset.detailOpen); },
+      get detailOpen() { return Boolean(slide.dataset.detailOpen) || Boolean(zoomed) || Boolean(spotted); },
       destroy() {
-        closeDetail(); hideTip(); setHot(null);
+        closeDetail(); hideTip(); setHot(null); setHotObj(null);
         slide.removeEventListener("pointerover", onOver);
         slide.removeEventListener("pointermove", onMove);
         slide.removeEventListener("pointerleave", onLeave);
@@ -721,7 +853,7 @@
         // Animations that start with the slide wait for its way in (as in PowerPoint).
         const wayIn = type === "none" || type === "morph" ? 0 : Math.round((trMs ?? TRANSITION_MS[type] ?? 620) * 0.85);
         play(slide, { step, animate: atStep == null && !still, delay: wayIn });
-        interaction = activate(slide, { details: slides[i]?.details || [], onDrill: back ? null : (to, el) => openDrill(to, el) });
+        interaction = activate(slide, { details: [...(slides[i]?.details || []), ...(E.objectDetails?.(slides[i]) || [])], elements: slides[i]?.elements || [], onDrill: back ? null : (to, el) => openDrill(to, el) });
         playMedia(slide, { sound: gesture });
         scheduleAdvance(slide, i);
         if (still) return;
@@ -729,6 +861,7 @@
         // rings what can be clicked once, right after it has arrived.
         const kinds = [slide.querySelector(".hs-detail-badge") ? "「＋ 詳しく」" : "", slide.querySelector(".hs-drill-badge") ? "「↗ 深掘り」" : "", slide.querySelector(".hs-control") ? "切り替え・スライダー" : ""].filter(Boolean).join("・");
         if (kinds && !hinted) { hinted = true; setTimeout(() => flash(`${kinds}の付いた項目はクリックできます`), 900); }
+        else if (!hinted && slide.querySelector(".hs-obj[data-action]:not([data-action=\"url\"])")) { hinted = true; setTimeout(() => flash("光った部品はクリックできます"), 900); }
         setTimeout(() => ring(slide), atStep == null ? 1900 : 300);
       };
       if (type === "morph" && doc.startViewTransition) {
@@ -935,8 +1068,8 @@
     function ring(slide) {
       if (!slide.isConnected || current?.firstElementChild !== slide || reduced()) return;
       const overlay = slide.querySelector(".hs-overlay");
-      const targets = [...slide.querySelectorAll("[data-detail], [data-drill], .hs-rank-views, .hs-sim-input input, .hs-gap-measure")]
-        .filter((el) => !(el instanceof SVGElement) && !el.closest(".hs-hidden") && !el.parentElement?.closest("[data-detail], [data-drill]")).slice(0, 10);
+      const targets = [...slide.querySelectorAll('[data-detail], [data-drill], .hs-rank-views, .hs-sim-input input, .hs-gap-measure, .hs-obj:is([data-action="zoom"], [data-action="flip"], [data-action="reveal"], [data-action="spot"])')]
+        .filter((el) => !(el instanceof SVGElement) && !el.closest(".hs-hidden, .hs-ix-wait, .hs-anim-hide") && !el.parentElement?.closest("[data-detail], [data-drill]")).slice(0, 10);
       for (const el of targets) {
         const box = rectIn(slide, el);
         if (!box.w || !box.h) continue;

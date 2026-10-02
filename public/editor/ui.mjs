@@ -5,6 +5,7 @@
 import * as ops from "./ops.mjs";
 import { ico } from "./icons.mjs";
 import { createAnimations } from "./anim.mjs";
+import { createInteractions } from "./interact.mjs";
 import { createTableUi } from "./tables.mjs";
 import { createCrop } from "./crop.mjs";
 import { createFreeform } from "./freeform.mjs";
@@ -295,6 +296,7 @@ export function createEditorUi(editor, app) {
     { id: "insert", label: "挿入" },
     { id: "transition", label: "画面切り替え" },
     { id: "animation", label: "アニメーション" },
+    { id: "interact", label: "インタラクション" },
     { id: "view", label: "表示" },
     { id: "shape", label: "図形の書式", contextual: () => hasShape() },
     { id: "picture", label: "図の形式", contextual: () => hasImage() },
@@ -637,7 +639,7 @@ export function createEditorUi(editor, app) {
   }
 
   function buildTab(id) {
-    return { home: homeTab, insert: insertTab, transition: anim.transitionTab, animation: anim.animationTab, shape: shapeTab, picture: pictureTab, view: viewTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab }[id]();
+    return { home: homeTab, insert: insertTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, shape: shapeTab, picture: pictureTab, view: viewTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab }[id]();
   }
 
   function showTab(id) {
@@ -872,6 +874,8 @@ export function createEditorUi(editor, app) {
 
   // アニメーション・画面切り替え (anim.mjs) build their tabs and the animation pane with these same parts.
   const anim = createAnimations(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), tabNow: () => tab, refreshRibbon: () => refresh() });
+  // インタラクション (interact.mjs): what only HTML does with an object — the mouse, a click, motion that keeps going.
+  const ix = createInteractions(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), tabNow: () => tab, editLink: () => editLink() });
   const crop = createCrop(editor, app);
   const freeform = createFreeform(editor, app);
   const tables = createTableUi(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), colors, showTab: (id) => showTab(id) });
