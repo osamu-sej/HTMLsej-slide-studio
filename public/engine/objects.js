@@ -972,6 +972,8 @@
     if (bg && bg !== "#ffffff") out["background-color"] = bg;
     const size = pxSize(style?.fontSize) ?? (el.tagName === "FONT" ? FONT_TAG_SIZES[el.getAttribute("size")] ?? null : null);
     if (size) out["font-size"] = `${size}px`;
+    const face = String(style?.fontFamily || "").replace(/^['\"]|['\"]$/g, "");
+    if (/^[\p{L}\p{N}\s._+\-]{1,100}$/u.test(face)) out["font-family"] = `"${face}"`;
     const weight = String(style?.fontWeight || "");
     if (weight === "bold" || Number(weight) >= 600) out["font-weight"] = "700";
     else if (weight === "normal" || (Number(weight) > 0 && Number(weight) < 600)) out["font-weight"] = "400";
@@ -1079,7 +1081,7 @@
     const doc = root.document;
     const frag = doc.createDocumentFragment();
     const tpl = doc.createElement("template");
-    tpl.innerHTML = String(html ?? "").slice(0, 60000);
+    tpl.innerHTML = String(html ?? "").slice(0, 1_000_000);
     const source = tpl.content || tpl;
     let para = null;
     const flush = () => { if (para) { frag.append(para); para = null; } };
@@ -1228,6 +1230,11 @@
     }
     const opacity = num(raw.opacity, 0, 1);
     if (opacity != null && opacity < 1) o.opacity = opacity;
+    if (raw.shadow && typeof raw.shadow === "object") {
+      const color = hexColor(raw.shadow.color);
+      if (color) o.shadow = { dx: num(raw.shadow.dx, -500, 500, 0), dy: num(raw.shadow.dy, -500, 500, 0),
+        blur: num(raw.shadow.blur, 0, 500, 0), color, opacity: num(raw.shadow.opacity, 0, 1, 1) };
+    }
     for (const key of ["locked", "hidden"]) if (raw[key] === true) o[key] = true;
     if (typeof raw.group === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(raw.group)) o.group = raw.group;
     // The layout item an object came from (図形に変換): its "詳しく" card and deep-dive page open from it.
@@ -1242,12 +1249,17 @@
       o.shape = SHAPES[raw.shape] ? raw.shape : "rect";
       // A shape drawn by hand keeps its points (fractions of its box).
       if (raw.shape === "custom" && o.kind === "shape") {
-        const pts = (Array.isArray(raw.path?.pts) ? raw.path.pts : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 400).map(([x, y]) => [Math.round(clamp(Number(x), -1, 2) * 10000) / 10000, Math.round(clamp(Number(y), -1, 2) * 10000) / 10000]);
+        const pts = (Array.isArray(raw.path?.pts) ? raw.path.pts : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 5000).map(([x, y]) => [Math.round(clamp(Number(x), -1, 2) * 10000) / 10000, Math.round(clamp(Number(y), -1, 2) * 10000) / 10000]);
         if (pts.length > 1) { o.shape = "custom"; o.path = { pts, ...(raw.path.closed ? { closed: true } : {}), ...(raw.path.curve ? { curve: true } : {}) }; }
       }
       if (Array.isArray(raw.adj) && SHAPES[o.shape]?.adj) o.adj = adjOf(SHAPES[o.shape], raw.adj).map((v) => Math.round(v * 10000) / 10000);
       const fill = colorOrNone(raw.fill);
       if (fill) o.fill = fill;
+      if (raw.gradient && typeof raw.gradient === "object" && Array.isArray(raw.gradient.stops)) {
+        const stops = raw.gradient.stops.slice(0, 100).map((stop) => ({ at: num(stop?.at, 0, 1), color: hexColor(stop?.color), opacity: num(stop?.opacity, 0, 1, 1) }))
+          .filter((stop) => stop.at != null && stop.color);
+        if (stops.length) o.gradient = { angle: num(raw.gradient.angle, -360, 360, 0), stops };
+      }
       const fillOpacity = num(raw.fillOpacity, 0, 1);
       if (fillOpacity != null && fillOpacity < 1) o.fillOpacity = fillOpacity;
     }
@@ -1267,6 +1279,7 @@
       if (ALIGN.has(raw.align)) o.align = raw.align;
       if (["top", "middle", "bottom"].includes(raw.valign)) o.valign = raw.valign;
       if (FONTS[raw.font] && raw.font !== "body") o.font = raw.font;
+      if (typeof raw.fontFace === "string" && /^[\p{L}\p{N}\s._+\-]{1,100}$/u.test(raw.fontFace)) o.fontFace = raw.fontFace;
       const lh = num(raw.lh, 0.8, 4);
       if (lh != null) o.lh = lh;
       const ls = num(raw.ls, -0.2, 1);
@@ -1279,7 +1292,7 @@
     // Pictures, videos, animations
     if (["image", "video", "lottie"].includes(o.kind)) {
       const src = typeof raw.src === "string" ? raw.src.trim() : "";
-      if (!/^(data:(image|video|application\/json)|idb:|asset:|https?:\/\/|blob:)/i.test(src) || src.length > 12_000_000) return null;
+      if (!/^(data:(image|video|application\/json)|idb:|asset:|https?:\/\/|blob:)/i.test(src) || src.length > 50_000_000) return null;
       o.src = src;
       if (typeof raw.alt === "string" && raw.alt.trim()) o.alt = raw.alt.trim().slice(0, 200);
       if (typeof raw.fileName === "string" && raw.fileName.trim()) o.fileName = raw.fileName.trim().slice(0, 200);
@@ -1342,9 +1355,9 @@
   }
   /** A table's cells (rich text, fill, colour, bold, alignment, merged spans), columns and rows, style options. */
   function normalizeTable(raw) {
-    const rows = (Array.isArray(raw.cells) ? raw.cells : []).filter(Array.isArray).slice(0, 40);
+    const rows = (Array.isArray(raw.cells) ? raw.cells : []).filter(Array.isArray).slice(0, 500);
     if (!rows.length) return null;
-    const nCols = clamp(Math.max(...rows.map((row) => row.length), 1), 1, 20);
+    const nCols = clamp(Math.max(...rows.map((row) => row.length), 1), 1, 100);
     const cells = rows.map((row) => Array.from({ length: nCols }, (_, c) => {
       const src = row[c] && typeof row[c] === "object" ? row[c] : {};
       const cell = {};
@@ -1353,6 +1366,12 @@
       if (fill) cell.fill = fill;
       const color = hexColor(src.color);
       if (color) cell.color = color;
+      const fs = num(src.fs, 8, 400);
+      if (fs != null) cell.fs = fs;
+      const lh = num(src.lh, 0.8, 4);
+      if (lh != null) cell.lh = lh;
+      if (typeof src.fontFace === "string" && /^[\p{L}\p{N}\s._+\-]{1,100}$/u.test(src.fontFace)) cell.fontFace = src.fontFace;
+      if (Array.isArray(src.pad) && src.pad.length === 4) cell.pad = src.pad.map((v) => num(v, 0, 400, 0));
       for (const key of ["bold", "italic", "underline", "strike"]) if (src[key] === true) cell[key] = true;
       if (ALIGN.has(src.align)) cell.align = src.align;
       if (["top", "middle", "bottom"].includes(src.valign)) cell.valign = src.valign;
@@ -1387,20 +1406,20 @@
     return out;
   }
   // As many categories and series as a PowerPoint chart brought over may carry.
-  const CHART_MAX_LABELS = 60;
-  const CHART_MAX_SERIES = 12;
+  const CHART_MAX_LABELS = 500;
+  const CHART_MAX_SERIES = 100;
   /** A chart's kind, category labels and series (numbers), title and unit. */
   function normalizeChart(raw) {
     if (!raw || typeof raw !== "object") return null;
-    const labels = (Array.isArray(raw.labels) ? raw.labels : []).slice(0, CHART_MAX_LABELS).map((label) => String(label ?? "").trim().slice(0, 40));
+    const labels = (Array.isArray(raw.labels) ? raw.labels : []).slice(0, CHART_MAX_LABELS).map((label) => String(label ?? "").trim().slice(0, 500));
     const series = (Array.isArray(raw.series) ? raw.series : []).filter((s) => s && typeof s === "object").slice(0, CHART_MAX_SERIES).map((s, i) => ({
-      name: String(s.name ?? "").trim().slice(0, 40) || `系列${i + 1}`,
+      name: String(s.name ?? "").trim().slice(0, 500) || `系列${i + 1}`,
       values: labels.map((_, j) => { const v = Number(Array.isArray(s.values) ? s.values[j] : NaN); return Number.isFinite(v) ? Math.round(clamp(v, -1e12, 1e12) * 10000) / 10000 : 0; }),
     }));
     if (!labels.length || !series.length) return null;
     const out = { type: CHART_KINDS[raw.type] ? raw.type : "bar", labels, series };
     for (const key of ["title", "unit"]) if (typeof raw[key] === "string" && raw[key].trim()) out[key] = raw[key].trim().slice(0, key === "unit" ? 10 : 80);
-    const style = normalizeChartStyle(raw.style);
+    const style = normalizeChartStyle(raw.style, labels.length);
     if (style) out.style = style;
     return out;
   }
@@ -1415,7 +1434,7 @@
   const MARKERS = new Set(["none", "circle", "square", "diamond", "triangle", "dash", "dot", "x", "plus", "star"]);
   const SERIES_KINDS = new Set(["bar", "line", "area"]);
 
-  function normalizeChartStyle(raw) {
+  function normalizeChartStyle(raw, categoryCount = CHART_MAX_LABELS) {
     if (!raw || typeof raw !== "object") return null;
     const font = (f) => {
       if (!f || typeof f !== "object") return null;
@@ -1500,17 +1519,17 @@
           if (z != null) m.z = z;
           const mc = hexColor(sr.marker.color);
           if (mc) m.color = mc;
-          if (Array.isArray(sr.marker.at)) m.at = sr.marker.at.map(Number).filter((i) => Number.isInteger(i) && i >= 0 && i < CHART_MAX_LABELS).slice(0, CHART_MAX_LABELS);
+          if (Array.isArray(sr.marker.at)) m.at = sr.marker.at.map(Number).filter((i) => Number.isInteger(i) && i >= 0 && i < categoryCount).slice(0, categoryCount);
           out.marker = m;
         }
         if (Array.isArray(sr.points)) {
-          const pts = sr.points.filter((p) => p && Number.isInteger(p.i) && p.i >= 0 && p.i < CHART_MAX_LABELS && hexColor(p.color)).slice(0, CHART_MAX_LABELS).map((p) => ({ i: p.i, color: hexColor(p.color) }));
+          const pts = sr.points.filter((p) => p && Number.isInteger(p.i) && p.i >= 0 && p.i < categoryCount && hexColor(p.color)).slice(0, categoryCount).map((p) => ({ i: p.i, color: hexColor(p.color) }));
           if (pts.length) out.points = pts;
         }
         const l = label(sr.label);
         if (l) out.label = l;
         if (Array.isArray(sr.pointLabels)) {
-          const pls = sr.pointLabels.filter((p) => p && Number.isInteger(p.i) && p.i >= 0 && p.i < CHART_MAX_LABELS).slice(0, CHART_MAX_LABELS).map((p) => ({ i: p.i, ...(label(p) || {}) }));
+          const pls = sr.pointLabels.filter((p) => p && Number.isInteger(p.i) && p.i >= 0 && p.i < categoryCount).slice(0, categoryCount).map((p) => ({ i: p.i, ...(label(p) || {}) }));
           if (pls.length) out.pointLabels = pls;
         }
         return out;
@@ -1990,7 +2009,7 @@
     return { chartType: c.type, data };
   }
 
-  /** A slide's objects: the usable ones, ids made unique, at most 300. */
+  /** A slide's objects: the usable ones, ids made unique. */
   function normalizeObjects(list) {
     const seen = new Set();
     const out = [];
@@ -2000,7 +2019,7 @@
       if (seen.has(o.id)) o.id = newId();
       seen.add(o.id);
       out.push(o);
-      if (out.length >= 300) break;
+      if (out.length >= 5000) break;
     }
     // Connectors only stay attached to objects that exist.
     for (const o of out) for (const end of ["from", "to"]) if (o[end] && !seen.has(o[end].id)) delete o[end];
@@ -2128,7 +2147,7 @@
       "font-weight": o.bold ? "700" : null, "font-style": o.italic ? "italic" : null,
       "text-decoration": [o.underline ? "underline" : "", o.strike ? "line-through" : ""].filter(Boolean).join(" ") || null,
       "letter-spacing": o.ls ? `${o.ls}em` : null, "--psp": o.psp ? `${o.psp}em` : null,
-      "font-family": o.font ? FONTS[o.font][1] : null, "white-space": o.wrap === false ? "pre" : null,
+      "font-family": o.fontFace ? `"${o.fontFace}", sans-serif` : o.font ? FONTS[o.font][1] : null, "white-space": o.wrap === false ? "pre" : null,
     };
     for (const [k, v] of Object.entries(style)) if (v != null) tx.style.setProperty(k, String(v));
     if (scale && scale < 1) tx.style.setProperty("--os", String(scale));
@@ -2140,9 +2159,24 @@
     const sw = o.stroke !== "none" ? o.strokeW : 0;
     const fill = g.open ? "none" : o.fill;
     const svg = s("svg", { class: "hs-obj-geom", width: r2(o.w), height: r2(o.h), viewBox: `0 0 ${r2(Math.max(1, o.w))} ${r2(Math.max(1, o.h))}`, overflow: "visible", "aria-hidden": "true" });
+    if (o.shadow) {
+      const c = o.shadow.color;
+      const rgb = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)).join(",");
+      rotEl.style.filter = `drop-shadow(${o.shadow.dx}px ${o.shadow.dy}px ${o.shadow.blur}px rgba(${rgb},${o.shadow.opacity}))`;
+    }
+    let paint = fill;
+    if (!g.open && o.gradient?.stops?.length) {
+      const id = newId();
+      const angle = rad(o.gradient.angle || 0);
+      const dx = Math.cos(angle) * 50, dy = Math.sin(angle) * 50;
+      const grad = s("linearGradient", { id, x1: `${50 - dx}%`, y1: `${50 - dy}%`, x2: `${50 + dx}%`, y2: `${50 + dy}%` });
+      for (const stop of o.gradient.stops) grad.append(s("stop", { offset: `${stop.at * 100}%`, "stop-color": stop.color, "stop-opacity": stop.opacity }));
+      svg.append(s("defs", {}, grad));
+      paint = `url(#${id})`;
+    }
     for (const d of g.paths) {
       svg.append(s("path", {
-        d, fill: fill === "none" ? "none" : fill, "fill-opacity": fill !== "none" && o.fillOpacity != null ? o.fillOpacity : null, "fill-rule": g.rule,
+        d, fill: paint === "none" ? "none" : paint, "fill-opacity": fill !== "none" && o.fillOpacity != null ? o.fillOpacity : null, "fill-rule": g.rule,
         stroke: sw ? o.stroke : "none", "stroke-width": sw || null, "stroke-dasharray": sw ? dashArray(o.dash, sw) : null,
         "stroke-linecap": o.dash === "roundDot" ? "round" : null, "stroke-linejoin": "miter", "stroke-miterlimit": 8,
       }));
@@ -2174,8 +2208,11 @@
         if (cell.merged) return;
         const edge = (side) => (cell[side] === "none" ? "none" : cell[side] ? `${cell[side].w}px solid ${cell[side].c}` : null);
         const td = h("td", { "data-r": String(r), "data-c": String(c), rowspan: cell.rs > 1 ? String(cell.rs) : null, colspan: cell.cs > 1 ? String(cell.cs) : null, "data-fill": cell.fill || null,
-          style: { background: cell.fill || null, "vertical-align": cell.valign || null, "border-top": edge("bt"), "border-right": edge("br"), "border-bottom": edge("bb"), "border-left": edge("bl") } });
+          style: { background: cell.fill || null, "vertical-align": cell.valign || null, "border-top": edge("bt"), "border-right": edge("br"), "border-bottom": edge("bb"), "border-left": edge("bl"),
+            padding: cell.pad ? cell.pad.map((v) => `${v}px`).join(" ") : null } });
         const tx = h("div", { class: "hs-cell-tx", style: { "text-align": cell.align || null, color: cell.color || null, "font-weight": cell.bold ? "700" : null, "font-style": cell.italic ? "italic" : null,
+          "font-size": cell.fs ? `calc(${cell.fs}px * var(--os, 1))` : null, "line-height": cell.lh ?? null,
+          "font-family": cell.fontFace ? `"${cell.fontFace}", sans-serif` : null,
           "text-decoration": [cell.underline ? "underline" : "", cell.strike ? "line-through" : ""].filter(Boolean).join(" ") || null } });
         tx.append(richFragment(cell.text || ""));
         td.append(tx);
@@ -2281,6 +2318,11 @@
     const move = h("div", { class: "hs-obj-move" });
     const fx = h("div", { class: "hs-obj-fx" });
     const rot = h("div", { class: "hs-obj-rot" });
+    if (o.kind === "image" && o.shadow) {
+      const c = o.shadow.color;
+      const rgb = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)).join(",");
+      rot.style.filter = `drop-shadow(${o.shadow.dx}px ${o.shadow.dy}px ${o.shadow.blur}px rgba(${rgb},${o.shadow.opacity}))`;
+    }
     const transform = [o.rot ? `rotate(${o.rot}deg)` : "", o.flipH || o.flipV ? `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1})` : ""].filter(Boolean).join(" ");
     if (transform) rot.style.transform = transform;
     if (o.kind === "shape" || o.kind === "text") {

@@ -1,7 +1,7 @@
-// PowerPoint import in a real browser: 既存の資料を取り込む → 見た目どおりに取り込む brings a deck in the SEJ
-// template over as objects in place (title boxes, shapes, bullets, a table, a chart drawn with its own colours and
-// labels), with its animations and transition; the template's marks are the studio's master; objects edit like any
-// other; presenting plays the animation on its click; the exported file carries it all. HTMLレイアウトに組み直す
+// PowerPoint import in a real browser: 既存の資料を取り込む → 見た目どおりに取り込む brings a deck
+// over as source pages with their own master marks and editable objects (title boxes, shapes, bullets,
+// a table, and a chart with its original colours and labels). Animations and transitions are retained;
+// presenting plays them on click, and the exported file carries them. HTMLレイアウトに組み直す
 // still rebuilds a deck into layouts, and closing the choice imports nothing.
 // Usage: node qa/studio-import.mjs [--base=http://127.0.0.1:8787]   (with `npm start` running)
 import { execFileSync } from "node:child_process";
@@ -55,16 +55,17 @@ await step("choosing a PowerPoint asks how to bring it over; closing the questio
   assert(!(await deckNow()), "no deck after closing");
 });
 
-await step("見た目どおりに取り込む: every page comes over as objects on the SEJ master", async () => {
+await step("見た目どおりに取り込む: every page and its original master become editable objects", async () => {
   await page.setInputFiles("#importDeckFile", join(decks, "sej.pptx"));
   await page.waitForSelector("#importModeDialog[open]");
   await page.click('#importModeDialog [data-mode="exact"]');
-  await page.waitForFunction(() => document.querySelectorAll(".film-item").length === 3, null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelectorAll(".film-item").length === 4, null, { timeout: 30000 });
   await page.waitForTimeout(800);
   const deck = await deckNow();
   assert(deck.slides.every((s) => s.type === "blank" && s.hideTitle), "白紙 pages that draw their own title");
-  assert(deck.slides[0].master === "title" && deck.slides[1].master === "content", "the masters PowerPoint used");
-  assert(!JSON.stringify(deck).includes("隠したページ"), "the hidden slide stays out");
+  assert(deck.slides.every((s) => s.master === "source"), "the original master is preserved");
+  assert(deck.slides[2].hidden && JSON.stringify(deck.slides[2]).includes("隠したページ"), "the hidden slide is retained for editing");
+  assert(await page.locator(".film-item.is-hidden").count() === 1, "the hidden slide is marked in the editor");
   const callout = await page.textContent(".callout");
   assert(/見た目どおりに取り込みました/.test(callout) && /アニメーション2件/.test(callout) && /非表示のスライド1枚/.test(callout), `callout: ${callout}`);
   await shot("cover");
@@ -74,10 +75,10 @@ await step("the page looks as it did: title box, shapes, bullets, table and a ch
   await goTo(2);
   const slide = await page.evaluate(() => JSON.parse(JSON.stringify(window.__hsej.slide())));
   assert(await page.locator(".slide-wrap .hs-title").count() === 0, "no studio title over the slide's own");
-  assert(await page.locator(".slide-wrap .hs-sej").count() === 1, "the SEJ master is drawn by the studio");
+  assert(await page.locator(".slide-wrap .hs-sej").count() === 0, "the studio does not redraw a second master");
   const words = slide.elements.map((o) => text(o.text)).join(" ");
   for (const w of ["改革の全体像", "現状の課題", "30分", "端末で発注する", "社内ポータル"]) assert(words.includes(w), `"${w}"`);
-  assert(!/社内限り|明日の笑顔/.test(words), "the template's marks are not copied");
+  assert(/社内限り|明日の笑顔/.test(words), "the original template marks are editable objects");
   assert(await page.locator('.slide-wrap .hs-obj-tx p[data-bullet="■"]').count() === 3, "bullets");
   assert(await page.locator(".slide-wrap .hs-obj table td").count() === 9, "the table, cell by cell");
   const bars = await page.evaluate(() => [...document.querySelectorAll(".slide-wrap .hs-ochart .hs-obar")].map((b) => b.getAttribute("fill")));
@@ -170,7 +171,7 @@ await step("presenting plays PowerPoint's animation on its click", async () => {
 });
 
 await step("a button from PowerPoint still jumps to its slide while presenting", async () => {
-  await goTo(3);
+  await goTo(4);
   await page.keyboard.press("Shift+F5");
   await page.waitForSelector(".hs-player .hs-slide .hs-obj[data-action]", { timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(1000);

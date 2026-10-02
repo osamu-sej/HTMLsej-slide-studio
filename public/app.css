@@ -211,6 +211,7 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .film-item.dragging { opacity: .4; }
 .film-item.is-drill { margin-left: 16px; }
 .film-item.is-drill .film-no { color: var(--accent); font-size: 13px; }
+.film-item.is-hidden .hs-scaler { opacity: .55; }
 .drill-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; margin-bottom: 6px; }
 .drill-row select, .drill-add select { min-width: 0; }
 .drill-add { display: grid; gap: 6px; margin-top: 6px; }

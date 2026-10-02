@@ -816,7 +816,7 @@ const httpServer = createServer(async (req, res) => {
       const total = request.deck.slides.length;
       const valid = request.mode === "insert" ? request.slideIndex >= 1 && request.slideIndex <= total - 1 : request.slideIndex < total;
       if (!valid) throw new Error("slideIndexが範囲外です。");
-      if (request.mode === "insert" && total >= 50) throw new Error("スライドは50枚までです。");
+      if (request.mode === "insert" && total >= 500) throw new Error("スライドは500枚までです。");
       return startReviseJob(session, request);
     });
   }

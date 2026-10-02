@@ -1,5 +1,5 @@
-// A PowerPoint deck brought over as it looks (tools/pptx_exact.py): 白紙 pages that draw their own title box
-// (hideTitle) on the master PowerPoint used (master), bullets as PowerPoint draws them, table borders cell by cell,
+// A PowerPoint deck brought over as it looks (tools/pptx_exact.py): source pages draw their own title box
+// and master marks as editable objects, bullets as PowerPoint draws them, table borders cell by cell,
 // and charts drawn with their own formatting (chart.style → officeChart).
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -25,6 +25,36 @@ async function loadEngine() {
 }
 
 const deckWith = (...slides) => ({ title: "検証", theme: "sej", transition: "fade", motion: {}, slides });
+
+test("a source page keeps its master, viewport, gradient, shadow, font and hidden slide state", async () => {
+  const { E } = await loadEngine();
+  const [shape] = E.normalizeObjects([{ id: "g", kind: "shape", shape: "rect", x: 300, y: 200, w: 400, h: 200,
+    fill: "none", text: "<p>Source</p>", fontFace: "Arial", gradient: { angle: 90,
+      stops: [{ at: 0, color: "#ff0000", opacity: 1 }, { at: 1, color: "#0000ff", opacity: 0.5 }] },
+    shadow: { dx: 5, dy: 6, blur: 10, color: "#000000", opacity: 0.5 } }]);
+  const page = { type: "blank", title: "Source", hideTitle: true, master: "source", sourceViewport: { x: 240, y: 0, w: 1440, h: 1080 }, elements: [shape] };
+  const hidden = { ...page, sid: "hidden", hidden: true };
+  const deck = deckWith(page, hidden);
+  assert.deepEqual([...E.storyMap(deck.slides).order], [0], "hidden source pages remain in the deck but outside the show");
+  const root = E.render(page, { deck, index: 0, mode: "present" });
+  assert.equal(root.querySelector(".hs-sej"), null);
+  assert.equal(root.querySelector(".hs-foot"), null);
+  assert.match(root.querySelector(".hs-objects").getAttribute("style"), /clip-path/);
+  assert.equal(root.querySelectorAll("linearGradient stop").length, 2);
+  assert.match(root.querySelector(".hs-obj-rot").getAttribute("style"), /drop-shadow/);
+  assert.match(root.querySelector(".hs-obj-tx").getAttribute("style"), /Arial/);
+  assert.equal(deckShape.parse(deck).slides[1].hidden, true);
+});
+
+test("objects and table cells beyond the old import limits are retained", async () => {
+  const { E } = await loadEngine();
+  const objects = Array.from({ length: 301 }, (_, i) => ({ id: `part${i}`, kind: "shape", shape: "rect", x: i, y: 0, w: 10, h: 10, fill: "#ffffff" }));
+  assert.equal(E.normalizeObjects(objects).length, 301);
+  const cells = Array.from({ length: 41 }, () => Array.from({ length: 21 }, () => ({ text: "<p>value</p>" })));
+  const [table] = E.normalizeObjects([{ id: "wide", kind: "table", x: 0, y: 0, w: 800, h: 600, cells }]);
+  assert.equal(table.cells.length, 41);
+  assert.equal(table.cells[0].length, 21);
+});
 
 test("an imported page draws its own title box on the master PowerPoint used", async () => {
   const { E } = await loadEngine();
@@ -101,7 +131,7 @@ test("a chart's PowerPoint formatting is kept, checked and limited", async () =>
       series: [{ kind: "bar", color: "#B7C3DA", points: [{ i: 0, color: "#1F3864" }, { i: 99, color: "#000000" }, { i: 1, color: "javascript:x" }], label: { val: true, pos: "outEnd", format: '0"%"', font: { size: 48, bold: true } },
         pointLabels: [{ i: 0, val: true, runs: [{ t: "最上位  ", font: { size: 40 } }, { t: "100%", font: { bold: true } }] }, { i: 3, show: false }], marker: { s: "bogus", z: 999 } }],
       bogus: true } } }]);
-  assert.equal(o.chart.labels.length, 60, "up to 60 categories");
+  assert.equal(o.chart.labels.length, 70, "all 70 categories survive normalization");
   const st = o.chart.style;
   assert.equal(st.gap, 500);
   assert.deepEqual({ ...st.font }, { size: 28, color: "#1a1a1a" });

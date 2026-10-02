@@ -1783,6 +1783,7 @@
     const no = {};
     let last = -1;
     arr(slides).forEach((slide, i) => {
+      if (slide?.hidden === true) return;
       if (slide?.drillOf && last >= 0) {
         parent[i] = last;
         (drills[last] ||= []).push({ index: i, target: String(slide.drillOf) });
@@ -1813,13 +1814,14 @@
     const pageNo = story.no[index] ?? index + 1;
     const theme = THEME_IDS.has(deck.theme) ? deck.theme : DEFAULT_THEME;
     const meta = THEMES.find((entry) => entry.id === theme);
-    const sej = theme === "sej";
+    const sourcePage = slide?.master === "source";
+    const sej = theme === "sej" && !sourcePage;
     const mode = opts.mode || "edit";
     const live = mode === "present";
     const type = LAYOUTS[slide?.type] || FULL[slide?.type] ? slide.type : "content";
     const motion = deck.motion || {};
-    const backdropKind = slide ? backdropOf(slide, type, motion) : null;
-    const kinetic = slide ? kineticOf(slide, type, motion) : null;
+    const backdropKind = sourcePage ? null : slide ? backdropOf(slide, type, motion) : null;
+    const kinetic = sourcePage ? "none" : slide ? kineticOf(slide, type, motion) : null;
     const ctx = {
       deck, index, total, theme, dark: meta.dark, mode, live,
       assetBase: opts.assetBase, assetMap: opts.assetMap, mediaUrls: opts.mediaUrls,
@@ -1840,16 +1842,17 @@
 
     // Animations put on the layout's own items (animate.js) take over from its click build.
     const takeover = Boolean(Engine.timelineTakesLayout?.(slide));
-    const build = takeover ? "none" : BUILDS.includes(slide?.animation) && slide.animation !== "auto" ? slide.animation : recommendedBuild(type);
+    const build = sourcePage || takeover ? "none" : BUILDS.includes(slide?.animation) && slide.animation !== "auto" ? slide.animation : recommendedBuild(type);
     const root = h("div", {
       class: ["hs-slide", mode === "thumb" || mode === "print" ? "hs-static" : "", mode === "edit" ? "hs-editable" : "", mode === "print" ? "hs-print" : "", live ? "hs-live" : "", motion.numbers !== false ? "hs-numbers" : "", STILL.has(type) ? "hs-stage" : "", drillParent != null ? "hs-drill" : ""],
       "data-theme": theme, "data-type": type, "data-build": build, "data-tone": meta.dark ? "dark" : "light",
+      "data-source-page": sourcePage ? "true" : null,
       // A slide may choose its own entrance and emphasis; otherwise the deck's apply.
-      "data-entrance": pick(ENTRANCES, slide?.entrance, motion.entrance) || "rise",
-      "data-hover": pick(HOVERS, motion.hover) || "lift",
-      "data-emphasis": pick(EMPHASES, slide?.emphasis, motion.emphasis) || "marker",
-      "data-ambient": motion.ambient === false ? "off" : "on",
-      "data-draw": motion.draw === false ? "off" : "on",
+      "data-entrance": sourcePage ? "none" : pick(ENTRANCES, slide?.entrance, motion.entrance) || "rise",
+      "data-hover": sourcePage ? "none" : pick(HOVERS, motion.hover) || "lift",
+      "data-emphasis": sourcePage ? "none" : pick(EMPHASES, slide?.emphasis, motion.emphasis) || "marker",
+      "data-ambient": sourcePage || motion.ambient === false ? "off" : "on",
+      "data-draw": sourcePage || motion.draw === false ? "off" : "on",
       "data-kinetic": kinetic, "data-backdrop": backdropKind,
       "data-drill-of": drillParent != null ? String(drillParent) : null,
       role: "img", "aria-label": `${pageNo}枚目${drillParent != null ? "の深掘り" : ""}：${strip(slide?.title || TYPE_LABELS[type] || "")}`,
@@ -1898,7 +1901,11 @@
     }
     // Objects placed by hand (objects.js) sit above the layout and below the master's marks.
     const objects = Engine.objectLayer?.(slide, ctx, { fit: opts.fit });
-    if (objects) root.append(objects);
+    if (objects) {
+      const v = slide?.sourceViewport;
+      if (sourcePage && v) objects.style.clipPath = `inset(${v.y}px ${1920 - v.x - v.w}px ${1080 - v.y - v.h}px ${v.x}px)`;
+      root.append(objects);
+    }
     root.append(overlay);
     if (sej) {
       // The master: the cover and chapters use the title master, every other page the content master
@@ -1911,7 +1918,7 @@
       const source = strip(slide?.source || "");
       if (source) root.dataset.source = source;
       if (master === "content" && source) root.append(h("footer", { class: "hs-foot" }, h("span", { class: "hs-source", "data-field": "source" }, `出所：${source}`)));
-    } else if (!["title", "section", "closing"].includes(type)) {
+    } else if (!sourcePage && !["title", "section", "closing"].includes(type)) {
       // Where the figures come from sits at the foot of the page (and in the chart tooltips); otherwise the deck's name.
       const source = strip(slide?.source || "");
       if (source) root.dataset.source = source;
@@ -2157,7 +2164,7 @@
   }
 
   function brandCheck(slideEl) {
-    if (slideEl?.dataset?.theme !== "sej" || !root.getComputedStyle) return [];
+    if (slideEl?.dataset?.theme !== "sej" || slideEl?.dataset?.sourcePage === "true" || !root.getComputedStyle) return [];
     const issues = [];
     const seen = new Set();
     const add = (el, message) => {

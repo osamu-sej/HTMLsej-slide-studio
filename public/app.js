@@ -525,7 +525,7 @@ function normalizeSlide(raw, index, total) {
   // Objects placed by hand, their animations, and the id that links to this slide point at.
   const objects = E.normalizeObjects(slide.elements);
   if (objects.length) slide.elements = objects; else delete slide.elements;
-  const timeline = E.normalizeTimeline(slide.timeline, slide).slice(0, 400);
+  const timeline = E.normalizeTimeline(slide.timeline, slide).slice(0, 5000);
   if (timeline.length) slide.timeline = timeline; else delete slide.timeline;
   // 画面切り替え: how long the way in takes (ms) and moving on by itself after some seconds.
   if (Number(slide.transitionDur) >= 100 && Number(slide.transitionDur) <= 10000) slide.transitionDur = Math.round(Number(slide.transitionDur)); else delete slide.transitionDur;
@@ -534,10 +534,15 @@ function normalizeSlide(raw, index, total) {
   // A page brought over from PowerPoint as it looked keeps its title as an object and may use the cover's master.
   if (type === "blank") {
     if (slide.hideTitle === true) slide.hideTitle = true; else delete slide.hideTitle;
-    if (slide.master !== "title" && slide.master !== "content") delete slide.master;
+    if (slide.master !== "title" && slide.master !== "content" && slide.master !== "source") delete slide.master;
+    if (slide.master === "source") {
+      const v = slide.sourceViewport;
+      if (!v || ![v.x, v.y, v.w, v.h].every(Number.isFinite)) delete slide.sourceViewport;
+    } else delete slide.sourceViewport;
   } else { delete slide.hideTitle; delete slide.master; }
+  if (slide.hidden !== true) delete slide.hidden;
   // The first page is the cover: a title page, or a cover brought over from PowerPoint (a 白紙 page).
-  if (index === 0 && total > 1 && type !== "title" && !(type === "blank" && slide.elements?.length)) return { type: "title", title: strip(slide.title) || "無題の資料" };
+  if (index === 0 && total > 1 && type !== "title" && slide.master !== "source" && !(type === "blank" && slide.elements?.length)) return { type: "title", title: strip(slide.title) || "無題の資料" };
   return slide;
 }
 
@@ -564,8 +569,23 @@ function normalizeDeck(value, base = null) {
   else if (Array.isArray(source?.slides)) { slides = source.slides; meta = source; }
   else if (Array.isArray(source?.deck?.slides)) { slides = source.deck.slides; meta = source.deck; }
   else throw new Error("slideData 配列が見つかりません。");
-  if (slides.length < 2 || slides.length > 50) throw new Error("スライド枚数は2〜50枚にしてください。");
+  if (slides.length < 1 || slides.length > 500) throw new Error("スライド枚数は1〜500枚にしてください。");
   const normalized = slides.map((slide, index) => normalizeSlide(slide, index, slides.length));
+  if (meta.fidelity === "exact") normalized.forEach((slide, index) => {
+    const source = slides[index];
+    const original = Array.isArray(source?.elements) ? source.elements : [];
+    if ((slide.elements?.length ?? 0) !== original.length) throw new Error(`${index + 1}枚目の部品が一部取り込めません。原本を確認してください。`);
+    if ((slide.timeline?.length ?? 0) !== (source.timeline?.length ?? 0)) throw new Error(`${index + 1}枚目のアニメーションが一部取り込めません。`);
+    original.forEach((object, i) => {
+      const kept = slide.elements[i];
+      if (object.gradient && kept.gradient?.stops?.length !== object.gradient.stops?.length)
+        throw new Error(`${index + 1}枚目のグラデーションが一部取り込めません。`);
+      if (object.kind === "table" && (kept.cells.length !== object.cells.length || kept.cells[0]?.length !== object.cells[0]?.length))
+        throw new Error(`${index + 1}枚目の表が一部取り込めません。`);
+      if (object.kind === "chart" && (kept.chart.labels.length !== object.chart.labels.length || kept.chart.series.length !== object.chart.series.length))
+        throw new Error(`${index + 1}枚目のグラフが一部取り込めません。`);
+    });
+  });
   const transition = TRANSITIONS.includes(meta.transition) ? meta.transition : base?.transition ?? "fade";
   // Whatever design the JSON names (a deck from HTML Slide Studio, an old save), it opens in the SEJ template.
   return withTemplate({
@@ -1065,7 +1085,7 @@ function replaceSlide(index, slide) {
 
 /** Returns where the slide went: a story slide never lands between a slide and its deep-dive pages. */
 function insertSlide(index, slide) {
-  if (state.deck.slides.length >= 50) { toast("スライドは50枚までです"); return -1; }
+  if (state.deck.slides.length >= 500) { toast("スライドは500枚までです"); return -1; }
   if (!slide.drillOf) { const story = storyOf(); while (story.parent[index] != null) index += 1; }
   pushUndo();
   state.deck.slides.splice(index, 0, slide);
@@ -1379,7 +1399,7 @@ async function openSavedDeck(record, selected = 0) {
 }
 
 async function insertSavedSlide(record, index) {
-  if (!state.deck || state.deck.slides.length >= 50) return;
+  if (!state.deck || state.deck.slides.length >= 500) return;
   try {
     const latest = await getSavedDeck(record.id);
     const source = latest?.deck.slides[index];
@@ -1419,7 +1439,7 @@ function renderLibrary() {
         h("div", { class: "text" }, h("b", {}, `${index + 1}枚目｜${slide.title || typeLabel(slide.type)}`), h("span", {}, slideExcerpt(slide, query))),
         h("div", { class: "library-slide-actions" },
           h("button", { class: "btn", type: "button", onclick: () => openSavedDeck(record, index) }, "この1枚で開く"),
-          h("button", { class: "btn", type: "button", disabled: !state.deck || state.deck.slides.length >= 50, onclick: () => insertSavedSlide(record, index) }, "今の資料に追加")));
+          h("button", { class: "btn", type: "button", disabled: !state.deck || state.deck.slides.length >= 500, onclick: () => insertSavedSlide(record, index) }, "今の資料に追加")));
     });
     return h("div", { class: "library-card" },
       h("div", { class: "library-card-head" },
@@ -1654,10 +1674,11 @@ function renderFilmstrip() {
     if (story.drills[index]?.length) flags.push(h("span", { title: `クリックで移る深掘りページ ${story.drills[index].length}枚` }, `↗${story.drills[index].length}`));
     const build = slide.animation || E.recommendedBuild(slide.type);
     if (build === "click") flags.push(h("span", { title: "クリックで順番に表示" }, "⋯"));
+    if (slide.hidden) flags.push(h("span", { title: "発表では表示しない元のスライド" }, "非"));
     const item = h("div", {
-      class: `film-item${index === state.selected ? " selected" : ""}${parent != null ? " is-drill" : ""}`,
+      class: `film-item${index === state.selected ? " selected" : ""}${parent != null ? " is-drill" : ""}${slide.hidden ? " is-hidden" : ""}`,
       draggable: movable ? "true" : null,
-      title: parent != null ? `${index + 1}. ${parent + 1}枚目の深掘りページ：${strip(slide.title) || typeLabel(slide.type)}` : `${index + 1}. ${strip(slide.title) || typeLabel(slide.type)}`,
+      title: `${index + 1}. ${parent != null ? `${parent + 1}枚目の深掘りページ：` : ""}${strip(slide.title) || typeLabel(slide.type)}${slide.hidden ? "（発表では非表示）" : ""}`,
       onclick: () => select(index),
       ondragstart: (event) => { dragFrom = index; event.dataTransfer.effectAllowed = "move"; item.classList.add("dragging"); },
       ondragend: () => { dragFrom = null; item.classList.remove("dragging"); strip_.querySelectorAll(".drop-before").forEach((el) => el.classList.remove("drop-before")); },
@@ -1689,8 +1710,9 @@ function renderStage() {
   const lotties = deck.slides.filter((slide) => slide.media?.kind === "lottie").length;
   const details = deck.slides.reduce((sum, slide) => sum + (slide.details?.length ?? 0), 0);
   const story = storyOf();
-  const drillCount = deck.slides.length - story.order.length;
-  $("deckMeta").textContent = [deck.audience && `対象：${deck.audience}`, `${story.order.length}枚${drillCount ? `＋深掘り${drillCount}枚` : ""}`, `${types}種類のレイアウト`, videos ? `動画${videos}本` : "", lotties ? `アニメーション${lotties}個` : "", details ? `詳細${details}か所` : ""].filter(Boolean).join(" ・ ");
+  const drillCount = Object.keys(story.parent).length;
+  const hiddenCount = deck.slides.filter((slide) => slide.hidden).length;
+  $("deckMeta").textContent = [deck.audience && `対象：${deck.audience}`, `${story.order.length}枚${drillCount ? `＋深掘り${drillCount}枚` : ""}${hiddenCount ? `＋非表示${hiddenCount}枚` : ""}`, `${types}種類のレイアウト`, videos ? `動画${videos}本` : "", lotties ? `アニメーション${lotties}個` : "", details ? `詳細${details}か所` : ""].filter(Boolean).join(" ・ ");
   if (state.view === "outline") return renderOutline(body);
   if (state.view === "grid") {
     body.replaceChildren(h("div", { class: "stage-grid" }, deck.slides.map((slide, index) => h("div", {
@@ -4918,7 +4940,7 @@ function importCallout() {
   const close = h("button", { class: "btn btn-ghost btn-icon", type: "button", title: "閉じる", onclick: () => { state.imported = null; renderStage(); } }, "✕");
   if (fidelity === "exact") {
     const s = state.imported.stats || {};
-    const notes = [s.hidden && `非表示のスライド${s.hidden}枚は取り込んでいません`, s.unsupported && `表示できない要素が${s.unsupported}個あります（EMF・WMFの図など。画像に置き換えてください）`].filter(Boolean);
+    const notes = [s.hidden && `非表示のスライド${s.hidden}枚も編集用に保持しています`, s.unsupported && `再現できない要素が${s.unsupported}個あります。原本との照合が必要です`].filter(Boolean);
     return h("div", { class: "callout" },
       h("div", { class: "text" },
         h("b", {}, `「${name}」を見た目どおりに取り込みました`),

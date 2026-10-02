@@ -5,7 +5,7 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 ## SEJテーマ
 
 - マスター（ロゴ・緑線・秘（B）・社内限り・スローガン・コピーライト・ページ番号）は原本 `assets/sej/template.pptx` と同じ位置に描く（1インチ＝144px）。位置は `public/engine/engine.js` の `SEJ_MASTER`／`SEJ_BOX` にあり、`test/test_sej_master.py` が原本と1px以内で一致するかを確かめる。マスターを動かす・消す・書き換える変更はしない。
-- スタジオの資料はいつもSEJテンプレート。テーマ・アクセント色を選ぶ画面は置かず、AI（生成・会話）のスキーマとプロンプトにもテーマを入れない。別のテーマの資料は `withTemplate()`（public/app.js）で開くときにSEJへ戻す。ほかの8テーマはエンジンと撮影テスト（`npm run qa`）のためだけに残す。
+- スタジオで新しく作る資料のテーマはSEJ固定。テーマ・アクセント色を選ぶ画面は置かず、AI（生成・会話）のスキーマとプロンプトにもテーマを入れない。別のテーマの資料は `withTemplate()`（public/app.js）で開くときにSEJへ戻す。PowerPointを見た目どおりに取り込んだページは `master: source` により元のマスターを表示する。ほかの8テーマはエンジンと撮影テスト（`npm run qa`）のためだけに残す。
 - ブランドのきまり：文字は黒（#1A1A1A）・濃紺（#1F3864）・グレー（#808080）だけ。白抜き文字は使わない。濃紺の面には文字を載せない。面は淡青・グレー・淡茶。影を付けない。色の付いた箱に枠線を付けない。アクセント色の変更は効かない。
 - レイアウトやCSSを変えたら `npm run qa:sej`（撮影とSEJブランド検査）で見た目と指摘を確かめる。`test/sej.test.js` はSEJのスタイルに白い文字や落ち影が入っていないかも見る。
 
@@ -17,7 +17,7 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 - 部品の文字は決まったタグだけのHTML（`sanitizeRich`）。画面に出す前に必ず通す。
 - 表・グラフは部品の `table`・`chart`（編集は `public/editor/tables.mjs`）、トリミングは `crop.mjs`、手で描く形と頂点の編集は `freeform.mjs`（`shape: "custom"` と `path`）。
 - 「図形に変換」（`public/editor/convert.mjs`）は、レイアウトのスライドを画面外で原寸に描いて読み取り、部品にして白紙のスライドにする。項目は `group`、出し方は `timeline`、詳細・深掘りは部品の `item` に引き継ぐ。色は `PALETTE` に合わせる（淡い色は元の色＋透明度）。レイアウトを変えたら `qa/studio-convert.mjs` を通し、見た目が原本と変わらないことを確かめる。
-- PowerPointの「見た目どおりに取り込む」は `tools/pptx_exact.py`（`/api/import?mode=exact`）。1枚ずつ白紙（`hideTitle`・`master`）の部品にし、グラフは書式を `chart.style` に入れて `officeChart`（objects.js）で描く。SEJテンプレートの資料はマスターの要素を取り込まない。変えたら `test/test_pptx_exact.py`・`test/import-exact.test.js`・`qa/studio-import.mjs` を通し、LibreOfficeで描いた原本と並べて見比べる。
+- PowerPointの「見た目どおりに取り込む」は `tools/pptx_exact.py`（`/api/import?mode=exact`）。1枚ずつ白紙（`hideTitle`・`master: source`）の部品にし、グラフは書式を `chart.style` に入れて `officeChart`（objects.js）で描く。取り込み資料は元のマスター・装飾・画像を保持し、スタジオのSEJマスターとブランド検査を重ねない。非表示スライドも編集データに残し、発表からは除く。変えたら `test/test_pptx_exact.py`・`test/import-exact.test.js`・`qa/studio-import.mjs` を通し、LibreOfficeで描いた原本と並べて見比べる。
 - アニメーションは `slide.timeline`（再生は `public/engine/animate.js`、編集は `public/editor/anim.mjs`）。開始・終了は `transform`／`opacity`／`clip-path`、強調は `scale`／`rotate`（足し合わせ）と色、軌跡は `translate`（足し合わせ）で動かし、同じ部品の効果が打ち消し合わないようにする。発表のクリックはレイアウトの「中身の出し方」の後にアニメーションが続く（`data-lsteps`・`data-steps`）。
 
 ## PRとマージ
