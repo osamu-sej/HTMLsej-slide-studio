@@ -104,7 +104,7 @@ export function applyChatOperations(slides, { operations = [], order } = {}) {
     } else for (const i of group.drills) deleted.add(i);
     for (const slide of group.inserted) items.push({ from: null, slide, changed: true });
   }
-  if (items.length < 2 || items.length > 50) throw new Error(`変更後の枚数が${items.length}枚になります。2〜50枚にしてください。`);
+  if (items.length < 1 || items.length > 500) throw new Error(`変更後の枚数が${items.length}枚になります。1〜500枚にしてください。`);
   return {
     slides: items.map((item) => item.slide),
     items: items.map(({ from, changed }) => ({ from, changed })),

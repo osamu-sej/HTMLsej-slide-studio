@@ -9,9 +9,8 @@ slide's proportions on the studio's 1920 × 1080 page. Placeholders take what th
 them (position, size, colour, bullets), colours follow the theme. Slide transitions and entrance / exit /
 emphasis animations come along as the studio's own.
 
-On a deck in the SEJ template, the template's marks (logo, green rule, 秘（B）, 社内限り, slogan, copyright,
-page number) are the studio's master and are not copied; any other deck brings its layout's backgrounds and
-decorations.
+The source template's marks, backgrounds and decorations remain editable objects on every imported page.
+The studio's own master is not drawn over them.
 """
 
 from __future__ import annotations
@@ -97,9 +96,6 @@ ARROWS = {"triangle": "triangle", "arrow": "arrow", "stealth": "stealth", "diamo
 NAMED = {"black": "000000", "white": "FFFFFF", "red": "FF0000", "green": "008000", "blue": "0000FF", "yellow": "FFFF00",
          "gray": "808080", "grey": "808080", "silver": "C0C0C0", "navy": "000080", "darkBlue": "00008B", "orange": "FFA500"}
 SEJ_TEXT = re.compile(r"(明日の笑顔|社内限り|秘（?[A-CＡ-Ｃ]）?|SEVEN-ELEVEN JAPAN|セブン‐イレブン・ジャパン)", re.I)
-# The SEJ master's marks (slide pixels; engine.js SEJ_BOX / SEJ_MASTER): a copy of one on a slide is not carried over.
-SEJ_MARKS = [(1798.2, 28.8, 64.8, 68.2), (1503.1, 37.4, 253.5, 57.5), (48.5, 989.3, 253.5, 57.5), (843.9, 1028.5, 230.0, 18.2),
-             (1734.4, 1012.8, 129.1, 57.5), (1358.1, 994.1, 467.7, 58.2), (69.5, 123.3, 1780.7, 10.1)]
 # A font's single line spacing (PowerPoint: ascent + descent), so text keeps its line positions.
 # Bullets PowerPoint draws from Wingdings / Symbol, as the characters they look like.
 WINGDINGS = {"§": "■", "Ø": "➢", "ü": "✓", "n": "■", "q": "❑", "l": "●", "p": "□", "v": "❖", "Ü": "➤", "ð": "⇒", "o": "□", "Ÿ": "•", "è": "➔", "\uf0a7": "■", "\uf0d8": "➢", "\uf0fc": "✓", "\uf06e": "■", "\uf0b7": "•"}
@@ -141,6 +137,7 @@ class Theme:
         self.fonts = {"major": {}, "minor": {}}
         self.fills: list = []
         self.lines: list = []
+        self.effects: list = []
         self.bg_fills: list = []
         theme_el = None
         for rel in master_part.rels.values():
@@ -167,6 +164,7 @@ class Theme:
             if fmt is not None:
                 self.fills = list(fmt.find(A + "fillStyleLst") if fmt.find(A + "fillStyleLst") is not None else [])
                 self.lines = list(fmt.find(A + "lnStyleLst") if fmt.find(A + "lnStyleLst") is not None else [])
+                self.effects = list(fmt.find(A + "effectStyleLst") if fmt.find(A + "effectStyleLst") is not None else [])
                 self.bg_fills = list(fmt.find(A + "bgFillStyleLst") if fmt.find(A + "bgFillStyleLst") is not None else [])
         clr_map = master_el.find(P + "clrMap")
         self.map = dict(clr_map.attrib) if clr_map is not None else {"bg1": "lt1", "tx1": "dk1", "bg2": "lt2", "tx2": "dk2"}
@@ -291,16 +289,18 @@ class Deck:
         return points * EMU_PT * self.k
 
 
-def image_url(part, deck: Deck, max_side: int = 2000) -> str | None:
-    """A picture part as a data URL (photos as JPEG, pictures with transparency as PNG). EMF/WMF cannot be shown."""
+def image_url(part, deck: Deck) -> str | None:
+    """Keep web-native picture bytes unchanged, avoiding JPEG and resize losses."""
     key = part.partname
     if key in deck.images:
         return deck.images[key]
     url = None
     blob = part.blob
     ext = posixpath.splitext(str(key))[1].lower()
-    if ext == ".svg":
-        url = "data:image/svg+xml;base64," + base64.b64encode(blob).decode()
+    native = {".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+              ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp"}
+    if ext in native:
+        url = f"data:{native[ext]};base64," + base64.b64encode(blob).decode()
     else:
         try:
             with Image.open(io.BytesIO(blob)) as img:
@@ -309,16 +309,13 @@ def image_url(part, deck: Deck, max_side: int = 2000) -> str | None:
                     raise ValueError("vector metafile")
                 alpha = img.mode in ("RGBA", "LA", "P") and (img.mode != "P" or "transparency" in img.info)
                 img = img.convert("RGBA" if alpha else "RGB")
-                scale = min(1.0, max_side / max(img.size))
-                if scale < 1:
-                    img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))), Image.LANCZOS)
                 out = io.BytesIO()
                 if alpha:
                     img.save(out, "PNG", optimize=True)
                     url = "data:image/png;base64," + base64.b64encode(out.getvalue()).decode()
                 else:
-                    img.save(out, "JPEG", quality=88)
-                    url = "data:image/jpeg;base64," + base64.b64encode(out.getvalue()).decode()
+                    img.save(out, "PNG", optimize=True)
+                    url = "data:image/png;base64," + base64.b64encode(out.getvalue()).decode()
         except Exception:
             url = None
     deck.images[key] = url
@@ -348,6 +345,7 @@ class SlideReader:
         self.actions: dict[str, dict[str, str]] = {}
         self.used: set[str] = set()
         self.title = ""
+        self.importing_decoration = False
 
     # ---- helpers
 
@@ -483,13 +481,9 @@ class SlideReader:
                     c = self.color(child)
                     return ("solid", c) if c else None
                 if name == "gradFill":
-                    stops = [self.color(gs) for gs in child.iter(A + "gs")]
-                    stops = [s for s in stops if s]
-                    if not stops:
-                        return None
-                    avg = tuple(round(sum(s[0][i] for s in stops) / len(stops)) for i in range(3))
-                    return ("solid", (avg, sum(s[1] for s in stops) / len(stops)))
+                    return self.gradient_of(child)
                 if name == "pattFill":
+                    self.deck.stats["unsupported"] += 1
                     c = self.color(child.find(A + "fgClr")) or self.color(child.find(A + "bgClr"))
                     return ("solid", c) if c else None
                 if name == "blipFill":
@@ -509,14 +503,46 @@ class SlideReader:
                         c = color_of(st, self.theme, color, self.clr_map)
                         return ("solid", c) if c else None
                     if local(st) == "gradFill":
-                        stops = [color_of(gs, self.theme, color, self.clr_map) for gs in st.iter(A + "gs")]
-                        stops = [s for s in stops if s]
-                        if stops:
-                            avg = tuple(round(sum(s[0][i] for s in stops) / len(stops)) for i in range(3))
-                            return ("solid", (avg, 1.0))
+                        return self.gradient_of(st, color)
                 if color:
                     return ("solid", color)
         return None
+
+    def gradient_of(self, node, ref=None):
+        stops = []
+        first_color = None
+        for gs in node.iter(A + "gs"):
+            c = color_of(gs, self.theme, ref, self.clr_map)
+            if c:
+                first_color = first_color or c
+                stops.append({"at": r2(clamp(int(gs.get("pos", 0)) / 100000, 0, 1)),
+                              "color": hexc(c), "opacity": r2(clamp(c[1], 0, 1))})
+        if not stops:
+            return None
+        lin = node.find(A + "lin")
+        if lin is None:
+            self.deck.stats["unsupported"] += 1
+            return ("solid", first_color)
+        return ("gradient", {"angle": r2(int(lin.get("ang", 0)) / 60000), "stops": stops})
+
+    def shadow_of(self, sppr, el=None, ph_chain=()):
+        effect = next((s.find(f"{A}effectLst/{A}outerShdw") for s in [sppr, *[n.find(P + "spPr") for n in ph_chain]]
+                       if s is not None and s.find(f"{A}effectLst/{A}outerShdw") is not None), None)
+        ref_color = None
+        if effect is None and el is not None:
+            idx, ref_color = self.style_ref(el, "effectRef")
+            if idx and 0 < idx <= len(self.theme.effects):
+                effect = self.theme.effects[idx - 1].find(f"{A}effectLst/{A}outerShdw")
+        if effect is None:
+            return None
+        color = self.color(effect, ref_color)
+        if not color:
+            return None
+        distance = self.deck.px(int(effect.get("dist", 0)))
+        angle = math.radians(int(effect.get("dir", 0)) / 60000)
+        return {"dx": r2(distance * math.cos(angle)), "dy": r2(distance * math.sin(angle)),
+                "blur": r2(self.deck.px(int(effect.get("blurRad", 0)))),
+                "color": hexc(color), "opacity": r2(clamp(color[1], 0, 1))}
 
     def line_of(self, sppr, el=None, ph_chain=()):
         """{color, alpha, w, dash, head, tail, headSize, tailSize} in pixels, or None for no line."""
@@ -542,6 +568,7 @@ class SlideReader:
                 elif node.find(A + "solidFill") is not None:
                     color = color_of(node.find(A + "solidFill"), self.theme, ref_color, self.clr_map)
                 elif node.find(A + "gradFill") is not None:
+                    self.deck.stats["unsupported"] += 1
                     stops = [color_of(gs, self.theme, ref_color, self.clr_map) for gs in node.iter(A + "gs")]
                     color = next((s for s in stops if s), None)
             if dash is None and node.find(A + "prstDash") is not None:
@@ -798,6 +825,8 @@ class SlideReader:
                     style.append(f"color: {hexc(run['color'])}")
                 if abs(run["size"] - base["size"]) > 0.25:
                     style.append(f"font-size: {r2(self.deck.pt(run['size']))}px")
+                if run["font"] and run["font"] != base["font"] and re.fullmatch(r"[\w\s.+\-]{1,100}", run["font"]):
+                    style.append(f'font-family: "{run["font"]}"')
                 if run["bold"] != base["bold"]:
                     style.append(f"font-weight: {700 if run['bold'] else 400}")
                 if run["italic"] != base["italic"]:
@@ -840,6 +869,8 @@ class SlideReader:
             **({"ls": r2(clamp(ls, -0.2, 1))} if abs(ls) > 0.005 else {}),
         }
         font = base["font"] or ""
+        if font and re.fullmatch(r"[\w\s.+\-]{1,100}", font):
+            settings["fontFace"] = font
         if re.search(r"BIZ UD", font):
             settings["font"] = "ud"
         elif re.search(r"教科書|Kyokasho", font):
@@ -856,42 +887,21 @@ class SlideReader:
     # ---- shapes
 
     def add(self, o: dict[str, Any], spid: str | None, group: str | None):
-        # Off the slide altogether: a slide show never shows it (on a 4:3 deck it would sit beside the page).
-        d = self.deck
-        if all(isinstance(o.get(k), (int, float)) for k in ("x", "y", "w", "h")):
-            left, top, right, bottom = d.ox, d.oy, d.ox + d.cx * d.k, d.oy + d.cy * d.k
-            if o["x"] >= right - 0.5 or o["y"] >= bottom - 0.5 or o["x"] + max(o["w"], 1) <= left + 0.5 or o["y"] + max(o["h"], 1) <= top + 0.5:
-                d.stats["skipped"] += 1
-                return
+        # Keep off-page objects too. They may be moved into view by an animation or an HTML action.
+        if len(self.objects) >= 5000:
+            raise ValueError(f"スライド{self.number}の部品が5000個を超えています。")
         if group:
             o["group"] = group
-        if spid and spid not in self.by_spid:
+        if spid and not self.importing_decoration and spid not in self.by_spid:
             self.by_spid[spid] = o["id"]
-        if spid and spid in self.actions:
+        if spid and not self.importing_decoration and spid in self.actions:
             o["action"] = self.actions.pop(spid)
         self.objects.append(o)
-
-    def skip_mark(self, b, el, is_picture=False) -> bool:
-        """On an SEJ deck, a copy of a master mark placed on the slide is not carried over (the studio draws it)."""
-        if not self.deck.sej:
-            return False
-        x, y, w, h = b["x"], b["y"], b["w"], b["h"]
-        area = max(1.0, w * h)
-        for mx, my, mw, mh in SEJ_MARKS:
-            ix = max(0.0, min(x + w, mx + mw) - max(x, mx))
-            iy = max(0.0, min(y + h, my + mh) - max(y, my))
-            if ix * iy / area > 0.6:
-                words = "".join(t.text or "" for t in el.iter(A + "t")).strip()
-                if is_picture or not words or SEJ_TEXT.search(words) or re.fullmatch(r"[\d‹›#]+", words):
-                    return True
-        return False
 
     def shape(self, el, tf, group, *, part=None, offset=None):
         """A p:sp (or dsp:sp): a shape, a text box, or a line."""
         info = self.ph_info(el)
         ph_chain = self.inherited_ph(info) if info else []
-        if info and info["type"] in ("dt", "ftr", "sldNum") and self.deck.sej:
-            return
         xf = self.xfrm_of(el, ph_chain)
         if xf is None:
             return
@@ -902,13 +912,11 @@ class SlideReader:
             nv = el.find(f"{DSP}nvSpPr/{DSP}cNvPr")
         spid = nv.get("id") if nv is not None else None
         name = nv.get("name") if nv is not None else None
-        if nv is not None and nv.get("hidden") in ("1", "true"):
-            return
+        hidden = nv is not None and nv.get("hidden") in ("1", "true")
         sppr = el.find(P + "spPr") if el.find(P + "spPr") is not None else el.find(DSP + "spPr")
+        if sppr is not None and (sppr.find(A + "scene3d") is not None or sppr.find(A + "sp3d") is not None):
+            self.deck.stats["unsupported"] += 1
         b = self.box(xf, tf)
-        if self.skip_mark(b, el):
-            self.deck.stats["skipped"] += 1
-            return
         geom = sppr.find(A + "prstGeom") if sppr is not None else None
         cust = sppr.find(A + "custGeom") if sppr is not None else None
         prst = geom.get("prst") if geom is not None else ("custom" if cust is not None else "rect")
@@ -932,6 +940,8 @@ class SlideReader:
                     pic["mask"] = key
                 if line:
                     pic.update(self.stroke(line))
+                if hidden:
+                    pic["hidden"] = True
                 self.add(pic, spid, group)
             fill = "none" if text else None
             if not text:
@@ -943,6 +953,13 @@ class SlideReader:
             subs = custom_paths(cust)
             closed_subs = [s for s in subs if len(s["pts"]) > 1]
             if not closed_subs:
+                self.deck.stats["unsupported"] += 1
+                o.update({"shape": "rect", **self.paint(fill, line)})
+                if text:
+                    o.update(self.text_settings(text, o))
+                if hidden:
+                    o["hidden"] = True
+                self.add(o, spid, group)
                 return
             if len(closed_subs) > 1:
                 # Each part of the outline is a drawn shape; they move together.
@@ -952,6 +969,8 @@ class SlideReader:
                     part_o.update(self.paint(fill if sub["fill"] else "none", line if sub["stroke"] else None))
                     if k == len(closed_subs) - 1 and text:
                         part_o.update(self.text_settings(text, o))
+                    if hidden:
+                        part_o["hidden"] = True
                     self.add(part_o, spid, group)
                 return
             sub = closed_subs[0]
@@ -971,6 +990,9 @@ class SlideReader:
             if adj:
                 o["adj"] = adj
         o.update(self.paint(fill, line))
+        shadow = self.shadow_of(sppr, el, ph_chain)
+        if shadow:
+            o["shadow"] = shadow
         if text:
             o.update(self.text_settings(text, o))
             if fill in (None, "none") and not line and o["shape"] == "rect":
@@ -978,6 +1000,8 @@ class SlideReader:
                 o["fill"] = "none"
         elif fill in (None, "none") and not line:
             return  # nothing to see
+        if hidden:
+            o["hidden"] = True
         self.add(o, spid, group)
 
     def paint(self, fill, line):
@@ -987,6 +1011,9 @@ class SlideReader:
             out["fill"] = hexc(fill[1])
             if alpha < 0.995:
                 out["fillOpacity"] = r2(clamp(alpha, 0, 1))
+        elif fill and fill[0] == "gradient":
+            out["fill"] = "none"
+            out["gradient"] = fill[1]
         else:
             out["fill"] = "none"
         out.update(self.stroke(line) if line else {"stroke": "none"})
@@ -1033,6 +1060,9 @@ class SlideReader:
             o["route"] = "elbow"
         elif prst.startswith("curved"):
             o["route"] = "curve"
+        nv = el.find(f".//{P}cNvPr")
+        if nv is not None and nv.get("hidden") in ("1", "true"):
+            o["hidden"] = True
         self.add(o, spid, group)
 
     def picture_from_blip(self, blip_fill, b, name=None, part=None):
@@ -1072,12 +1102,8 @@ class SlideReader:
             xf = {**xf, "x": xf["x"] + offset[0], "y": xf["y"] + offset[1]}
         nv = el.find(f"{P}nvPicPr/{P}cNvPr")
         spid = nv.get("id") if nv is not None else None
-        if nv is not None and nv.get("hidden") in ("1", "true"):
-            return
+        hidden = nv is not None and nv.get("hidden") in ("1", "true")
         b = self.box(xf, tf)
-        if self.skip_mark(b, el, is_picture=True):
-            self.deck.stats["skipped"] += 1
-            return
         o = self.picture_from_blip(el.find(P + "blipFill"), b, nv.get("name") if nv is not None else None, part)
         if not o:
             return
@@ -1093,9 +1119,14 @@ class SlideReader:
         line = self.line_of(sppr, el)
         if line:
             o.update(self.stroke(line))
+        shadow = self.shadow_of(sppr, el)
+        if shadow:
+            o["shadow"] = shadow
+        if hidden:
+            o["hidden"] = True
         self.add(o, spid, group)
 
-    def frame(self, el, tf, group):
+    def frame(self, el, tf, group, part=None):
         """A graphic frame: a table, a chart, SmartArt, or an embedded object (its picture)."""
         xf = self.xfrm_of(el)
         if xf is None:
@@ -1112,17 +1143,17 @@ class SlideReader:
             if table:
                 self.add(table, spid, group)
         elif uri.endswith("/chart"):
-            chart = self.chart(data, b, spid)
+            chart = self.chart(data, b, spid, part)
             if chart:
                 self.add(chart, spid, group)
         elif uri.endswith("/diagram"):
-            self.smartart(data, xf, tf, group, spid)
+            self.smartart(data, xf, tf, group, spid, part)
         else:
             # An embedded object (Excel, a picture of an equation…): the picture PowerPoint keeps of it.
             pic = next(iter(data.iter(P + "pic")), None)
             if pic is not None:
                 blip_fill = pic.find(P + "blipFill")
-                o = self.picture_from_blip(blip_fill, b) if blip_fill is not None else None
+                o = self.picture_from_blip(blip_fill, b, part=part) if blip_fill is not None else None
                 if o:
                     o["id"] = self.new_id("i", spid)
                     self.add(o, spid, group)
@@ -1136,6 +1167,8 @@ class SlideReader:
         rows = tbl.findall(A + "tr")
         if not cols or not rows:
             return None
+        if len(rows) > 500 or len(cols) > 100:
+            raise ValueError(f"スライド{self.number}の表が対応サイズ（500行・100列）を超えています。")
         tblpr = tbl.find(A + "tblPr")
         flags = {k: tblpr is not None and tblpr.get(k) in ("1", "true") for k in ("firstRow", "lastRow", "firstCol", "lastCol", "bandRow", "bandCol")}
         style_id = tblpr.find(A + "tableStyleId").text if tblpr is not None and tblpr.find(A + "tableStyleId") is not None else None
@@ -1221,10 +1254,19 @@ class SlideReader:
                     html, settings, box = txt
                     cell["text"] = html
                     sizes.append(settings["fs"])
+                    cell["fs"] = settings["fs"]
+                    cell["lh"] = settings["lh"]
+                    if settings.get("fontFace"):
+                        cell["fontFace"] = settings["fontFace"]
+                    if box.get("pad"):
+                        cell["pad"] = box["pad"]
                     if settings.get("color") or txt_color:
                         cell["color"] = settings.get("color") or hexc(txt_color)
                     if settings.get("bold") or txt_bold:
                         cell["bold"] = True
+                    for key in ("italic", "underline", "strike"):
+                        if settings.get(key):
+                            cell[key] = True
                     if settings["align"] != "left":
                         cell["align"] = settings["align"]
                 anchor = tcpr.get("anchor") if tcpr is not None else None
@@ -1243,33 +1285,36 @@ class SlideReader:
         return {"id": self.new_id("t", spid), "kind": "table", **b, "cells": cells, "cols": shares(cols), "rows": shares(heights),
                 "style": "plain", "header": False, "banded": False, "fs": r2(fs), "color": "#000000", "lh": 1.2}
 
-    def chart(self, data, b, spid):
+    def chart(self, data, b, spid, owner_part=None):
         ref = data.find(f"{{{NS['c']}}}chart")
         rid = ref.get(R + "id") if ref is not None else None
-        part = self.rel_target(self.slide.part, rid) if rid else None
+        part = self.rel_target(owner_part or self.slide.part, rid) if rid else None
         if part is None:
             return None
         try:
             root = etree.fromstring(part.blob)
             out = ChartReader(self, root).read()
+        except ValueError:
+            raise
         except Exception:
+            self.deck.stats["unsupported"] += 1
             return None
         if not out:
             return None
         self.deck.stats["charts"] += 1
         return {"id": self.new_id("c", spid), "kind": "chart", **b, "chart": out}
 
-    def smartart(self, data, xf, tf, group, spid):
+    def smartart(self, data, xf, tf, group, spid, owner_part=None):
         rel_ids = data.find(f"{{{NS['dgm']}}}relIds")
         if rel_ids is None:
             return
-        dm = self.rel_target(self.slide.part, rel_ids.get(R + "dm"))
+        dm = self.rel_target(owner_part or self.slide.part, rel_ids.get(R + "dm"))
         drawing = None
         if dm is not None:
             root = etree.fromstring(dm.blob)
             ext = root.find(f".//{{{NS['dsp']}}}dataModelExt")
             if ext is not None and ext.get("relId"):
-                drawing = self.rel_target(self.slide.part, ext.get("relId"))
+                drawing = self.rel_target(dm, ext.get("relId"))
         if drawing is None:
             self.deck.stats["unsupported"] += 1
             return
@@ -1311,9 +1356,11 @@ class SlideReader:
             return {"type": "url", "href": rel.target_ref[:2000]}
         return None
 
-    def walk(self, tree, tf=(), group=None, part=None, offset=None):
+    def walk(self, tree, tf=(), group=None, part=None, offset=None, decorations=False):
         for child in tree:
             name = local(child)
+            if decorations and name in ("sp", "pic", "graphicFrame") and child.find(f".//{P}nvPr/{P}ph") is not None:
+                continue
             if part is None and name in ("sp", "pic", "cxnSp", "graphicFrame"):
                 action = self.click_action(child)
                 nv = next((c for c in child if local(c).startswith("nv")), None)
@@ -1325,7 +1372,7 @@ class SlideReader:
                 fallback = child.find(f"{{{NS['mc']}}}Fallback")
                 inner = choice if choice is not None and len(choice) else fallback
                 if inner is not None:
-                    self.walk(inner, tf, group, part, offset)
+                    self.walk(inner, tf, group, part, offset, decorations)
                 continue
             if name == "sp":
                 self.shape(child, tf, group, part=part, offset=offset)
@@ -1339,7 +1386,12 @@ class SlideReader:
                     geom = child.find(f"{P}spPr/{A}prstGeom")
                     self.connector(child, xf, tf, group, geom.get("prst") if geom is not None else "line")
             elif name == "graphicFrame":
-                self.frame(child, tf, group)
+                start = len(self.objects)
+                self.frame(child, tf, group, part)
+                nv = child.find(f"{P}nvGraphicFramePr/{P}cNvPr")
+                if nv is not None and nv.get("hidden") in ("1", "true"):
+                    for object_in_frame in self.objects[start:]:
+                        object_in_frame["hidden"] = True
             elif name == "grpSp":
                 g = self.group_tf(child)
                 if g is None:
@@ -1347,14 +1399,16 @@ class SlideReader:
                 nv = child.find(f"{P}nvGrpSpPr/{P}cNvPr")
                 if nv is None:
                     nv = child.find(f"{DSP}nvGrpSpPr/{DSP}cNvPr")
-                if nv is not None and nv.get("hidden") in ("1", "true"):
-                    continue
+                group_hidden = nv is not None and nv.get("hidden") in ("1", "true")
                 gid = group or f"g{self.index}x{nv.get('id') if nv is not None else len(self.objects)}"
                 if offset and not tf:
                     g = {**g, "x": g["x"] + offset[0], "y": g["y"] + offset[1]}
                 start = len(self.objects)
-                self.walk(child, (g, *tf), gid, part)
-                if nv is not None and nv.get("id") and len(self.objects) > start:
+                self.walk(child, (g, *tf), gid, part, decorations=decorations)
+                if group_hidden:
+                    for object_in_group in self.objects[start:]:
+                        object_in_group["hidden"] = True
+                if not self.importing_decoration and nv is not None and nv.get("id") and len(self.objects) > start:
                     self.by_spid.setdefault(nv.get("id"), f"grp:{gid}")
 
     # ---- backgrounds, layouts and masters
@@ -1378,6 +1432,8 @@ class SlideReader:
                     if st is not None and local(st) == "solidFill":
                         c = color_of(st, self.theme, color, self.clr_map)
                         fill = ("solid", c) if c else None
+                    elif st is not None and local(st) == "gradFill":
+                        fill = self.gradient_of(st, color)
                     elif st is not None and local(st) == "blipFill":
                         fill = ("blip", st)
                     elif color:
@@ -1397,12 +1453,13 @@ class SlideReader:
                 if rgb == (255, 255, 255) and alpha > 0.99:
                     return
                 self.objects.append({"id": self.new_id("bg", None), "kind": "shape", "name": "背景", "shape": "rect", **full, "fill": hexc(fill[1]), "stroke": "none", "locked": True})
+            elif fill[0] == "gradient":
+                self.objects.append({"id": self.new_id("bg", None), "kind": "shape", "name": "背景", "shape": "rect", **full,
+                                     "fill": "none", "gradient": fill[1], "stroke": "none", "locked": True})
             return
 
     def decorations(self):
         """Another template's master and layout pictures and shapes (not their placeholders), under the slide's."""
-        if self.deck.sej:
-            return
         show = lambda el: el.find(f"{P}cSld") is not None and el.get("showMasterSp") not in ("0", "false")
         layers = []
         if show(self.slide._element) and show(self.layout._element):
@@ -1411,24 +1468,11 @@ class SlideReader:
             layers.append(self.layout)
         for owner in layers:
             tree = owner._element.find(f"{P}cSld/{P}spTree")
-            keep = [child for child in tree if child.find(f".//{P}nvPr/{P}ph") is None]
-            self.walk_owner(keep, owner.part)
-
-    def walk_owner(self, tree, part):
-        # Pictures in a layout or master point at that part's own relationships.
-        for child in tree:
-            name = local(child)
-            if name == "pic":
-                self.picture(child, (), None, part)
-            elif name == "sp":
-                self.shape(child, (), None, part=part)
-            elif name == "cxnSp":
-                xf = self.xfrm_of(child)
-                if xf is not None:
-                    geom = child.find(f"{P}spPr/{A}prstGeom")
-                    self.connector(child, xf, (), None, geom.get("prst") if geom is not None else "line")
-            elif name == "grpSp":
-                self.walk(child, (), None, part)
+            self.importing_decoration = True
+            try:
+                self.walk(tree, part=owner.part, decorations=True)
+            finally:
+                self.importing_decoration = False
 
     # ---- the slide
 
@@ -1437,23 +1481,16 @@ class SlideReader:
         self.decorations()
         tree = self.slide._element.find(f"{P}cSld/{P}spTree")
         self.walk(tree)
-        slide: dict[str, Any] = {"type": "blank", "title": self.title[:90] or f"スライド {self.number}", "hideTitle": True}
+        slide: dict[str, Any] = {"type": "blank", "title": self.title[:90] or f"スライド {self.number}", "hideTitle": True,
+                                 "sourceViewport": {"x": r2(self.deck.ox), "y": r2(self.deck.oy),
+                                                    "w": r2(self.deck.cx * self.deck.k), "h": r2(self.deck.cy * self.deck.k)}}
         sid = self.deck.sids.get(str(self.slide.part.partname))
         if sid:
             slide["sid"] = sid  # what links to this slide point at
-        if self.deck.sej:
-            # The SEJ cover and chapter pages use the title master (no green rule); the rest the content master.
-            master_words = " ".join(sh.text_frame.text for sh in self.master.shapes if sh.has_text_frame)
-            slide["master"] = "content" if "‹#›" in master_words or any(sh.is_placeholder and sh.placeholder_format.type == 13 for sh in self.master.placeholders) else "title"
-        elif any(self.ph_info(sp) and self.ph_info(sp)["type"] == "ctrTitle" for sp in self.layout._element.iter(P + "sp")):
-            # Another template's cover (a centred title) takes the SEJ cover's master.
-            slide["master"] = "title"
+        slide["master"] = "source"
         notes = notes_text(self.slide)
         if notes:
-            slide["notes"] = notes[:1200]
-        if len(self.objects) > 300:
-            self.objects = self.objects[:300]
-            self.deck.stats["unsupported"] += 1
+            slide["notes"] = notes
         if self.objects:
             slide["elements"] = self.objects
         timeline = timeline_of(self.slide._element, self.by_spid, self.deck)
@@ -1576,7 +1613,9 @@ def custom_paths(cust) -> list[dict[str, Any]]:
             nonlocal pts
             if len(pts) > 1:
                 dedup = [pts[0]] + [p for i, p in enumerate(pts[1:], 1) if abs(p[0] - pts[i - 1][0]) > 1e-6 or abs(p[1] - pts[i - 1][1]) > 1e-6]
-                out.append({"pts": [[round(x / pw, 4), round(y / ph, 4)] for x, y in dedup][:400], "closed": closed, "fill": fill and closed, "stroke": stroke})
+                if len(dedup) > 5000:
+                    raise ValueError("図形の輪郭が5000点を超えています。")
+                out.append({"pts": [[round(x / pw, 4), round(y / ph, 4)] for x, y in dedup][:5000], "closed": closed, "fill": fill and closed, "stroke": stroke})
             pts = []
 
         def pt_of(el):
@@ -1718,7 +1757,9 @@ def timeline_of(slide_el, by_spid, deck: Deck) -> list[dict[str, Any]]:
         if target is not None and target.find(P + "txEl") is not None:
             entry["by"] = "para"
         out.append(entry)
-    return out[:400]
+    if len(out) > 5000:
+        raise ValueError("アニメーションが5000件を超えています。")
+    return out
 
 
 def path_points(path: str, deck: Deck) -> list[list[float]]:
@@ -1727,7 +1768,9 @@ def path_points(path: str, deck: Deck) -> list[list[float]]:
     pts = []
     for i in range(0, len(nums) - 1, 2):
         pts.append([round(float(nums[i]) * deck.cx * deck.k, 1), round(float(nums[i + 1]) * deck.cy * deck.k, 1)])
-    return pts[:200]
+    if len(pts) > 2000:
+        raise ValueError("アニメーションの軌跡が2000点を超えています。")
+    return pts
 
 
 TRANSITIONS = {"fade": "fade", "dissolve": "fade", "push": "push", "wipe": "wipe", "cover": "slide", "pull": "slide", "split": "curtain",
@@ -1771,7 +1814,7 @@ C = "{%s}" % NS["c"]
 MARKER_SYMBOLS = {"circle": "circle", "square": "square", "diamond": "diamond", "triangle": "triangle", "dash": "dash", "dot": "dot",
                   "x": "x", "plus": "plus", "star": "star", "none": "none", "auto": "circle", "picture": "square"}
 LABEL_POSITIONS = {"outEnd", "inEnd", "ctr", "inBase", "t", "b", "l", "r", "bestFit"}
-CHART_LABELS, CHART_SERIES = 60, 12
+CHART_LABELS, CHART_SERIES = 500, 100
 WEEKDAYS = "月火水木金土日"
 
 
@@ -2043,6 +2086,10 @@ class ChartReader:
         groups = [g for g in plot if local(g).endswith("Chart")]
         if not groups:
             return None
+        if sum(len(g.findall(C + "ser")) for g in groups) > CHART_SERIES:
+            raise ValueError(f"スライド{self.sr.number}のグラフが100系列を超えています。")
+        if any(int(node.get("val", 0)) > CHART_LABELS for node in plot.iter(C + "ptCount")):
+            raise ValueError(f"スライド{self.sr.number}のグラフが500項目を超えています。")
         base_font = {"size": r2(self.deck.pt(18)), "color": self.ink}
         base_font.update(self.font(self.root.find(C + "txPr")))
         base_font.update({k: v for k, v in self.font(chart.find(C + "txPr")).items()})
@@ -2073,7 +2120,7 @@ class ChartReader:
                 if len(series) >= CHART_SERIES:
                     break
                 name_vals, _, _ = cache_of(ser.find(C + "tx"))
-                name = (name_vals[0] if name_vals and name_vals[0] else f"系列{len(series) + 1}")[:40]
+                name = (name_vals[0] if name_vals and name_vals[0] else f"系列{len(series) + 1}")[:500]
                 cat_el = ser.find(C + "cat")
                 if cat_el is None:
                     cat_el = ser.find(C + "xVal")
@@ -2083,7 +2130,7 @@ class ChartReader:
                 cats, cat_fmt, cat_num = cache_of(cat_el)
                 vals, val_fmt, _ = cache_of(val_el)
                 if not labels and cats:
-                    labels = [(number_text(float(c), cat_fmt) if cat_num and c not in (None, "") and re.match(r"^-?[\d.]+(e-?\d+)?$", c, re.I) else str(c or ""))[:40] for c in cats][:CHART_LABELS]
+                    labels = [(number_text(float(c), cat_fmt) if cat_num and c not in (None, "") and re.match(r"^-?[\d.]+(e-?\d+)?$", c, re.I) else str(c or ""))[:500] for c in cats][:CHART_LABELS]
                 values = []
                 for v in vals[:CHART_LABELS]:
                     try:
@@ -2254,21 +2301,22 @@ def read_pptx_exact(data: bytes) -> dict[str, Any]:
     from pptx import Presentation
 
     prs = Presentation(io.BytesIO(data))
+    if len(prs.slides) > 500:
+        raise ValueError("スライドが500枚を超えています。")
     deck = Deck(prs, {})
     # Each slide that comes over keeps an id, so links between slides still go where they went.
-    shown = [s for s in prs.slides if s._element.get("show") not in ("0", "false")][:50]
+    shown = list(prs.slides)
     deck.sids = {str(s.part.partname): f"p{i + 1}" for i, s in enumerate(shown)}
     slides = []
     number = 0
     for index, slide in enumerate(prs.slides):
         number += 1
-        if slide._element.get("show") in ("0", "false"):
-            deck.stats["hidden"] += 1
-            continue
         reader = SlideReader(deck, slide, len(slides), number)
-        slides.append(reader.read())
-        if len(slides) >= 50:
-            break
+        imported = reader.read()
+        if slide._element.get("show") in ("0", "false"):
+            imported["hidden"] = True
+            deck.stats["hidden"] += 1
+        slides.append(imported)
     deck.stats["slides"] = len(slides)
     title = (prs.core_properties.title or "").strip() or (slides[0]["title"] if slides else "") or "取り込んだ資料"
     return {"deckTitle": title[:100], "slideData": slides, "stats": deck.stats, "fidelity": "exact", "sej": deck.sej,

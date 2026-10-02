@@ -11,7 +11,7 @@ export const studioSettingsSchema = z.object({
 });
 
 export const textItemSchema = z.string().min(1).max(180);
-export const notesSchema = z.string().max(1200).optional();
+export const notesSchema = z.string().max(200000).optional();
 // Built-in photo library (public/assets) — see PHOTOS in public/engine/engine.js.
 export const visualAssetSchema = z.enum([
   "ai", "aiWorkflow", "promptDesign", "businessWorkshop", "businessEtiquette",
@@ -89,8 +89,9 @@ const shared = {
   // A deep-dive page: not part of the story, opened by clicking this item ("items[1]") of the slide above.
   drillOf: z.string().max(30).optional(),
   notes: notesSchema,
-  elements: z.array(objectSchema).max(300).optional(),
-  timeline: z.array(timelineEntrySchema).max(400).optional(),
+  elements: z.array(objectSchema).max(5000).optional(),
+  hidden: z.boolean().optional(),
+  timeline: z.array(timelineEntrySchema).max(5000).optional(),
   sid: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).optional(),
   // 画面切り替え set by hand: the way in's length (ms) and moving on by itself after some seconds.
   transitionDur: z.number().min(100).max(10000).optional(),
@@ -202,7 +203,7 @@ const AI_SLIDES = [
 export const aiSlideSchema = z.discriminatedUnion("type", AI_SLIDES);
 // A 白紙 page: objects placed by hand. One brought over from PowerPoint as it looked keeps its title as an object
 // (hideTitle) and may use the cover's master.
-export const blankSlideSchema = z.object({ type: z.literal("blank"), ...titledShape, title: z.string().max(90).optional(), hideTitle: z.boolean().optional(), master: z.enum(["title", "content"]).optional() });
+export const blankSlideSchema = z.object({ type: z.literal("blank"), ...titledShape, title: z.string().max(90).optional(), hideTitle: z.boolean().optional(), master: z.enum(["title", "content", "source"]).optional(), sourceViewport: z.object({ x: z.number(), y: z.number(), w: z.number().positive(), h: z.number().positive() }).optional() });
 export const slideSchema = z.discriminatedUnion("type", [...AI_SLIDES, blankSlideSchema]);
 
 export const THEMES = ["sej", "clarity", "midnight", "editorial", "mono", "forest", "sunset", "aurora", "kinari"];
@@ -239,11 +240,11 @@ export const deckShape = z.object({
   motion: deckMotionSchema.optional(),
   // Standing instructions for every AI request on this deck ("役員向け", "数値は9月時点"…).
   memo: z.string().max(2000).optional().default(""),
-  slides: z.array(slideSchema).min(2).max(50),
+  slides: z.array(slideSchema).min(1).max(500),
 });
 export const reviseRequestSchema = z.object({
   deck: deckShape,
-  slideIndex: z.number().int().min(0).max(49),
+  slideIndex: z.number().int().min(0).max(499),
   instruction: z.string().max(1000).optional().default(""),
   issues: z.array(z.object({ field: z.string().max(80), message: z.string().max(200) })).max(30).optional().default([]),
   mode: z.enum(["replace", "insert"]).optional().default("replace"),
@@ -255,30 +256,30 @@ export const rewriteRequestSchema = z.object({
 });
 export const notesRequestSchema = z.object({
   deck: deckShape,
-  indices: z.array(z.number().int().min(0).max(49)).max(50).optional(),
+  indices: z.array(z.number().int().min(0).max(499)).max(500).optional(),
   seconds: z.union([z.literal(30), z.literal(60), z.literal(90)]).optional().default(60),
   tone: z.enum(["丁寧", "簡潔", "親しみやすい"]).optional().default("丁寧"),
 });
-export const notesResultSchema = z.object({ notes: z.array(z.object({ slide: z.number().int().min(1).max(50), text: z.string().min(1).max(1200) })).max(50) });
+export const notesResultSchema = z.object({ notes: z.array(z.object({ slide: z.number().int().min(1).max(500), text: z.string().min(1).max(1200) })).max(500) });
 
 // Conversational editing: the AI answers and proposes operations on the original slide numbers.
 export const chatRequestSchema = z.object({
   deck: deckShape,
   message: z.string().min(1).max(4000),
   history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(4000) })).max(20).optional().default([]),
-  current: z.number().int().min(0).max(49).optional().default(0),
-  focus: z.array(z.number().int().min(0).max(49)).max(50).optional().default([]),
+  current: z.number().int().min(0).max(499).optional().default(0),
+  focus: z.array(z.number().int().min(0).max(499)).max(500).optional().default([]),
   attachment: z.object({ name: z.string().max(200), text: z.string().max(60_000) }).optional(),
 });
 export const chatOperationSchema = z.object({
   op: z.enum(["replace", "insert", "delete"]),
-  slide: z.number().int().min(1).max(50),
+  slide: z.number().int().min(1).max(500),
   content: aiSlideSchema.optional(),
 });
 export const chatResultSchema = z.object({
   reply: z.string().min(1).max(1500),
   operations: z.array(chatOperationSchema).max(50),
-  order: z.array(z.number().int().min(1).max(50)).max(50).optional(),
+  order: z.array(z.number().int().min(1).max(500)).max(500).optional(),
   deckTitle: z.string().max(100).optional(),
   // No theme: every deck wears the SEJ template, so the AI cannot switch the design.
   transition: transitionSchema.optional(),
@@ -288,7 +289,7 @@ export const chatResultSchema = z.object({
 });
 
 // Fields only people set (uploaded photos and videos, hand placement) are hidden from the AI's output schema.
-const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "advance", "hideTitle", "master"]);
+const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "advance", "hideTitle", "master", "sourceViewport", "hidden"]);
 function withoutUserFields(node) {
   if (Array.isArray(node)) return node.map(withoutUserFields);
   if (!node || typeof node !== "object") return node;
@@ -326,7 +327,7 @@ export const codexOutlineSchema = toCodexSchema(outlineResultSchema);
 // Three alternatives for one slide, to pick from side by side.
 export const variantsRequestSchema = z.object({
   deck: deckShape,
-  slideIndex: z.number().int().min(0).max(49),
+  slideIndex: z.number().int().min(0).max(499),
   instruction: z.string().max(1000).optional().default(""),
 });
 export const variantsResultSchema = z.object({

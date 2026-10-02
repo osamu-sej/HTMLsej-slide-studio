@@ -171,7 +171,7 @@
       if (BY[raw.by] && raw.by !== "all" && ["in", "out", "em"].includes(cls) && (objectIds.has(el) ? ["shape", "text"].includes(kinds.get(el)) : LAYOUT_TARGET.test(el))) entry.by = raw.by;
       if (typeof raw.trigger === "string" && objectIds.has(raw.trigger)) entry.trigger = raw.trigger;
       if (cls === "path") {
-        const pts = (Array.isArray(raw.path?.pts) ? raw.path.pts : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 200).map(([x, y]) => [Math.round(num(x, -6000, 6000, 0) * 10) / 10, Math.round(num(y, -6000, 6000, 0) * 10) / 10]);
+        const pts = (Array.isArray(raw.path?.pts) ? raw.path.pts : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 2000).map(([x, y]) => [Math.round(num(x, -6000, 6000, 0) * 10) / 10, Math.round(num(y, -6000, 6000, 0) * 10) / 10]);
         if (pts.length < 2) continue;
         entry.path = { pts, ...(raw.path.closed ? { closed: true } : {}), ...(raw.path.curve ? { curve: true } : {}) };
       }

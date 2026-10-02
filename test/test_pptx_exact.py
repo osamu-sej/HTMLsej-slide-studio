@@ -1,8 +1,12 @@
-"""tools/pptx_exact.py: a PowerPoint deck comes over as it looks — objects in place, text run by run, tables,
-charts with their formatting, animations and transitions — and the SEJ template's marks are left to the studio."""
+"""Source pages retain their own masters, objects, text, charts, effects, and hidden slides."""
+import io
 import sys
 import unittest
 from pathlib import Path
+
+from lxml import etree
+from pptx import Presentation
+from pptx.util import Inches
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "tools"))
@@ -25,30 +29,31 @@ class SejDeckTest(unittest.TestCase):
         cls.deck = read_pptx_exact(pptx_fixtures.sej_deck())
         cls.slides = cls.deck["slideData"]
 
-    def test_an_sej_deck_is_recognised_and_hidden_slides_stay_out(self):
+    def test_an_sej_deck_keeps_every_slide_including_hidden_ones(self):
         self.assertTrue(self.deck["sej"])
         self.assertEqual(self.deck["fidelity"], "exact")
         self.assertEqual(self.deck["deckTitle"], "発注業務の改革")
-        self.assertEqual(len(self.slides), 3)
+        self.assertEqual(len(self.slides), 4)
         self.assertEqual(self.deck["stats"]["hidden"], 1)
-        self.assertNotIn("隠したページ", str(self.slides))
+        self.assertIn("隠したページ", str(self.slides[2]))
+        self.assertTrue(self.slides[2]["hidden"])
         for slide in self.slides:
             self.assertEqual(slide["type"], "blank")
             self.assertTrue(slide["hideTitle"], "the slide's own title box shows the title")
-        self.assertEqual([s["master"] for s in self.slides], ["title", "content", "content"])
+        self.assertEqual([s["master"] for s in self.slides], ["source"] * 4)
 
-    def test_the_templates_marks_are_left_to_the_studio(self):
+    def test_the_original_master_marks_are_editable_objects(self):
         words = " ".join(o.get("text", "") for s in self.slides for o in s["elements"])
-        for mark in ("社内限り", "明日の笑顔", "SEVEN-ELEVEN", "秘"):
-            self.assertNotIn(mark, words)
-        self.assertEqual(self.deck["stats"]["pictures"], 0, "the logo is not copied")
+        for mark in ("社内限り", "明日の笑顔", "秘"):
+            self.assertIn(mark, words)
+        self.assertGreater(self.deck["stats"]["pictures"], 0, "the original logo is copied")
 
     def test_placeholders_take_their_place_from_the_layout(self):
         title = by_text(self.slides[1], "改革の全体像")
         self.assertLess(title["y"], 130)
         self.assertLess(title["x"], 120)
         self.assertTrue(title.get("bold"))
-        body = by_text(self.slides[2], "最初の点")
+        body = by_text(self.slides[3], "最初の点")
         self.assertIn('data-indent="1"', body["text"], "the second level is indented")
 
     def test_shapes_keep_their_place_fill_and_text_runs(self):
@@ -100,10 +105,10 @@ class SejDeckTest(unittest.TestCase):
         self.assertEqual(slide["notes"], "ここで全体像を説明します。")
 
     def test_buttons_keep_where_they_go_in_a_slide_show(self):
-        self.assertEqual([s["sid"] for s in self.slides], ["p1", "p2", "p3"], "ids for the slides that come over")
-        back = by_text(self.slides[2], "全体像へ戻る")
+        self.assertEqual([s["sid"] for s in self.slides], ["p1", "p2", "p3", "p4"], "ids for every slide")
+        back = by_text(self.slides[3], "全体像へ戻る")
         self.assertEqual(back["action"], {"type": "slide", "to": "p2"})
-        self.assertEqual(by_text(self.slides[2], "終わる")["action"], {"type": "end"})
+        self.assertEqual(by_text(self.slides[3], "終わる")["action"], {"type": "end"})
 
     def test_animations_and_the_transition(self):
         slide = self.slides[1]
@@ -135,11 +140,11 @@ class PlainDeckTest(unittest.TestCase):
         self.assertEqual(chevron["rot"], 20)
         self.assertTrue(any(o.get("shape") == "star5" for o in shapes))
 
-    def test_objects_off_the_slide_stay_out(self):
-        # The fixture puts a picture and part of a table past the 10-inch slide's right edge.
+    def test_objects_off_the_slide_are_kept_for_editing(self):
+        # The fixture puts a picture beyond the 4:3 page; the HTML viewport clips it.
         pictures = [o for o in self.slides[1]["elements"] if o["kind"] == "image"]
-        self.assertEqual(pictures, [], "the picture sits beyond the slide")
-        self.assertGreaterEqual(self.deck["stats"]["skipped"], 1)
+        self.assertEqual(len(pictures), 1)
+        self.assertGreater(pictures[0]["x"], self.slides[1]["sourceViewport"]["x"] + self.slides[1]["sourceViewport"]["w"])
 
     def test_a_pie_chart_is_a_donut_without_a_hole_showing_percentages(self):
         chart = next(o for o in self.slides[2]["elements"] if o["kind"] == "chart")["chart"]
@@ -156,6 +161,45 @@ class ChartNumberTest(unittest.TestCase):
         self.assertEqual(pptx_exact.number_text(1234.5, "#,##0"), "1,235")
         self.assertEqual(pptx_exact.number_text(45566, "yyyy/m/d"), "2024/10/1")
         self.assertEqual(pptx_exact.number_text(45566, 'm"月"'), "10月")
+
+
+class SourceEffectsTest(unittest.TestCase):
+    def test_every_slide_beyond_the_old_fifty_slide_limit_survives(self):
+        prs = Presentation()
+        for i in range(51):
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            slide.shapes.add_textbox(Inches(1), Inches(1), Inches(3), Inches(1)).text = f"Page {i + 1}"
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        self.assertEqual(len(deck["slideData"]), 51)
+        self.assertIn("Page 51", str(deck["slideData"][-1]))
+
+    def test_a_source_gradient_shadow_and_font_survive_import(self):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        shape = slide.shapes.add_shape(1, Inches(1), Inches(1), Inches(4), Inches(2))
+        shape.text = "Gradient"
+        shape.text_frame.paragraphs[0].runs[0].font.name = "Arial"
+        sppr = shape._element.spPr
+        for child in list(sppr):
+            if etree.QName(child).localname in ("solidFill", "noFill"):
+                sppr.remove(child)
+        sppr.append(etree.fromstring('''<a:gradFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:gsLst>
+          <a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs>
+          </a:gsLst><a:lin ang="5400000" scaled="1"/></a:gradFill>'''))
+        sppr.append(etree.fromstring('''<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+          <a:outerShdw blurRad="91440" dist="91440" dir="0"><a:srgbClr val="000000"><a:alpha val="50000"/></a:srgbClr></a:outerShdw>
+          </a:effectLst>'''))
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        imported = by_text(deck["slideData"][0], "Gradient")
+        self.assertEqual(deck["slideData"][0]["master"], "source")
+        self.assertEqual(imported["fontFace"], "Arial")
+        self.assertEqual([s["color"] for s in imported["gradient"]["stops"]], ["#ff0000", "#0000ff"])
+        self.assertEqual(imported["gradient"]["angle"], 90)
+        self.assertAlmostEqual(imported["shadow"]["opacity"], 0.5)
 
 
 if __name__ == "__main__":
