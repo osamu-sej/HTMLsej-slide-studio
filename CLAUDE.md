@@ -15,6 +15,8 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 - `elements`・`timeline`・`sid` はユーザーだけの項目。AIの出力スキーマに入れず、プロンプトには要約（`server/objects.mjs`）だけを渡し、AIの変更のあとは必ず元に戻す（`server/schemas.mjs` の `USER_ONLY_FIELDS`）。AIは白紙（`blank`）のスライドを作らない。
 - 部品はSEJマスターの下に描く（`.hs-objects` は z-index 4、`.hs-sej` は 5）。色の一覧（`PALETTE`）はSEJの色だけにし、ほかの色はブランド検査で知らせる。
 - 部品の文字は決まったタグだけのHTML（`sanitizeRich`）。画面に出す前に必ず通す。
+- 表・グラフは部品の `table`・`chart`（編集は `public/editor/tables.mjs`）、トリミングは `crop.mjs`、手で描く形と頂点の編集は `freeform.mjs`（`shape: "custom"` と `path`）。
+- 「図形に変換」（`public/editor/convert.mjs`）は、レイアウトのスライドを画面外で原寸に描いて読み取り、部品にして白紙のスライドにする。項目は `group`、出し方は `timeline`、詳細・深掘りは部品の `item` に引き継ぐ。色は `PALETTE` に合わせる（淡い色は元の色＋透明度）。レイアウトを変えたら `qa/studio-convert.mjs` を通し、見た目が原本と変わらないことを確かめる。
 - アニメーションは `slide.timeline`（再生は `public/engine/animate.js`、編集は `public/editor/anim.mjs`）。開始・終了は `transform`／`opacity`／`clip-path`、強調は `scale`／`rotate`（足し合わせ）と色、軌跡は `translate`（足し合わせ）で動かし、同じ部品の効果が打ち消し合わないようにする。発表のクリックはレイアウトの「中身の出し方」の後にアニメーションが続く（`data-lsteps`・`data-steps`）。
 
 ## PRとマージ
@@ -30,6 +32,6 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 ## 確認
 
 - `npm test`（CodexとOllamaは偽物で代用）。
-- 画面にかかわる変更は、`npm start` のあと `qa/studio-smoke.mjs`・`studio-editing.mjs`・`studio-ai-mock.mjs`・`studio-motion.mjs`・`studio-drill.mjs`・`studio-interactive.mjs`・`studio-objects.mjs`・`studio-animations.mjs` を実際のブラウザで通す。リボンは狭い幅だとグループを1つのボタンに折りたたむので、QAでボタンを探すときは折りたたんだグループも開く。
+- 画面にかかわる変更は、`npm start` のあと `qa/studio-smoke.mjs`・`studio-editing.mjs`・`studio-ai-mock.mjs`・`studio-motion.mjs`・`studio-drill.mjs`・`studio-interactive.mjs`・`studio-objects.mjs`・`studio-animations.mjs`・`studio-tables.mjs`・`studio-convert.mjs` を実際のブラウザで通す。リボンは狭い幅だとグループを1つのボタンに折りたたむので、QAでボタンを探すときは折りたたんだグループも開く。
 - 深掘りページ（`drillOf`）は元のスライドの直後に置く本編外のページ。本編の並び・番号は `E.storyMap`（engine.js）とサーバーの `drillParents`（server/chat.mjs）が同じ決まりで求める。
 - レイアウトの「見た目のグループ」と単調さのチェックは `public/layout-looks.mjs` にあり、サーバー（AIへの指示・自動の選び直し）とスタジオ（チェック・骨子の画面）が同じものを使う。

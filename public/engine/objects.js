@@ -897,7 +897,8 @@
   }
 
   /** The outline of a shape in a w × h box: { paths, extras, text: [l, t, r, b], open, rule }. */
-  function geometry(key, w, hh, adj) {
+  function geometry(key, w, hh, adj, path = null) {
+    if (key === "custom" && Array.isArray(path?.pts) && path.pts.length > 1) return customGeometry(path, Math.max(1, w), Math.max(1, hh));
     const shape = SHAPES[key] || SHAPES.rect;
     const a = adjOf(shape, adj);
     const ww = Math.max(1, w);
@@ -907,6 +908,28 @@
       key: shape.key, paths: Array.isArray(d) ? d : [d], extras: shape.extras ? shape.extras(ww, hhh, a) : [],
       text: shape.text ? shape.text(ww, hhh, a) : [0, 0, ww, hhh], open: Boolean(shape.open), rule: shape.rule || "nonzero", adj: a,
     };
+  }
+
+  /**
+   * A shape drawn by hand (曲線・フリーフォーム・フリーハンド): its points are fractions of its box, joined by
+   * straight lines or a smooth curve through them (Catmull-Rom as cubic Béziers); an open one has no fill.
+   */
+  function freeformD(path, w, hh) {
+    const pts = path.pts.map(([x, y]) => [x * w, y * hh]);
+    const n = pts.length;
+    const f = (v) => r2(v);
+    if (!path.curve || n < 3) return `M${pts.map(([x, y]) => `${f(x)} ${f(y)}`).join(" L")}${path.closed ? " Z" : ""}`;
+    const at = (i) => (path.closed ? pts[(i + n) % n] : pts[Math.max(0, Math.min(n - 1, i))]);
+    let d = `M${f(pts[0][0])} ${f(pts[0][1])}`;
+    const last = path.closed ? n : n - 1;
+    for (let i = 0; i < last; i += 1) {
+      const [p0, p1, p2, p3] = [at(i - 1), at(i), at(i + 1), at(i + 2)];
+      d += ` C${f(p1[0] + (p2[0] - p0[0]) / 6)} ${f(p1[1] + (p2[1] - p0[1]) / 6)} ${f(p2[0] - (p3[0] - p1[0]) / 6)} ${f(p2[1] - (p3[1] - p1[1]) / 6)} ${f(p2[0])} ${f(p2[1])}`;
+    }
+    return path.closed ? `${d} Z` : d;
+  }
+  function customGeometry(path, w, hh) {
+    return { key: "custom", paths: [freeformD(path, w, hh)], extras: [], text: [0, 0, w, hh], open: !path.closed, rule: "nonzero", adj: [] };
   }
 
   // ---------------------------------------------------------------- rich text (what people type into shapes and text boxes)
@@ -1139,8 +1162,11 @@
 
   // ---------------------------------------------------------------- objects: kinds, defaults, normalization
 
-  const KINDS = ["shape", "text", "image", "line", "icon", "video", "lottie"];
-  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", lottie: "アニメーション" };
+  const KINDS = ["shape", "text", "image", "line", "icon", "video", "lottie", "table", "chart"];
+  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", lottie: "アニメーション", table: "表", chart: "グラフ" };
+  // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
+  const TABLE_STYLES = { sej: "罫線（SEJ）", rows: "淡い横線", grid: "格子", lines: "横線だけ", plain: "線なし", brown: "淡茶の見出し" };
+  const CHART_KINDS = { bar: "縦棒", "stacked-bar": "積み上げ縦棒", "100-stacked-bar": "100%積み上げ縦棒", line: "折れ線", "multi-line": "折れ線（複数）", donut: "ドーナツ", combo: "複合（棒と折れ線）" };
   const DASHES = {
     solid: ["実線", null], roundDot: ["丸点線", [0, 2]], squareDot: ["角点線", [1, 1]], dash: ["破線", [4, 3]], dashDot: ["一点鎖線", [4, 3, 1, 3]],
     longDash: ["長破線", [8, 3]], longDashDot: ["長鎖線", [8, 3, 1, 3]], longDashDotDot: ["長二点鎖線", [8, 3, 1, 3, 1, 3]],
@@ -1158,6 +1184,8 @@
     icon: { color: "#1f3864", strokeW: 1.75 },
     video: { fit: "cover", autoplay: false, loop: false, muted: false },
     lottie: { fit: "contain", autoplay: true, loop: true },
+    table: { style: "sej", header: true, banded: true, firstCol: false, lastRow: false, fs: 28, color: "#1a1a1a", lh: 1.35 },
+    chart: {},
   };
   /** An object's settings, with its kind's defaults for whatever it does not set. */
   const withDefaults = (o) => ({ ...DEFAULTS[o.kind], ...o });
@@ -1199,15 +1227,22 @@
     if (opacity != null && opacity < 1) o.opacity = opacity;
     for (const key of ["locked", "hidden"]) if (raw[key] === true) o[key] = true;
     if (typeof raw.group === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(raw.group)) o.group = raw.group;
+    // The layout item an object came from (図形に変換): its "詳しく" card and deep-dive page open from it.
+    if (typeof raw.item === "string" && /^[A-Za-z]{1,20}(\[\d{1,2}\])?$/.test(raw.item)) o.item = raw.item;
     // Lines, outlines and fills
     const stroke = colorOrNone(raw.stroke);
     if (stroke) o.stroke = stroke;
-    const strokeW = num(raw.strokeW, 0.5, 60);
+    const strokeW = num(raw.strokeW, 0.5, 200);
     if (strokeW != null) o.strokeW = strokeW;
     if (DASHES[raw.dash] && raw.dash !== "solid") o.dash = raw.dash;
     if (["shape", "text"].includes(o.kind)) {
       o.shape = SHAPES[raw.shape] ? raw.shape : "rect";
-      if (Array.isArray(raw.adj) && SHAPES[o.shape].adj) o.adj = adjOf(SHAPES[o.shape], raw.adj).map((v) => Math.round(v * 10000) / 10000);
+      // A shape drawn by hand keeps its points (fractions of its box).
+      if (raw.shape === "custom" && o.kind === "shape") {
+        const pts = (Array.isArray(raw.path?.pts) ? raw.path.pts : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 400).map(([x, y]) => [Math.round(clamp(Number(x), -1, 2) * 10000) / 10000, Math.round(clamp(Number(y), -1, 2) * 10000) / 10000]);
+        if (pts.length > 1) { o.shape = "custom"; o.path = { pts, ...(raw.path.closed ? { closed: true } : {}), ...(raw.path.curve ? { curve: true } : {}) }; }
+      }
+      if (Array.isArray(raw.adj) && SHAPES[o.shape]?.adj) o.adj = adjOf(SHAPES[o.shape], raw.adj).map((v) => Math.round(v * 10000) / 10000);
       const fill = colorOrNone(raw.fill);
       if (fill) o.fill = fill;
       const fillOpacity = num(raw.fillOpacity, 0, 1);
@@ -1261,6 +1296,24 @@
         for (const key of ["autoplay", "loop", "muted"]) if (typeof raw[key] === "boolean") o[key] = raw[key];
       }
     }
+    if (o.kind === "table") {
+      const table = normalizeTable(raw);
+      if (!table) return null;
+      Object.assign(o, table);
+      // The words' size, colour, line spacing and font for the whole table (cells may set their own colour).
+      const fs = num(raw.fs, 8, 400);
+      if (fs != null) o.fs = fs;
+      const color = hexColor(raw.color);
+      if (color) o.color = color;
+      const lh = num(raw.lh, 0.8, 4);
+      if (lh != null) o.lh = lh;
+      if (FONTS[raw.font] && raw.font !== "body") o.font = raw.font;
+    }
+    if (o.kind === "chart") {
+      const chartData = normalizeChart(raw.chart);
+      if (!chartData) return null;
+      o.chart = chartData;
+    }
     if (o.kind === "icon") {
       if (!E.icons[raw.icon]) return null;
       o.icon = raw.icon;
@@ -1275,6 +1328,84 @@
       else if (action.type === "url" && /^(https?:\/\/|mailto:)/i.test(String(action.href || "").trim())) o.action = { type: "url", href: String(action.href).trim().slice(0, 2000) };
     }
     return o;
+  }
+
+  /** Column widths or row heights: n positive shares that add up to 1 (equal when unusable). */
+  function shares(list, n) {
+    const values = Array.from({ length: n }, (_, i) => Number(Array.isArray(list) ? list[i] : NaN));
+    if (!values.every((v) => Number.isFinite(v) && v > 0)) return Array.from({ length: n }, () => Math.round((1 / n) * 100000) / 100000);
+    const sum = values.reduce((a, b) => a + b, 0);
+    return values.map((v) => Math.round((v / sum) * 100000) / 100000);
+  }
+  /** A table's cells (rich text, fill, colour, bold, alignment, merged spans), columns and rows, style options. */
+  function normalizeTable(raw) {
+    const rows = (Array.isArray(raw.cells) ? raw.cells : []).filter(Array.isArray).slice(0, 40);
+    if (!rows.length) return null;
+    const nCols = clamp(Math.max(...rows.map((row) => row.length), 1), 1, 20);
+    const cells = rows.map((row) => Array.from({ length: nCols }, (_, c) => {
+      const src = row[c] && typeof row[c] === "object" ? row[c] : {};
+      const cell = {};
+      if (typeof src.text === "string" && src.text.trim()) { const text = sanitizeRich(src.text); if (text.replace(/<[^>]+>/g, "").trim()) cell.text = text; }
+      const fill = hexColor(src.fill);
+      if (fill) cell.fill = fill;
+      const color = hexColor(src.color);
+      if (color) cell.color = color;
+      for (const key of ["bold", "italic", "underline", "strike"]) if (src[key] === true) cell[key] = true;
+      if (ALIGN.has(src.align)) cell.align = src.align;
+      if (["top", "middle", "bottom"].includes(src.valign)) cell.valign = src.valign;
+      const rs = Math.round(Number(src.rs) || 1);
+      const cs = Math.round(Number(src.cs) || 1);
+      if (rs > 1) cell.rs = rs;
+      if (cs > 1) cell.cs = cs;
+      return cell;
+    }));
+    // Merged cells: a span stays inside the table, the cells it covers are marked, and spans never overlap.
+    const covered = cells.map((row) => row.map(() => false));
+    cells.forEach((row, r) => row.forEach((cell, c) => {
+      if (covered[r][c]) { for (const key of Object.keys(cell)) delete cell[key]; cell.merged = true; return; }
+      const rs = clamp(cell.rs || 1, 1, cells.length - r);
+      const cs = clamp(cell.cs || 1, 1, nCols - c);
+      let fits = true;
+      for (let i = r; i < r + rs; i += 1) for (let j = c; j < c + cs; j += 1) if ((i !== r || j !== c) && covered[i][j]) fits = false;
+      if (!fits) { delete cell.rs; delete cell.cs; return; }
+      if (rs > 1) cell.rs = rs; else delete cell.rs;
+      if (cs > 1) cell.cs = cs; else delete cell.cs;
+      for (let i = r; i < r + rs; i += 1) for (let j = c; j < c + cs; j += 1) if (i !== r || j !== c) covered[i][j] = true;
+    }));
+    const out = { cells, cols: shares(raw.cols, nCols), rows: shares(raw.rows, cells.length) };
+    if (TABLE_STYLES[raw.style] && raw.style !== "sej") out.style = raw.style;
+    for (const key of ["header", "banded", "firstCol", "lastRow"]) if (typeof raw[key] === "boolean") out[key] = raw[key];
+    return out;
+  }
+  /** A chart's kind, category labels and series (numbers), title and unit. */
+  function normalizeChart(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const labels = (Array.isArray(raw.labels) ? raw.labels : []).slice(0, 24).map((label) => String(label ?? "").trim().slice(0, 40));
+    const series = (Array.isArray(raw.series) ? raw.series : []).filter((s) => s && typeof s === "object").slice(0, 8).map((s, i) => ({
+      name: String(s.name ?? "").trim().slice(0, 40) || `系列${i + 1}`,
+      values: labels.map((_, j) => { const v = Number(Array.isArray(s.values) ? s.values[j] : NaN); return Number.isFinite(v) ? Math.round(clamp(v, -1e12, 1e12) * 10000) / 10000 : 0; }),
+    }));
+    if (!labels.length || !series.length) return null;
+    const out = { type: CHART_KINDS[raw.type] ? raw.type : "bar", labels, series };
+    for (const key of ["title", "unit"]) if (typeof raw[key] === "string" && raw[key].trim()) out[key] = raw[key].trim().slice(0, key === "unit" ? 10 : 80);
+    return out;
+  }
+  /** The engine's chart spec (as the layouts' charts) for a chart object. */
+  function chartSpec(c) {
+    const data = { ...(c.title ? { title: c.title } : {}), ...(c.unit ? { unit: c.unit } : {}) };
+    const first = c.series[0]?.values || [];
+    if (c.type === "stacked-bar" || c.type === "100-stacked-bar") {
+      data.barData = c.labels.map((label, i) => ({ label, values: c.series.map((s) => s.values[i] ?? 0) }));
+      data.legendLabels = c.series.map((s) => s.name);
+    } else if (c.type === "multi-line") {
+      data.xAxisLabels = c.labels;
+      data.series = c.series.map((s) => ({ label: s.name, values: s.values }));
+    } else if (c.type === "combo") {
+      const line = c.series[1]?.values || first;
+      data.items = c.labels.map((label, i) => ({ label, barValue: first[i] ?? 0, value: line[i] ?? 0 }));
+      data.legendLabels = [c.series[0]?.name, c.series[1]?.name || c.series[0]?.name].filter(Boolean);
+    } else data.items = c.labels.map((label, i) => ({ label, value: first[i] ?? 0 }));
+    return { chartType: c.type, data };
   }
 
   /** A slide's objects: the usable ones, ids made unique, at most 300. */
@@ -1423,7 +1554,7 @@
   }
 
   function shapeBody(o, rotEl, scale) {
-    const g = geometry(o.shape, o.w, o.h, o.adj);
+    const g = geometry(o.shape, o.w, o.h, o.adj, o.path);
     const sw = o.stroke !== "none" ? o.strokeW : 0;
     const fill = g.open ? "none" : o.fill;
     const svg = s("svg", { class: "hs-obj-geom", width: r2(o.w), height: r2(o.h), viewBox: `0 0 ${r2(Math.max(1, o.w))} ${r2(Math.max(1, o.h))}`, overflow: "visible", "aria-hidden": "true" });
@@ -1447,6 +1578,39 @@
       box.append(textNode(o, scale));
       rotEl.append(box);
     }
+  }
+
+  /** A table: SEJ-styled rules and fills, each cell's rich text; merged cells span; rows grow with their text. */
+  function tableBody(o, rotEl) {
+    const classes = ["hs-otable", `ts-${o.style || "sej"}`, o.header !== false ? "has-header" : "", o.banded !== false ? "is-banded" : "", o.firstCol ? "has-first-col" : "", o.lastRow ? "has-last-row" : ""].filter(Boolean);
+    const table = h("table", { class: classes, style: { "font-size": `calc(${o.fs}px * var(--os, 1))`, color: o.color, "line-height": String(o.lh), "font-family": o.font ? FONTS[o.font][1] : null } });
+    table.append(h("colgroup", {}, o.cols.map((f) => h("col", { style: { width: `${(f * 100).toFixed(3)}%` } }))));
+    const body = h("tbody");
+    o.cells.forEach((row, r) => {
+      const tr = h("tr", { "data-r": String(r), style: { height: `${r2(o.rows[r] * o.h)}px` } });
+      row.forEach((cell, c) => {
+        if (cell.merged) return;
+        const td = h("td", { "data-r": String(r), "data-c": String(c), rowspan: cell.rs > 1 ? String(cell.rs) : null, colspan: cell.cs > 1 ? String(cell.cs) : null, "data-fill": cell.fill || null,
+          style: { background: cell.fill || null, "vertical-align": cell.valign || null } });
+        const tx = h("div", { class: "hs-cell-tx", style: { "text-align": cell.align || null, color: cell.color || null, "font-weight": cell.bold ? "700" : null, "font-style": cell.italic ? "italic" : null,
+          "text-decoration": [cell.underline ? "underline" : "", cell.strike ? "line-through" : ""].filter(Boolean).join(" ") || null } });
+        tx.append(richFragment(cell.text || ""));
+        td.append(tx);
+        tr.append(td);
+      });
+      body.append(tr);
+    });
+    table.append(body);
+    rotEl.append(h("div", { class: "hs-obj-tablebox" }, table));
+  }
+
+  /** A chart drawn by the engine's own charts (the same look as the layouts' charts), with an optional title. */
+  function chartBody(o, rotEl) {
+    const box = h("div", { class: "hs-obj-chart" });
+    if (o.chart.title) box.append(h("div", { class: "hs-obj-chart-title" }, o.chart.title));
+    const titleH = o.chart.title ? 52 : 0;
+    box.append(E.chart(chartSpec(o.chart), { w: Math.max(240, Math.round(o.w)), h: Math.max(140, Math.round(o.h - titleH)), key: `obj:${o.id}` }));
+    rotEl.append(box);
   }
 
   function imageBody(o, rotEl, ctx) {
@@ -1521,9 +1685,9 @@
     if (o.kind === "line") return lineNode(o, all);
     const el = h("div", {
       class: ["hs-obj", `hs-obj-${o.kind}`], "data-el": o.id, "data-kind": o.kind,
-      "data-fill": ["shape", "text"].includes(o.kind) && o.fill !== "none" && !SHAPES[o.shape]?.open ? o.fill : null,
+      "data-fill": ["shape", "text"].includes(o.kind) && o.fill !== "none" && !(o.shape === "custom" ? !o.path?.closed : SHAPES[o.shape]?.open) ? o.fill : null,
       "data-stroke": ["shape", "text", "image"].includes(o.kind) && o.stroke !== "none" ? o.stroke : null,
-      "data-autofit": o.autofit && o.autofit !== "none" ? o.autofit : null,
+      "data-autofit": o.autofit && o.autofit !== "none" ? o.autofit : null, "data-item": o.item || null,
       "data-bbox": Object.values(bounds(o)).map(r2).join(","),
       style: { left: `${r2(o.x)}px`, top: `${r2(o.y)}px`, width: `${r2(o.w)}px`, height: `${r2(o.h)}px` },
     });
@@ -1538,6 +1702,8 @@
       const text = rot.querySelector(".hs-obj-text");
       if (text && (o.flipH || o.flipV)) text.style.transform = `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1})`;
     } else if (o.kind === "image") imageBody(o, rot, ctx);
+    else if (o.kind === "table") tableBody(o, rot);
+    else if (o.kind === "chart") chartBody(o, rot);
     else if (o.kind === "icon") {
       const icon = E.icon(o.icon, "hs-obj-icon");
       if (icon) { icon.style.color = o.color; icon.setAttribute("stroke-width", String(o.strokeW)); rot.append(icon); }
@@ -1592,18 +1758,21 @@
 
   /** What an object says, as plain text (search, the AI's summary, the selection pane). */
   function objectText(o) {
+    if (o?.kind === "table") return o.cells.map((row) => row.filter((cell) => !cell.merged).map((cell) => (cell.text ? richToText(cell.text).trim() : "")).join("\t")).join("\n").trim();
+    if (o?.kind === "chart") return [o.chart.title, ...o.chart.labels].filter(Boolean).join(" ");
     return o && (o.kind === "shape" || o.kind === "text") && o.text ? richToText(o.text).trim() : "";
   }
 
   /** The default name PowerPoint would give ("正方形/長方形 3", "テキスト ボックス 2"). */
   function objectName(o, index = 0) {
     if (o.name) return o.name;
-    const base = o.kind === "shape" ? (SHAPES[o.shape]?.label || "図形").replace(/^.*: /, "") : o.kind === "line" ? (o.head || o.tail ? "矢印" : o.route === "elbow" ? "カギ線コネクタ" : o.route === "curve" ? "曲線コネクタ" : "直線") : KIND_LABELS[o.kind] || "オブジェクト";
+    const base = o.kind === "shape" ? (o.shape === "custom" ? "フリーフォーム" : (SHAPES[o.shape]?.label || "図形").replace(/^.*: /, "")) : o.kind === "line" ? (o.head || o.tail ? "矢印" : o.route === "elbow" ? "カギ線コネクタ" : o.route === "curve" ? "曲線コネクタ" : "直線") : KIND_LABELS[o.kind] || "オブジェクト";
     return `${base} ${index + 1}`;
   }
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS,
+    TABLE_STYLES, CHART_KINDS, chartSpec, freeformD,
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, objectNode, fitObjects, objectText, objectName,
   });

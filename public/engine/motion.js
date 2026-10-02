@@ -1087,7 +1087,7 @@
       return true;
     }
     const onStageClick = (event) => {
-      if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes, .hs-control")) return;
+      if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes, .hs-control, a[href]")) return;
       gesture = true;
       origin = { x: event.clientX, y: event.clientY };
       const actor = event.target.closest(".hs-obj[data-action]");

@@ -591,3 +591,169 @@ export function moveAnimations(timeline, ids, step) {
   }
   return list;
 }
+
+// ---------------------------------------------------------------- tables (kind "table")
+// A table is edited as a grid where every position points at the cell that covers it, so a merged cell is one
+// object in several positions: inserting, deleting, merging and splitting then keep merges right by themselves.
+
+const copyCell = (cell) => JSON.parse(JSON.stringify(cell || {}));
+function expand(cells) {
+  const grid = cells.map((row) => row.map(() => null));
+  cells.forEach((row, r) => row.forEach((cell, c) => {
+    if (cell.merged || grid[r][c]) return;
+    const own = copyCell(cell);
+    delete own.rs; delete own.cs; delete own.merged;
+    for (let i = r; i < Math.min(cells.length, r + (cell.rs || 1)); i += 1) for (let j = c; j < Math.min(row.length, c + (cell.cs || 1)); j += 1) grid[i][j] = own;
+  }));
+  return grid.map((row) => row.map((cell) => cell || {}));
+}
+function collapse(grid) {
+  const done = new Set();
+  return grid.map((row, r) => row.map((cell, c) => {
+    if (done.has(cell)) return { merged: true };
+    done.add(cell);
+    let rs = 1;
+    let cs = 1;
+    while (r + rs < grid.length && grid[r + rs][c] === cell) rs += 1;
+    while (c + cs < row.length && row[c + cs] === cell) cs += 1;
+    const out = copyCell(cell);
+    if (rs > 1) out.rs = rs;
+    if (cs > 1) out.cs = cs;
+    return out;
+  }));
+}
+/** The cell (top-left of a merge) that covers row r, column c. */
+export function tableOrigin(o, r, c) {
+  const grid = expand(o.cells);
+  const cell = grid[r]?.[c];
+  for (let i = 0; i < grid.length; i += 1) for (let j = 0; j < grid[i].length; j += 1) if (grid[i][j] === cell) return [i, j];
+  return [r, c];
+}
+const px = (shares, total) => shares.map((f) => f * total);
+const toShares = (values) => { const sum = values.reduce((a, b) => a + b, 0) || 1; return values.map((v) => Math.round((v / sum) * 100000) / 100000); };
+
+/** A new table: rows × cols of empty cells (the first row is its header). */
+export function makeTable(rows, cols, box) {
+  return { kind: "table", ...box, cells: Array.from({ length: rows }, () => Array.from({ length: cols }, () => ({}))), cols: Array.from({ length: cols }, () => 1 / cols), rows: Array.from({ length: rows }, () => 1 / rows) };
+}
+/** Insert a row before `at` (a merge crossing that line grows over the new row); the table grows by one row. */
+export function tableInsertRow(o, at) {
+  const grid = expand(o.cells);
+  at = Math.max(0, Math.min(grid.length, at));
+  const row = grid[0].map((_, c) => (at > 0 && at < grid.length && grid[at - 1][c] === grid[at][c] ? grid[at][c] : {}));
+  grid.splice(at, 0, row);
+  const heights = px(o.rows, o.h);
+  const added = heights[Math.min(at, heights.length - 1)] || o.h / heights.length;
+  heights.splice(at, 0, added);
+  return { ...o, cells: collapse(grid), rows: toShares(heights), h: o.h + added };
+}
+/** Insert a column before `at`; the table grows by that column's width. */
+export function tableInsertCol(o, at) {
+  const grid = expand(o.cells);
+  at = Math.max(0, Math.min(grid[0].length, at));
+  grid.forEach((row) => row.splice(at, 0, at > 0 && at < row.length && row[at - 1] === row[at] ? row[at] : {}));
+  const widths = px(o.cols, o.w);
+  const added = widths[Math.min(at, widths.length - 1)] || o.w / widths.length;
+  widths.splice(at, 0, added);
+  return { ...o, cells: collapse(grid), cols: toShares(widths), w: o.w + added };
+}
+/** Delete rows r0…r1 (the table shrinks); null when nothing would be left. */
+export function tableDeleteRows(o, r0, r1) {
+  const [a, b] = [Math.min(r0, r1), Math.max(r0, r1)];
+  if (b - a + 1 >= o.cells.length) return null;
+  const grid = expand(o.cells).filter((_, r) => r < a || r > b);
+  const heights = px(o.rows, o.h);
+  const removed = heights.slice(a, b + 1).reduce((s, v) => s + v, 0);
+  return { ...o, cells: collapse(grid), rows: toShares(heights.filter((_, r) => r < a || r > b)), h: Math.max(20, o.h - removed) };
+}
+/** Delete columns c0…c1 (the table narrows); null when nothing would be left. */
+export function tableDeleteCols(o, c0, c1) {
+  const [a, b] = [Math.min(c0, c1), Math.max(c0, c1)];
+  if (b - a + 1 >= o.cells[0].length) return null;
+  const grid = expand(o.cells).map((row) => row.filter((_, c) => c < a || c > b));
+  const widths = px(o.cols, o.w);
+  const removed = widths.slice(a, b + 1).reduce((s, v) => s + v, 0);
+  return { ...o, cells: collapse(grid), cols: toShares(widths.filter((_, c) => c < a || c > b)), w: Math.max(20, o.w - removed) };
+}
+/** Merge a block of cells into one (the words of each come along, one paragraph after another). */
+export function tableMerge(o, r0, c0, r1, c1) {
+  const grid = expand(o.cells);
+  const [ra, rb, ca, cb] = [Math.min(r0, r1), Math.max(r0, r1), Math.min(c0, c1), Math.max(c0, c1)];
+  // Grow the block to whole merges it cuts through.
+  let [top, bottom, left, right] = [ra, rb, ca, cb];
+  for (let grew = true; grew;) {
+    grew = false;
+    const inside = new Set();
+    for (let i = top; i <= bottom; i += 1) for (let j = left; j <= right; j += 1) inside.add(grid[i][j]);
+    grid.forEach((row, i) => row.forEach((cell, j) => {
+      if (!inside.has(cell)) return;
+      if (i < top) { top = i; grew = true; } if (i > bottom) { bottom = i; grew = true; }
+      if (j < left) { left = j; grew = true; } if (j > right) { right = j; grew = true; }
+    }));
+  }
+  const first = grid[top][left];
+  const texts = [];
+  const seen = new Set();
+  for (let i = top; i <= bottom; i += 1) for (let j = left; j <= right; j += 1) {
+    const cell = grid[i][j];
+    if (seen.has(cell)) continue;
+    seen.add(cell);
+    if (cell.text && cell.text.replace(/<[^>]+>/g, "").trim()) texts.push(cell.text);
+  }
+  const merged = { ...first, ...(texts.length ? { text: texts.join("") } : {}) };
+  for (let i = top; i <= bottom; i += 1) for (let j = left; j <= right; j += 1) grid[i][j] = merged;
+  return { ...o, cells: collapse(grid) };
+}
+/** Split a merged cell back into single cells (its words stay in the first). */
+export function tableSplit(o, r, c) {
+  const grid = expand(o.cells);
+  const cell = grid[r]?.[c];
+  if (!cell) return o;
+  let first = true;
+  grid.forEach((row, i) => row.forEach((x, j) => {
+    if (x !== cell) return;
+    if (first) { first = false; return; }
+    grid[i][j] = { ...(cell.fill ? { fill: cell.fill } : {}) };
+  }));
+  return { ...o, cells: collapse(grid) };
+}
+/** Settings for a block of cells (fill, colour, bold, alignment…); undefined removes a setting. */
+export function tableCells(o, r0, c0, r1, c1, patch) {
+  const grid = expand(o.cells);
+  const done = new Set();
+  for (let i = Math.min(r0, r1); i <= Math.max(r0, r1); i += 1) for (let j = Math.min(c0, c1); j <= Math.max(c0, c1); j += 1) {
+    const cell = grid[i]?.[j];
+    if (!cell || done.has(cell)) continue;
+    done.add(cell);
+    const changes = typeof patch === "function" ? patch(cell) : patch;
+    for (const [k, v] of Object.entries(changes || {})) { if (v === undefined || v === null) delete cell[k]; else cell[k] = v; }
+  }
+  return { ...o, cells: collapse(grid) };
+}
+/** The same height for rows r0…r1, or the same width for columns c0…c1 (高さを揃える・幅を揃える). */
+export function tableDistribute(o, axis, a = 0, b = Infinity) {
+  const key = axis === "rows" ? "rows" : "cols";
+  const list = [...o[key]];
+  const [lo, hi] = [Math.max(0, Math.min(a, b)), Math.min(list.length - 1, Math.max(a, b))];
+  const share = list.slice(lo, hi + 1).reduce((s, v) => s + v, 0) / (hi - lo + 1);
+  for (let i = lo; i <= hi; i += 1) list[i] = share;
+  return { ...o, [key]: toShares(list) };
+}
+/** Move the line between column i and i+1 (or row) by d slide pixels, keeping both at least `min` wide. */
+export function tableResizeLine(o, axis, i, d, min = 24) {
+  const key = axis === "rows" ? "rows" : "cols";
+  const total = key === "rows" ? o.h : o.w;
+  const sizes = px(o[key], total);
+  if (i < 0 || i >= sizes.length - 1) return o;
+  const move = Math.max(min - sizes[i], Math.min(sizes[i + 1] - min, d));
+  sizes[i] += move;
+  sizes[i + 1] -= move;
+  return { ...o, [key]: toShares(sizes) };
+}
+/** The text of a table as tab-separated lines (and back), for copying cells as text. */
+export function tableFromText(text) {
+  const lines = String(text || "").replace(/\r/g, "").split("\n").filter((line, i, all) => line || i < all.length - 1).slice(0, 40);
+  const rows = lines.map((line) => line.split("\t").slice(0, 20));
+  const cols = Math.max(...rows.map((row) => row.length), 1);
+  return rows.map((row) => Array.from({ length: cols }, (_, c) => (row[c] ? { text: `<p>${row[c].replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[ch])}</p>` } : {})));
+}
