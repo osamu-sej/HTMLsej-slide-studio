@@ -4,6 +4,7 @@ import { LOOK_ADVICE, LOOKS, lookOf, varietyIssues } from "./layout-looks.mjs?v=
 import { createCanvas } from "./editor/canvas.mjs?v=__APP_VERSION__";
 import { createEditorUi } from "./editor/ui.mjs?v=__APP_VERSION__";
 import * as ops from "./editor/ops.mjs?v=__APP_VERSION__";
+import { createConverter } from "./editor/convert.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -1469,18 +1470,30 @@ function eachText(value, visit, key = "") {
 /** Visit the words of every object's text (not its markup); returns how many objects changed. */
 function eachObjectText(slides, visit) {
   let changed = 0;
+  // One rich text: its words visited, the markup kept. Returns the new text, or null when nothing changed.
+  const visitRich = (html) => {
+    const box = document.createElement("div");
+    box.append(E.richFragment(html));
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    let dirty = false;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const next = visit(node.data);
+      if (next !== node.data) { node.data = next; dirty = true; }
+    }
+    return dirty ? E.sanitizeRich(box.innerHTML) : null;
+  };
   for (const slide of slides) {
     for (const o of slide.elements || []) {
-      if (!o?.text) continue;
-      const box = document.createElement("div");
-      box.append(E.richFragment(o.text));
-      const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
       let dirty = false;
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        const next = visit(node.data);
-        if (next !== node.data) { node.data = next; dirty = true; }
+      if (o?.text) { const next = visitRich(o.text); if (next != null) { o.text = next; dirty = true; } }
+      // A table's cells and a chart's words are found and replaced too.
+      if (o?.kind === "table") for (const cell of o.cells.flat()) if (cell.text) { const next = visitRich(cell.text); if (next != null) { cell.text = next; dirty = true; } }
+      if (o?.kind === "chart") {
+        if (o.chart.title) { const next = visit(o.chart.title); if (next !== o.chart.title) { o.chart.title = next; dirty = true; } }
+        o.chart.labels = o.chart.labels.map((label) => { const next = visit(label); if (next !== label) dirty = true; return next; });
+        for (const serie of o.chart.series) { const next = visit(serie.name); if (next !== serie.name) { serie.name = next; dirty = true; } }
       }
-      if (dirty) { o.text = E.sanitizeRich(box.innerHTML); changed += 1; }
+      if (dirty) changed += 1;
     }
   }
   return changed;
@@ -1822,11 +1835,18 @@ const editorApp = {
   setView: (view) => setView(view),
   openPanel: (panel, focus) => openFormatPanel(focus),
   showTab: (tab) => editorUi.showTab(tab),
+  editChart: (id) => editorUi.editChart(id),
+  startCrop: (id) => editorUi.startCrop(id),
+  editPoints: (id) => editorUi.editPoints(id),
+  fitFor: (index) => fitFor(index),
+  convertSlide: () => convertSlideToObjects(),
+  canConvert: () => !converter.refusal(state.deck?.slides[state.selected]),
 };
+const converter = createConverter(editorApp);
 const editor = createCanvas(editorApp);
 const editorUi = createEditorUi(editor, editorApp);
 // Read-only access for the browser checks (qa/studio-objects.mjs): the deck and the slide on the stage.
-window.__hsej = { deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection };
+window.__hsej = { deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection, typing: () => editor.state.typing?.cell ?? (editor.typing ? "text" : null), cellRange: () => editor.cellRange };
 
 /**
  * The objects of the slide on the stage changed (one undo step unless told otherwise). Their animations follow:
@@ -1864,6 +1884,37 @@ function setSlideFields(patch, { all = false } = {}) {
     }
   }
   markChanged({ structural: true });
+}
+
+/**
+ * 図形に変換: the slide on the stage becomes 白紙, its layout drawn as objects people edit one by one (its build
+ * as animations on them). One undo step, as in PowerPoint.
+ */
+async function convertSlideToObjects() {
+  if (!state.deck || state.converting) return;
+  const index = state.selected;
+  const why = converter.refusal(state.deck.slides[index]);
+  if (why) { toast(why); return; }
+  if (state.inline) finishInlineEdit(true);
+  state.converting = true;
+  try {
+    const before = state.deck.slides[index];
+    const result = await converter.convert(index);
+    if (!state.deck || state.deck.slides[index] !== before) return;
+    const next = result.slide;
+    const timeline = E.normalizeTimeline(next.timeline, next);
+    if (timeline.length) next.timeline = timeline; else delete next.timeline;
+    pushUndo();
+    state.deck.slides[index] = next;
+    editor.select?.([]);
+    markChanged({ structural: true });
+    toast(`図形に変換しました（${result.objects.length}個の部品）。1つずつ動かして編集できます。⌘Zで元に戻せます`);
+  } catch (error) {
+    console.error(error);
+    toast(`図形に変換できませんでした：${error.message || error}`);
+  } finally {
+    state.converting = false;
+  }
 }
 
 function openFormatPanel(focus = null) {

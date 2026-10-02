@@ -5,6 +5,9 @@
 import * as ops from "./ops.mjs";
 import { ico } from "./icons.mjs";
 import { createAnimations } from "./anim.mjs";
+import { createTableUi } from "./tables.mjs";
+import { createCrop } from "./crop.mjs";
+import { createFreeform } from "./freeform.mjs";
 
 const SIZES_PT = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const LINE_WIDTHS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 8, 12];
@@ -136,7 +139,9 @@ export function createEditorUi(editor, app) {
         box.append(h("div", { class: "rb-gallery-head" }, "線"));
         box.append(h("div", { class: "rb-gallery-grid" }, [["line", "直線"], ["arrow", "矢印"], ["double", "両方向矢印"], ["elbow", "カギ線コネクタ"], ["curve", "曲線コネクタ"]].map(([variant, label]) => h("button", {
           type: "button", title: label, "aria-label": label, onclick: () => { close(); onPick({ kind: "line", variant }); },
-        }, lineThumb(variant)))));
+        }, lineThumb(variant))), [["curve", "曲線"], ["polygon", "フリーフォーム: 図形"], ["scribble", "フリーフォーム: フリーハンド"]].map(([mode, label]) => h("button", {
+          type: "button", title: label, "aria-label": label, "data-freeform": mode, onclick: () => { close(); onPick({ kind: "freeform", mode }); },
+        }, freeformThumb(mode)))));
       }
       for (const [name, keys] of E.SHAPE_GROUPS) {
         box.append(h("div", { class: "rb-gallery-head" }, name));
@@ -152,6 +157,12 @@ export function createEditorUi(editor, app) {
     const svg = E.s("svg", { viewBox: `-2 -2 ${w + 4} ${hh + 4}`, width: w + 4, height: hh + 4, "aria-hidden": "true" });
     for (const d of g.paths) svg.append(E.s("path", { d, fill: g.open ? "none" : "#dce4f2", stroke: "#1f3864", "stroke-width": 1, "fill-rule": g.rule }));
     for (const extra of g.extras) svg.append(E.s("path", { d: extra.d, fill: extra.tone === "line" ? "none" : extra.tone === "dark" ? "rgba(0,0,0,.15)" : "rgba(255,255,255,.5)", stroke: "#1f3864", "stroke-width": 0.8 }));
+    return svg;
+  }
+  function freeformThumb(mode) {
+    const svg = E.s("svg", { viewBox: "0 0 30 24", width: 30, height: 24, "aria-hidden": "true" });
+    const d = mode === "curve" ? "M3 18 C8 4 14 4 16 12 S24 22 27 6" : mode === "polygon" ? "M4 19 L9 5 L17 11 L25 4 L22 20 Z" : "M3 16 c3-6 5 4 8-2 s4-8 6 0 s5 6 7-4 s2-4 3 0";
+    svg.append(E.s("path", { d, fill: mode === "polygon" ? "#dce4f2" : "none", stroke: "#1f3864", "stroke-width": 1.5, "stroke-linejoin": "round", "stroke-linecap": "round" }));
     return svg;
   }
   function lineThumb(variant) {
@@ -225,11 +236,31 @@ export function createEditorUi(editor, app) {
     img.src = `/assets/${file}`;
   }
   function pickTool(tool) {
+    if (tool.kind === "freeform") { freeform.start(tool.mode); return; }
     editor.setTool(tool);
     app.toast(tool.kind === "line" ? "スライド上をドラッグして線を引いてください（Shiftで水平・垂直・45°）" : tool.kind === "text" ? "クリックまたはドラッグでテキストボックスを置き、そのまま入力できます" : "スライド上をドラッグして描いてください（クリックで標準の大きさ。Shiftで縦横同じ比率）");
   }
 
   async function editLink() {
+    // While typing, the words picked become a link (挿入 → リンク), as in PowerPoint.
+    if (editor.typing) {
+      const selection = window.getSelection();
+      const picked = selection && !selection.isCollapsed && selection.toString().trim();
+      if (picked) {
+        const range = selection.getRangeAt(0).cloneRange();
+        const url = await app.ask("リンクの挿入", `「${picked.slice(0, 30)}」から開くWebページ（https://…）かメール（mailto:…）。空にするとリンクを外します`, "https://");
+        if (url == null) return;
+        editor.restoreRange();
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        if (!url.trim() || url.trim() === "https://") { editor.textFormat("unlink"); return; }
+        if (!/^(https?:\/\/|mailto:)/i.test(url.trim())) { app.toast("URLは https:// か mailto: で始めてください"); return; }
+        editor.textFormat("link", url.trim());
+        app.toast("リンクを付けました（発表中にクリックすると開きます）");
+        return;
+      }
+    }
     const o = one();
     if (!o) return app.toast("リンクを付けるオブジェクトを1つ選んでください");
     openPop(document.querySelector('[data-rb="link"]') || ribbon, (close) => linkForm(o, close));
@@ -267,6 +298,9 @@ export function createEditorUi(editor, app) {
     { id: "view", label: "表示" },
     { id: "shape", label: "図形の書式", contextual: () => hasShape() },
     { id: "picture", label: "図の形式", contextual: () => hasImage() },
+    { id: "tableDesign", label: "テーブル デザイン", contextual: () => tables.isTable() },
+    { id: "tableLayout", label: "レイアウト", contextual: () => tables.isTable() },
+    { id: "chartDesign", label: "グラフのデザイン", contextual: () => tables.isChart() },
   ];
 
   function signature() {
@@ -286,7 +320,8 @@ export function createEditorUi(editor, app) {
     built = sig;
     updaters = [];
     const head = h("div", { class: "rb-tabs", role: "tablist" },
-      tabs.map((t) => h("button", { type: "button", role: "tab", class: t.contextual ? "contextual" : "", "aria-selected": String(t.id === tab), onclick: () => { tab = t.id; collapsed = false; renderRibbon(true); editor.draw(); }, ondblclick: () => { collapsed = !collapsed; renderRibbon(true); } }, t.label)),
+      // Switching tabs keeps the caret (and the cells picked in a table), as in PowerPoint.
+      tabs.map((t) => h("button", { type: "button", role: "tab", class: t.contextual ? "contextual" : "", "aria-selected": String(t.id === tab), "data-keeps-text": "", onmousedown: (event) => event.preventDefault(), onclick: () => { tab = t.id; collapsed = false; renderRibbon(true); editor.draw(); }, ondblclick: () => { collapsed = !collapsed; renderRibbon(true); } }, t.label)),
       h("span", { class: "rb-spacer" }),
       h("span", { class: "rb-hint" }, editor.tool ? "描画中（Escでやめる）" : editor.painter ? "書式を貼り付ける図形をクリック（Esc）" : ""),
       h("button", { type: "button", class: "rb-collapse", title: collapsed ? "リボンを表示" : "リボンを折りたたむ", onclick: () => { collapsed = !collapsed; renderRibbon(true); } }, collapsed ? "▾" : "▴"));
@@ -364,7 +399,8 @@ export function createEditorUi(editor, app) {
           { label: "白紙（自由配置）", icon: "slide", run: () => app.insertBlankSlide() },
           { label: "レイアウトを選んで追加…", icon: "layout", run: () => app.openTypeDialog("insert") },
         ]), { big: true }),
-        col(btn("layout", "レイアウト", "このスライドのレイアウトを変える", () => app.openTypeDialog("change")), btn("duplicateSlide", "複製", "このスライドを複製", () => app.duplicateSlide()))),
+        col(btn("layout", "レイアウト", "このスライドのレイアウトを変える", () => app.openTypeDialog("change")), btn("duplicateSlide", "複製", "このスライドを複製", () => app.duplicateSlide()),
+          btn("convert", "図形に変換", "このスライドのレイアウトを図形・テキストボックス・画像に分けて、1つずつ自由に編集できるようにする（白紙のスライドになります）", () => app.convertSlide(), { enabled: () => app.canConvert() }))),
       group("クリップボード",
         btn("paste", "貼り付け", "貼り付け（⌘V）", () => editor.pasteFromMemory(), { big: true }),
         col(btn("cut", "切り取り", "切り取り（⌘X）", () => { document.execCommand("cut") || cutFallback(); }, { enabled: any }),
@@ -420,9 +456,11 @@ export function createEditorUi(editor, app) {
           { label: "URLから…", icon: "link", run: () => insertFromUrl("image") },
         ]), { big: true }),
         h("span", { "data-rb": "photos" })),
+      group("表", drop("table", "表", "表を入れる（行と列を選ぶ）", () => tables.tablePicker(), { big: true })),
       group("図",
         drop("shapes", "図形", "図形を描く", () => shapeGallery(pickTool), { big: true }),
-        drop("icon", "アイコン", "アイコンを入れる", () => iconGallery(insertIcon), { big: true })),
+        drop("icon", "アイコン", "アイコンを入れる", () => iconGallery(insertIcon), { big: true }),
+        drop("chartBar", "グラフ", "グラフを入れる（データは表で入力）", () => tables.chartPicker(), { big: true })),
       group("テキスト",
         drop("textbox", "テキスト ボックス", "テキストボックスを描く", menu([
           { label: "横書きテキスト ボックス", icon: "textbox", run: () => pickTool({ kind: "text" }) },
@@ -436,7 +474,7 @@ export function createEditorUi(editor, app) {
           { label: "このデバイスのビデオ・Lottie…", icon: "video", run: insertVideoFile },
           { label: "YouTube・URL…", icon: "link", run: () => insertFromUrl("video") },
         ]), { big: true })),
-      group("リンク", h("span", { "data-rb": "link" }, btn("link", "リンク・|動作", "クリックしたときの動作（スライドへ移動・Webページを開く）", editLink, { big: true, enabled: () => Boolean(one()) }))),
+      group("リンク", h("span", { "data-rb": "link" }, btn("link", "リンク・|動作", "選んだ文字にリンク／図形をクリックしたときの動作（スライドへ移動・Webページを開く）", editLink, { big: true, keep: true, enabled: () => Boolean(one()) || editor.typing }))),
     ];
   }
 
@@ -573,7 +611,7 @@ export function createEditorUi(editor, app) {
         drop("mask", "図形に合わせて|切り抜き", "画像を図形の形に切り抜く", () => (close) => h("div", { class: "rb-gallery" }, h("div", { class: "rb-gallery-grid" }, MASKS.map((key) => h("button", { type: "button", title: E.SHAPES[key].label, onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? { mask: key === "rect" ? undefined : key, adj: undefined } : null)); } }, shapeThumb(key))))), { big: true, enabled: hasImage })),
       arrangeGroup(),
       group("サイズ",
-        btn("crop", "トリミング", "画像の端を切り取る（書式パネルで数値指定）", () => app.openPanel("format", "picture"), { big: true, enabled: hasImage }),
+        btn("crop", "トリミング", "画像の端を切り取る：黒い印をドラッグ（Enterで確定）。数値は書式パネルで", () => { const o = one(); if (o?.kind === "image") crop.start(o.id); else app.openPanel("format", "picture"); }, { big: true, enabled: hasImage, pressed: () => crop.active }),
         sizeFields()),
     ];
   }
@@ -599,7 +637,7 @@ export function createEditorUi(editor, app) {
   }
 
   function buildTab(id) {
-    return { home: homeTab, insert: insertTab, transition: anim.transitionTab, animation: anim.animationTab, shape: shapeTab, picture: pictureTab, view: viewTab }[id]();
+    return { home: homeTab, insert: insertTab, transition: anim.transitionTab, animation: anim.animationTab, shape: shapeTab, picture: pictureTab, view: viewTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab }[id]();
   }
 
   function showTab(id) {
@@ -719,6 +757,23 @@ export function createEditorUi(editor, app) {
         line("折り返し", toggle("図形の幅で折り返す", st.wrap !== false, (on) => editor.textFormat("wrap", on))),
         line("余白（cm）", ...["上", "右", "下", "左"].map((label, i) => h("span", { class: "fp-pad" }, h("small", {}, label), numberInput(ops.toCm((st.pad || [7, 14, 7, 14])[i]), (v) => { const pad = [...(st.pad || [7, 14, 7, 14])]; pad[i] = ops.fromCm(Math.max(0, v)); editor.textFormat("pad", pad); }, { step: 0.05, min: 0, width: 54 }))))));
     }
+    if (single && chosen[0].kind === "table") {
+      const t = E.withDefaults(chosen[0]);
+      const setTable = (patch) => editor.changeTable((o) => ({ ...o, ...patch }));
+      out.push(section("table", "表", true,
+        line("スタイル", choice(Object.entries(E.TABLE_STYLES), t.style || "sej", (v) => setTable({ style: v === "sej" ? undefined : v }))),
+        line("オプション", toggle("ヘッダー行", t.header !== false, (on) => setTable({ header: on })), toggle("縞模様（行）", t.banded !== false, (on) => setTable({ banded: on }))),
+        line("", toggle("最初の列", t.firstCol, (on) => setTable({ firstCol: on })), toggle("集計行", t.lastRow, (on) => setTable({ lastRow: on }))),
+        line("文字のサイズ", numberInput(ops.toPt(t.fs), (v) => editor.textFormat("size", v), { step: 1, min: 6, unit: "pt" })),
+        line("フォント", choice(Object.entries(E.FONTS).map(([k, [label]]) => [k, label]), t.font || "body", (v) => editor.textFormat("font", v))),
+        line("大きさ", h("span", { class: "hint" }, `${t.cells.length}行 × ${t.cols.length}列（リボンの「レイアウト」で行・列の追加・削除・結合）`))));
+    }
+    if (single && chosen[0].kind === "chart") {
+      const c = chosen[0].chart;
+      out.push(section("chart", "グラフ", true,
+        line("種類", choice(Object.entries(E.CHART_KINDS), c.type, (v) => editor.apply({ chart: { ...c, type: v } }, { ids: [chosen[0].id] }))),
+        line("", h("button", { type: "button", class: "btn btn-sm", onclick: () => tables.editChart(chosen[0].id) }, "データの編集…"), h("small", { class: "hint" }, `${c.labels.length}項目 × ${c.series.length}系列`))));
+    }
     if (chosen.some((x) => x.kind === "image")) {
       const img = E.withDefaults(chosen.find((x) => x.kind === "image"));
       const crop = img.crop || { l: 0, t: 0, r: 0, b: 0 };
@@ -811,14 +866,17 @@ export function createEditorUi(editor, app) {
     return box;
   }
   function kindIcon(o) {
-    if (o.kind === "shape") return shapeThumb(o.shape, 18, 14);
-    return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", lottie: "lottie" }[o.kind] || "shapes", 16);
+    if (o.kind === "shape") return E.SHAPES[o.shape] ? shapeThumb(o.shape, 18, 14) : freeformThumb(o.path?.closed ? "polygon" : "curve");
+    return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", lottie: "lottie", table: "table", chart: "chartBar" }[o.kind] || "shapes", 16);
   }
 
   // アニメーション・画面切り替え (anim.mjs) build their tabs and the animation pane with these same parts.
   const anim = createAnimations(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), tabNow: () => tab, refreshRibbon: () => refresh() });
+  const crop = createCrop(editor, app);
+  const freeform = createFreeform(editor, app);
+  const tables = createTableUi(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), colors, showTab: (id) => showTab(id) });
 
   editor.subscribe(() => { renderRibbon(); renderPane(); });
 
-  return { renderRibbon, renderPane, renderAnimPane: () => anim.renderPane(), showTab, closePop, openPop, shapeGallery, iconGallery, photoGallery, get tab() { return tab; } };
+  return { renderRibbon, renderPane, renderAnimPane: () => anim.renderPane(), editChart: (id) => tables.editChart(id), startCrop: (id) => crop.start(id), editPoints: (id) => freeform.editPoints(id), showTab, closePop, openPop, shapeGallery, iconGallery, photoGallery, get tab() { return tab; } };
 }

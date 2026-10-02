@@ -20,7 +20,7 @@ export function createCanvas(app) {
     sel: [], slideIndex: -1, entered: null, typing: null, tool: null, drag: null,
     wrap: null, slideEl: null, layer: null, painter: null, clipboard: null, pasteCount: 0, suppressClick: false,
     zoom: stored("zoom", "fit"), grid: stored("grid", false), snapGrid: stored("snapGrid", false), smart: stored("smart", true), guides: stored("guides", true),
-    menu: null, range: null, picker: null,
+    menu: null, range: null, picker: null, cellRange: null,
   };
   const subs = new Set();
   const emit = () => { for (const fn of subs) { try { fn(); } catch (error) { console.error(error); } } };
@@ -283,6 +283,23 @@ export function createCanvas(app) {
     const list = objects();
     const p = toSlide(event);
     const handle = event.target.closest?.(".ed-handle")?.dataset.handle;
+    // Typing in a table: another cell takes the caret, Shift+click (or a drag) selects a block of cells.
+    if (ed.typing?.cell && event.target.closest?.("td[data-r]") && ed.typing.node.contains(event.target)) {
+      const td = event.target.closest("td[data-r]");
+      const here = ops.tableOrigin(byId(ed.typing.id), Number(td.dataset.r), Number(td.dataset.c));
+      const [r0, c0] = ed.typing.cell;
+      if (event.shiftKey) { event.preventDefault(); setCellRange([r0, c0, here[0], here[1]]); return; }
+      if (here[0] !== r0 || here[1] !== c0) {
+        event.preventDefault();
+        const id = ed.typing.id;
+        stopTyping(true);
+        startTyping(id, { cell: here, at: [event.clientX, event.clientY] });
+        return;
+      }
+      setCellRange(null);
+      dragCells(event, [r0, c0]);
+      return;
+    }
     // Typing: clicks inside the text keep editing.
     if (ed.typing && event.target.closest(".ed-typing-tx")) return;
     if (ed.typing) stopTyping(true);
@@ -624,17 +641,101 @@ export function createCanvas(app) {
       if (!["shape", "text"].includes(hit.kind)) return;
     }
     if (["shape", "text"].includes(hit.kind) && !hit.locked) startTyping(hit.id, { at: [event.clientX, event.clientY] });
-    else if (hit.kind === "image") app.showTab?.("picture");
+    else if (hit.kind === "table" && !hit.locked) {
+      const td = cellAt(event, hit.id);
+      startTyping(hit.id, { cell: td ? [Number(td.dataset.r), Number(td.dataset.c)] : [0, 0], at: [event.clientX, event.clientY] });
+    } else if (hit.kind === "image") app.showTab?.("picture");
+    else if (hit.kind === "chart") app.editChart?.(hit.id);
   }
 
-  function startTyping(id, { caret = "point", at = null, replaceWith = null } = {}) {
+  /** A block of cells picked while typing in a table (rows r0…r1, columns c0…c1), shown tinted on the stage. */
+  function setCellRange(range) {
+    ed.cellRange = range && (range[0] !== range[2] || range[1] !== range[3]) ? range : null;
+    paintCellRange();
+    emit();
+  }
+  function paintCellRange() {
+    const node = ed.typing?.node || (ed.sel.length === 1 ? ed.slideEl?.querySelector(`.hs-obj[data-el="${CSS.escape(ed.sel[0])}"]`) : null);
+    for (const td of ed.slideEl?.querySelectorAll("td.ed-cell-sel") || []) td.classList.remove("ed-cell-sel");
+    const r = ed.cellRange;
+    if (!r || !node) return;
+    const [ra, rb, ca, cb] = [Math.min(r[0], r[2]), Math.max(r[0], r[2]), Math.min(r[1], r[3]), Math.max(r[1], r[3])];
+    for (const td of node.querySelectorAll("td[data-r]")) {
+      const i = Number(td.dataset.r);
+      const j = Number(td.dataset.c);
+      if (i >= ra && i <= rb && j >= ca && j <= cb) td.classList.add("ed-cell-sel");
+    }
+  }
+  function dragCells(event, from) {
+    const id = ed.typing.id;
+    const move = (ev) => {
+      if (!ed.typing || ed.typing.id !== id) return;
+      const td = cellAt(ev, id);
+      if (!td) return;
+      const here = [Number(td.dataset.r), Number(td.dataset.c)];
+      if (here[0] === from[0] && here[1] === from[1]) { if (ed.cellRange) setCellRange(null); return; }
+      window.getSelection()?.removeAllRanges();
+      setCellRange([from[0], from[1], here[0], here[1]]);
+    };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  /** Where table commands act: the picked block, the cell being typed in, or (table selected) every cell. */
+  function tableTarget() {
+    const id = ed.typing?.cell ? ed.typing.id : ed.sel.length === 1 ? ed.sel[0] : null;
+    const o = id ? byId(id) : null;
+    if (!o || o.kind !== "table") return null;
+    if (ed.cellRange) { const [r0, c0, r1, c1] = ed.cellRange; return { o, r0: Math.min(r0, r1), c0: Math.min(c0, c1), r1: Math.max(r0, r1), c1: Math.max(c0, c1), cells: true }; }
+    if (ed.typing?.cell) { const [r, c] = ed.typing.cell; const cell = o.cells[r][c]; return { o, r0: r, c0: c, r1: r + (cell.rs || 1) - 1, c1: c + (cell.cs || 1) - 1, cells: true }; }
+    return { o, r0: 0, c0: 0, r1: o.cells.length - 1, c1: o.cells[0].length - 1, cells: false };
+  }
+  /** Change the table that table commands act on (typing stops first; the cell picked stays picked). */
+  function changeTable(fn, { keepTyping = true, keepRange = true } = {}) {
+    const target = tableTarget();
+    if (!target) return null;
+    const cell = ed.typing?.cell;
+    const range = ed.cellRange;
+    if (ed.typing) stopTyping(true);
+    const o = byId(target.o.id);
+    const next = fn(o, target);
+    if (!next) return null;
+    commit(objects().map((item) => (item.id === o.id ? next : item)), { select: [o.id] });
+    if (keepTyping && cell && next.cells?.[cell[0]]?.[cell[1]] && !next.cells[cell[0]][cell[1]].merged) { startTyping(o.id, { cell, caret: "end" }); if (range && keepRange) setCellRange(range); }
+    return next;
+  }
+  /** A table whose rows no longer hold their words grows to fit (measured on the stage). */
+  function tableFit(o, node) {
+    const trs = [...(node?.querySelectorAll("tr") || [])];
+    if (!trs.length || trs.length !== o.cells.length) return {};
+    const k = scale();
+    const heights = trs.map((tr) => tr.getBoundingClientRect().height / k);
+    const total = heights.reduce((a, b) => a + b, 0);
+    if (total <= o.h + 1) return {};
+    return { h: Math.round(total * 100) / 100, rows: heights.map((v) => Math.round((v / total) * 100000) / 100000) };
+  }
+
+  /** The table cell under the pointer (a <td> of that table on the stage). */
+  function cellAt(event, id) {
+    const node = ed.slideEl?.querySelector(`.hs-obj[data-el="${CSS.escape(id)}"]`);
+    return document.elementsFromPoint(event.clientX, event.clientY).map((el) => el.closest?.("td[data-r]")).find((td) => td && node?.contains(td)) || null;
+  }
+
+  function startTyping(id, { caret = "point", at = null, replaceWith = null, cell = null } = {}) {
     const o = byId(id);
-    if (!o || !["shape", "text"].includes(o.kind) || !ed.slideEl) return false;
+    if (!o || !["shape", "text", "table"].includes(o.kind) || !ed.slideEl) return false;
     const node = ed.slideEl.querySelector(`.hs-obj[data-el="${CSS.escape(id)}"]`);
-    const tx = node?.querySelector(".hs-obj-tx");
+    let tx = node?.querySelector(".hs-obj-tx");
+    let where = null;
+    if (o.kind === "table") {
+      // A table types into one cell at a time (the cell that covers a merged block).
+      where = ops.tableOrigin(o, ...(cell || [0, 0]));
+      tx = node?.querySelector(`td[data-r="${where[0]}"][data-c="${where[1]}"] .hs-cell-tx`);
+      ed.cellRange = null;
+    }
     if (!tx) return false;
     ed.sel = [id];
-    ed.typing = { id, before: tx.innerHTML, node, tx };
+    ed.typing = { id, before: tx.innerHTML, node, tx, cell: where };
     if (!tx.innerHTML.trim()) tx.innerHTML = "<p><br></p>";
     if (replaceWith != null) tx.innerHTML = `<p>${replaceWith.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]) || "<br>"}</p>`;
     tx.setAttribute("contenteditable", "true");
@@ -678,6 +779,24 @@ export function createCanvas(app) {
   function onTypingInput() { growWhileTyping(); }
   function onTypingKey(event) {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); stopTyping(true); return; }
+    if (event.key === "Tab" && ed.typing?.cell) {
+      // Tab: the next cell (a new row after the last one), Shift+Tab: the one before.
+      event.preventDefault();
+      event.stopPropagation();
+      const { id, cell: [r, c] } = ed.typing;
+      stopTyping(true);
+      const o = byId(id);
+      const order = [];
+      o.cells.forEach((row, i) => row.forEach((x, j) => { if (!x.merged) order.push([i, j]); }));
+      const at = order.findIndex(([i, j]) => i === r && j === c);
+      let to = order[at + (event.shiftKey ? -1 : 1)];
+      if (!to && !event.shiftKey) {
+        commit(objects().map((item) => (item.id === id ? ops.tableInsertRow(item, item.cells.length) : item)));
+        to = [byId(id).cells.length - 1, 0];
+      }
+      if (to) startTyping(id, { cell: to, caret: "all" });
+      return;
+    }
     if (event.key === "Tab") {
       event.preventDefault();
       document.execCommand(event.shiftKey ? "outdent" : "indent");
@@ -698,7 +817,7 @@ export function createCanvas(app) {
 
   /** The box height a "grow" object needs for its text. */
   function neededSize(o, tx) {
-    const g = E.geometry(o.shape || "rect", o.w, o.h, o.adj);
+    const g = E.geometry(o.shape || "rect", o.w, o.h, o.adj, o.path);
     const pad = o.pad || E.OBJECT_DEFAULTS[o.kind]?.pad || [7, 14, 7, 14];
     if (o.vertical) {
       const insetX = o.w - (g.text[2] - g.text[0]);
@@ -731,6 +850,7 @@ export function createCanvas(app) {
     if (!t) return;
     ed.typing = null;
     ed.range = null;
+    ed.cellRange = null;
     document.removeEventListener("selectionchange", rememberRange);
     t.tx.removeEventListener("input", onTypingInput);
     t.tx.removeEventListener("keydown", onTypingKey);
@@ -743,6 +863,14 @@ export function createCanvas(app) {
     const o = byId(t.id);
     if (!o) return;
     const empty = !html.replace(/<[^>]+>/g, "").trim();
+    if (t.cell) {
+      // A cell keeps its words; a table that no longer fits its text grows (rows keep their proportions).
+      let next = save && html !== E.sanitizeRich(t.before) ? ops.tableCells(o, t.cell[0], t.cell[1], t.cell[0], t.cell[1], { text: empty ? undefined : html }) : o;
+      next = { ...next, ...tableFit(next, t.node) };
+      if (next !== o && JSON.stringify(next) !== JSON.stringify(o)) commit(objects().map((item) => (item.id === o.id ? next : item)));
+      else { app.rerender(); emit(); }
+      return;
+    }
     // An empty text box disappears when you leave it, as in PowerPoint.
     if (save && empty && o.kind === "text") {
       commit(objects().filter((item) => item.id !== o.id), { select: [] });
@@ -763,6 +891,11 @@ export function createCanvas(app) {
     if (ed.typing || !ed.slideEl) return;
     const fixes = [];
     for (const o of objects()) {
+      if (o.kind === "table") {
+        const fit = tableFit(o, ed.slideEl.querySelector(`.hs-obj[data-el="${CSS.escape(o.id)}"]`));
+        if (fit.h != null) fixes.push([o.id, fit]);
+        continue;
+      }
       const full = E.withDefaults(o);
       if (full.autofit !== "grow" || !["shape", "text"].includes(o.kind)) continue;
       const tx = ed.slideEl.querySelector(`.hs-obj[data-el="${CSS.escape(o.id)}"] .hs-obj-tx`);
@@ -999,12 +1132,18 @@ export function createCanvas(app) {
   // -- text: inside the text being typed (the selected words) or the whole of each selected object
   function textFormat(kind, value) {
     const t = ed.typing;
+    // A table: a block of cells, the cell's own settings (vertical alignment), or the whole table when it is
+    // selected without typing.
+    if (t?.cell && (ed.cellRange || kind === "valign")) { tableFormat(kind, value); return; }
+    if (!t && tableTarget()) { tableFormat(kind, value); return; }
     if (t) {
       restoreRange();
       const cmd = { bold: "bold", italic: "italic", underline: "underline", strike: "strikeThrough", sup: "superscript", sub: "subscript", clear: "removeFormat", bullet: "insertUnorderedList", number: "insertOrderedList", indent: "indent", outdent: "outdent" }[kind];
       if (cmd) document.execCommand(cmd);
       else if (kind === "color") document.execCommand("foreColor", false, value);
       else if (kind === "highlight") document.execCommand("hiliteColor", false, value || "transparent");
+      else if (kind === "link") document.execCommand("createLink", false, value);
+      else if (kind === "unlink") document.execCommand("unlink");
       else if (kind === "align") document.execCommand({ left: "justifyLeft", center: "justifyCenter", right: "justifyRight", justify: "justifyFull" }[value]);
       else if (kind === "size" || kind === "grow" || kind === "shrink") sizeSelectedWords(kind, value);
       else if (["valign", "lh", "vertical", "font", "autofit", "pad", "wrap", "psp", "ls"].includes(kind)) { stopTyping(true); applyText(kind, value); return; }
@@ -1013,6 +1152,29 @@ export function createCanvas(app) {
       return;
     }
     applyText(kind, value);
+  }
+  function tableFormat(kind, value) {
+    changeTable((o, t) => {
+      const block = [];
+      for (let i = t.r0; i <= t.r1; i += 1) for (let j = t.c0; j <= t.c1; j += 1) if (!o.cells[i][j].merged) block.push(o.cells[i][j]);
+      const set = (patch) => ops.tableCells(o, t.r0, t.c0, t.r1, t.c1, patch);
+      // Settings on the whole table clear the same setting written into its words.
+      const clearWords = (what) => (cell) => (cell.text ? { text: ops.clearInline(E, cell.text, what) || undefined } : {});
+      switch (kind) {
+        case "bold": case "italic": case "underline": case "strike": {
+          const on = !block.every((cell) => cell[kind]);
+          return set((cell) => ({ [kind]: on || undefined, ...clearWords(kind)(cell) }));
+        }
+        case "color": return set((cell) => ({ color: value, ...clearWords("color")(cell) }));
+        case "align": return set((cell) => ({ align: value === "left" ? undefined : value, ...clearWords("align")(cell) }));
+        case "valign": return set({ valign: value === "middle" ? undefined : value });
+        case "size": return { ...o, fs: ops.fromPt(value), cells: o.cells.map((row) => row.map((cell) => (cell.text ? { ...cell, text: ops.clearInline(E, cell.text, "size") || undefined } : cell))) };
+        case "grow": case "shrink": return { ...o, fs: ops.fromPt(stepSize((o.fs || 28) / ops.PX_PER_PT, kind === "grow" ? 1 : -1)) };
+        case "font": return { ...o, font: value === "body" ? undefined : value };
+        case "clear": return set((cell) => ({ bold: undefined, italic: undefined, underline: undefined, strike: undefined, color: undefined, text: cell.text ? ["bold", "italic", "underline", "strike", "color", "size", "highlight"].reduce((html, what) => ops.clearInline(E, html, what), cell.text) || undefined : undefined }));
+        default: return null;
+      }
+    }, { keepTyping: Boolean(ed.typing) });
   }
   function sizeSelectedWords(kind, value) {
     const o = E.withDefaults(byId(ed.typing.id));
@@ -1078,7 +1240,16 @@ export function createCanvas(app) {
   /** What the text controls should show for the selection (or the words being typed). */
   function textState() {
     const list = objects();
-    const chosen = selected(list).filter((o) => ["shape", "text"].includes(o.kind)).map((o) => E.withDefaults(o));
+    const table = tableTarget();
+    if (table && (!ed.typing || ed.cellRange)) {
+      const o = E.withDefaults(table.o);
+      const block = [];
+      for (let i = table.r0; i <= table.r1; i += 1) for (let j = table.c0; j <= table.c1; j += 1) if (!o.cells[i][j].merged) block.push(o.cells[i][j]);
+      const first = block[0] || {};
+      const all = (key) => block.length > 0 && block.every((cell) => cell[key]);
+      return { fs: ops.toPt(o.fs), color: first.color || o.color, bold: all("bold"), italic: all("italic"), underline: all("underline"), strike: all("strike"), align: first.align || "left", valign: first.valign || "middle", vertical: false, lh: o.lh, font: o.font || "body", autofit: "none", list: null, pad: null, wrap: true, table: true };
+    }
+    const chosen = selected(list).filter((o) => ["shape", "text"].includes(o.kind) || (o.kind === "table" && ed.typing?.cell)).map((o) => E.withDefaults(o));
     if (!chosen.length) return null;
     const o = chosen[0];
     const out = { fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, list: ops.listOf(o.text), pad: o.pad, wrap: o.wrap !== false };
@@ -1171,8 +1342,13 @@ export function createCanvas(app) {
       any && { label: "図形の書式設定…", run: () => app.openPanel("format") },
       one && { label: "リンク・動作の設定…", run: () => app.openPanel("format", "action") },
       any && { label: "アニメーション…", run: () => { app.showTab("animation"); app.openAnimationPane(); } },
+      one?.kind === "shape" && one.shape === "custom" && !one.locked && { label: "頂点の編集", run: () => app.editPoints?.(one.id) },
+      one?.kind === "image" && !one.locked && { label: "トリミング", run: () => app.startCrop?.(one.id) },
+      one?.kind === "chart" && { label: "データの編集…", run: () => app.editChart?.(one.id) },
       !any && { label: "すべて選択", keys: "⌘A", run: () => { ed.sel = visible().map((o) => o.id); draw(); emit(); } },
       !any && { label: "図形を描く…", run: () => app.showTab?.("insert") },
+      !any && app.canConvert?.() && "-",
+      !any && app.canConvert?.() && { label: "図形に変換（レイアウトを部品に分ける）", run: () => app.convertSlide() },
     ].filter(Boolean);
   }
 
@@ -1238,6 +1414,7 @@ export function createCanvas(app) {
     overlay(fn) { overlays.add(fn); return () => overlays.delete(fn); },
     handle(prefix, fn) { handles.set(prefix, fn); return () => handles.delete(prefix); },
     pick, get picking() { return Boolean(ed.picker); },
+    tableTarget, changeTable, setCellRange, get cellRange() { return ed.cellRange; },
     toSlide, scale, timeline,
     select(ids) { ed.sel = [...ids]; ed.entered = null; draw(); emit(); },
     clear() { if (ed.typing) stopTyping(true); ed.sel = []; ed.entered = null; ed.tool = null; draw(); emit(); },

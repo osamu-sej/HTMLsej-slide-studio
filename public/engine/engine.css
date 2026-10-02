@@ -81,6 +81,44 @@
 .hs-obj-missing { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: #f2f2f2; color: #808080; font-size: 22px; }
 .hs-obj-missing .hs-icon { font-size: 64px; }
 .hs-slide.hs-live .hs-obj[data-action], .hs-slide.hs-live .hs-obj[data-trigger] { pointer-events: auto; cursor: pointer; }
+/* An object made from a layout item (図形に変換) keeps the item's "詳しく" card and deep-dive page. */
+.hs-slide.hs-live .hs-obj[data-detail], .hs-slide.hs-live .hs-obj[data-drill] { pointer-events: auto; cursor: pointer; }
+/* links in words open while presenting (and do not move the slide on) */
+.hs-slide.hs-live :is(.hs-obj-tx, .hs-cell-tx) a[href] { pointer-events: auto; cursor: pointer; }
+/* tables: SEJ rules (navy above and below, grey between rows), a pale blue head, grey bands; text never white */
+.hs-obj-tablebox { position: absolute; inset: 0; }
+.hs-otable { width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--font-body); }
+.hs-otable td { padding: .3em .55em; vertical-align: middle; overflow: hidden; overflow-wrap: anywhere; word-break: normal; line-break: strict; }
+.hs-slide .hs-cell-tx p { margin: 0; }
+.hs-slide .hs-cell-tx :is(ul, ol) { margin: 0; padding: 0 0 0 1.2em; }
+.hs-slide .hs-cell-tx ul { list-style: disc; }
+.hs-slide .hs-cell-tx ol { list-style: decimal; }
+.hs-cell-tx b { font-weight: 700; }
+.hs-otable.ts-sej { border-top: 3px solid #1f3864; border-bottom: 3px solid #1f3864; }
+.hs-otable.ts-sej td { border-bottom: 1px solid #d9d9d9; }
+.hs-otable.ts-sej.has-header tr:first-child td { background: #dce4f2; color: #1f3864; font-weight: 700; border-bottom: 2px solid #1f3864; }
+.hs-otable.ts-rows td { border-bottom: 1px solid #d9d9d9; }
+.hs-otable.ts-rows.has-header tr:first-child td { background: #dce4f2; font-weight: 700; border-bottom: 0; }
+.hs-otable.ts-grid td { border: 1.5px solid #808080; }
+.hs-otable.ts-grid.has-header tr:first-child td { background: #dce4f2; color: #1f3864; font-weight: 700; }
+.hs-otable.ts-lines { border-top: 2px solid #1a1a1a; border-bottom: 2px solid #1a1a1a; }
+.hs-otable.ts-lines td { border-bottom: 1px solid #808080; }
+.hs-otable.ts-lines.has-header tr:first-child td { font-weight: 700; border-bottom: 2px solid #1a1a1a; }
+.hs-otable.ts-plain.has-header tr:first-child td { font-weight: 700; color: #1f3864; }
+.hs-otable.ts-brown { border-top: 3px solid #808080; border-bottom: 3px solid #808080; }
+.hs-otable.ts-brown td { border-bottom: 1px solid #d9d9d9; }
+.hs-otable.ts-brown.has-header tr:first-child td { background: #d6c9b8; font-weight: 700; border-bottom: 2px solid #808080; }
+.hs-otable.is-banded.has-header tr:nth-child(2n + 3) td, .hs-otable.is-banded:not(.has-header) tr:nth-child(2n) td { background: #f2f2f2; }
+.hs-otable.ts-brown.is-banded.has-header tr:nth-child(2n + 3) td, .hs-otable.ts-brown.is-banded:not(.has-header) tr:nth-child(2n) td { background: #f5f0ea; }
+.hs-otable.has-first-col td:first-child { font-weight: 700; }
+.hs-otable.has-last-row tr:last-child td { font-weight: 700; border-top: 2px solid #1f3864; }
+.hs-otable td[data-fill] { background-clip: padding-box; }
+.hs-obj-chart { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.hs-obj-chart-title { flex: none; height: 52px; font: 700 30px/52px var(--font-body); color: #1a1a1a; }
+.hs-obj-chart > .hs-chart-wrap { flex: 1; min-height: 0; }
+.hs-obj-chart .hs-chart { flex: 1; min-height: 0; }
+.hs-obj-chart .hs-chart svg { width: 100%; height: 100%; }
+
 /* animations (animate.js): what waits for its entrance is hidden; words and letters animated one by one */
 .hs-anim-hide { visibility: hidden; }
 .hs-u { display: inline-block; white-space: pre; }
@@ -597,7 +635,9 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 
 /* ------------------------------------------------------------------ editor affordances (inert in presentations) */
 
-.hs-slide.hs-editable .hs-t[data-field] { cursor: text; border-radius: 6px; }
+.hs-slide.hs-editable .hs-t[data-field] { cursor: text; }
+/* The editing outline's rounding never overrides a part's own shape (a pill-shaped chip stays a pill). */
+:where(.hs-slide.hs-editable .hs-t[data-field]) { border-radius: 6px; }
 .hs-slide.hs-editable .hs-t[data-field]:hover { outline: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 6px; }
 .hs-slide .hs-t.hs-editing { outline: 3px solid var(--accent) !important; outline-offset: 6px; background: color-mix(in srgb, var(--bg) 92%, transparent); cursor: text; user-select: text; }
 .hs-slide .hs-overflow { outline: 3px dashed var(--bad) !important; outline-offset: 4px; background: color-mix(in srgb, var(--bad) 7%, transparent); }

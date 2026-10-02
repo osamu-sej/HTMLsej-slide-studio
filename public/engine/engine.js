@@ -203,7 +203,7 @@
   function icon(name, cls = "") {
     const entry = ICONS[name];
     if (!entry) return null;
-    const el = s("svg", { class: ["hs-icon", cls].filter(Boolean).join(" "), viewBox: "0 0 24 24", "aria-hidden": "true" });
+    const el = s("svg", { class: ["hs-icon", cls].filter(Boolean).join(" "), viewBox: "0 0 24 24", "aria-hidden": "true", "data-icon": name });
     el.innerHTML = entry.svg;
     // Every stroke measures 1 so the icon can draw itself line by line (see "draw" in engine.css).
     for (const shape of el.children) shape.setAttribute("pathLength", "1");
@@ -359,7 +359,8 @@
     const items = arr(data.items);
     const labels = items.map((it) => strip(it.label));
     if (type === "combo" && items.some((it) => it.barValue != null)) {
-      return { type: "combo", labels, series: [{ name: "棒", values: items.map((it) => Number(it.barValue ?? it.value) || 0) }, { name: "線", values: items.map((it) => Number(it.value) || 0) }] };
+      const names = arr(data.legendLabels).map(strip);
+      return { type: "combo", labels, series: [{ name: names[0] || "棒", values: items.map((it) => Number(it.barValue ?? it.value) || 0) }, { name: names[1] || "線", values: items.map((it) => Number(it.value) || 0) }] };
     }
     return { type: type === "combo" ? "bar" : type, labels, series: [{ name: strip(data.title || ""), values: items.map((it) => Number(it.value ?? it.barValue) || 0) }] };
   }
@@ -1984,7 +1985,8 @@
 
   function getComputedStyleSafe(el) {
     // Layout classes that already position their items absolutely keep their position.
-    return /hs-(tri-node|road-node|tree-node|circle)/.test(el.className) ? "absolute" : "static";
+    // Objects placed by hand (an item converted into objects) are positioned absolutely too.
+    return /hs-(tri-node|road-node|tree-node|circle)|(^|\s)hs-obj(\s|$)/.test(el.className) ? "absolute" : "static";
   }
 
   const cssEscape = (value) => (root.CSS?.escape ? root.CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&"));
@@ -2173,6 +2175,11 @@
       if (fill && Engine.BRAND_FILLS && !Engine.BRAND_FILLS.has(fill)) flag(`図形の塗りの色 #${fill} はSEJの面の色（淡青・グレー・淡茶）ではありません`);
       if (stroke && Engine.BRAND_LINES && !Engine.BRAND_LINES.has(stroke)) flag(`線の色 #${stroke} はSEJの線の色（濃紺・黒・グレー）ではありません`);
       if (fill && fill !== "ffffff" && stroke) flag("色の付いた図形に枠線を付けません（SEJテンプレート）");
+      // A table's cells are filled from the same palette.
+      for (const td of obj.querySelectorAll("td[data-fill]")) {
+        const cellFill = td.dataset.fill.slice(1).toLowerCase();
+        if (Engine.BRAND_FILLS && !Engine.BRAND_FILLS.has(cellFill)) flag(`表のセルの色 #${cellFill} はSEJの面の色（淡青・グレー・淡茶）ではありません`);
+      }
       const box = String(obj.dataset.bbox || "").split(",").map(Number);
       if (box.length === 4 && box.every(Number.isFinite)) {
         const [x, y, w, hh] = box;
@@ -2212,7 +2219,7 @@
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },
     setSejArt(art) { SEJ_ART = art || {}; },
-    render, mount, fit, brandCheck, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, mediaEl, resolveSrc, chart, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
+    render, mount, fit, brandCheck, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, mediaEl, resolveSrc, chart, chartModel, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
     evalFormula, formulaTokens, rankShow, simUpdate, gapUpdate, fmtNum,
   });
   root.SlideEngine = Engine;
