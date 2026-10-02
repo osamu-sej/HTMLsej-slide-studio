@@ -5,6 +5,7 @@ import { createCanvas } from "./editor/canvas.mjs?v=__APP_VERSION__";
 import { createEditorUi } from "./editor/ui.mjs?v=__APP_VERSION__";
 import * as ops from "./editor/ops.mjs?v=__APP_VERSION__";
 import { createConverter } from "./editor/convert.mjs?v=__APP_VERSION__";
+import { chromeOf, describeAdded, enhanceSlide } from "./editor/htmlfx.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -1868,6 +1869,8 @@ const editorApp = {
   editPoints: (id) => editorUi.editPoints(id),
   fitFor: (index) => fitFor(index),
   convertSlide: () => convertSlideToObjects(),
+  enhance: (scope) => enhanceDeck(scope),
+  present: () => openPresenter(state.selected),
   canConvert: () => !converter.refusal(state.deck?.slides[state.selected]),
 };
 const converter = createConverter(editorApp);
@@ -1889,6 +1892,37 @@ function setObjects(list, { undo = true, timeline = undefined } = {}) {
   const next = ops.reconcileTimeline(timeline !== undefined ? timeline : slide.timeline, before, list);
   if (next?.length) slide.timeline = next; else delete slide.timeline;
   markChanged({ structural: true });
+}
+
+/**
+ * HTMLの動きをおまかせで付ける (editor/htmlfx.mjs): on the slide on the stage, or on every slide, in one undo step.
+ * What a slide already has (its own animations, actions, hovers) stays.
+ */
+function enhanceDeck(scope = "slide") {
+  if (!state.deck) return;
+  const indices = scope === "all" ? state.deck.slides.map((_, i) => i).filter((i) => !state.deck.slides[i].hidden) : [state.selected];
+  // The template's furniture repeated on slide after slide (a logo, 秘（B）, a slogan) is left alone.
+  const chrome = chromeOf(state.deck.slides);
+  const totals = {};
+  let count = 0;
+  for (const i of indices) {
+    const slide = state.deck.slides[i];
+    if (!slide?.elements?.length) continue;
+    const out = enhanceSlide(slide, E, { chrome });
+    if (!out.count) continue;
+    if (!count) pushUndo();
+    slide.elements = E.normalizeObjects(out.elements);
+    const timeline = E.normalizeTimeline(out.timeline, slide);
+    if (timeline.length) slide.timeline = timeline; else delete slide.timeline;
+    count += out.count;
+    for (const [key, n] of Object.entries(out.added)) totals[key] = (totals[key] || 0) + n;
+  }
+  if (!count) {
+    toast(scope === "all" ? "付けられる部品が見つかりませんでした（すでに動きがあるか、部品のないスライドです）" : "このスライドには付けられる部品がありません（すでに動きがあるか、部品がありません）");
+    return;
+  }
+  markChanged({ structural: true });
+  toast(`HTMLならではの動きを${count}か所に付けました（${describeAdded(totals)}）。⌘Zで元に戻せます`);
 }
 
 /** The animations of the slide on the stage changed (the animation pane and ribbon). */
@@ -4944,9 +4978,11 @@ function importCallout() {
     return h("div", { class: "callout" },
       h("div", { class: "text" },
         h("b", {}, `「${name}」を見た目どおりに取り込みました`),
-        `元の配置・色・文字のまま、図形・表・グラフ・写真を1つずつ動かして直せます。${s.animations ? `PowerPointのアニメーション${s.animations}件も引き継いでいます。` : ""}「アニメーション」タブで動きを付けて、発表やHTMLの書き出しに使えます。`,
+        `元の配置・色・文字のまま、図形・表・グラフ・写真を1つずつ動かして直せます。${s.animations ? `PowerPointのアニメーション${s.animations}件も引き継いでいます。` : ""}HTMLにした今は、PowerPointにはない動き（マウスを乗せると浮く・説明が出る、クリックで詳細・拡大・裏返す・タブ切り替え、数字のカウントアップ、グラフが伸びて値をなぞれる）を付けられます。`,
         notes.length ? h("span", { class: "callout-note" }, `${notes.join("。")}。`) : null),
-      h("button", { class: "btn btn-primary", type: "button", onclick: () => { if (state.view !== "single") setView("single"); editorUi.showTab("animation"); setPanel("anim"); } }, "動きを付ける"),
+      h("button", { class: "btn btn-ai", type: "button", title: "すべてのスライドに、HTMLならではの動きをおまかせで付けます（⌘Zで戻せます）", onclick: () => enhanceDeck("all") }, "✦ HTMLの動きをおまかせで付ける"),
+      h("button", { class: "btn", type: "button", title: "リボンの「インタラクション」で、マウスの反応・クリックの操作・ずっと動く動きを部品に付けます", onclick: () => { if (state.view !== "single") setView("single"); editorUi.showTab("interact"); } }, "自分で付ける"),
+      h("button", { class: "btn btn-ghost", type: "button", title: "引き継いだPowerPointのアニメーションをアニメーション ウィンドウで見る・直す", onclick: () => { if (state.view !== "single") setView("single"); editorUi.showTab("animation"); setPanel("anim"); } }, "アニメーションを編集"),
       close);
   }
   return h("div", { class: "callout" },

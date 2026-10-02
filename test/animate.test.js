@@ -39,7 +39,9 @@ test("the catalogue matches PowerPoint's: entrances and their exits, emphasis, m
   assert.ok(Object.keys(E.ANIM_PATHS).length >= 20, "motion paths");
   assert.deepEqual(Object.keys(E.ANIM_MEDIA), ["play", "pause", "stop"]);
   for (const [key, def] of Object.entries(E.ANIM_IN)) {
-    assert.ok(def.label && def.out, `${key} has an entrance and an exit name`);
+    // HTML-only effects that cannot play backwards (counting, decoding, a chart growing) have no exit.
+    if (def.noExit) assert.ok(def.label && def.html && !def.out, `${key}: an HTML entrance without an exit`);
+    else assert.ok(def.label && def.out, `${key} has an entrance and an exit name`);
     if (def.dirs) assert.ok(def.dirs.some(([k]) => k === def.dir), `${key}'s default direction is one of its own`);
     if (def.outDirs) assert.deepEqual(def.outDirs.map(([k]) => k), def.dirs.map(([k]) => k), `${key}: the exit names the same directions`);
   }

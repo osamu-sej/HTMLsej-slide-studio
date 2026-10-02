@@ -118,6 +118,16 @@ const P = {
   transition: '<rect x="2.5" y="6" width="12" height="9" rx="1"/><rect x="9.5" y="9" width="12" height="9" rx="1" fill="currentColor" fill-opacity=".2"/><path d="M12 3.5h3.5V6"/>',
   applyAll: '<rect x="3" y="3" width="8" height="6" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="11" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="6" rx="1"/><path d="M8 21h8"/>',
   pen: '<path d="M4 20 15.5 8.5l-4-4L4 16z"/><path d="m11.5 4.5 2-2 4 4-2 2"/>',
+  // インタラクション (HTML only)
+  magic: '<path d="m4 20 11-11M13 7l2-2 2 2-2 2zM18 3v3M16.5 4.5h3M20 10v2M19 11h2M8 3v2M7 4h2"/>',
+  hover: '<path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V10M12 9.5a1.5 1.5 0 0 1 3 0V11M15 10.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-.5a6 6 0 0 1-4.6-2.2L4.5 15.6a1.5 1.5 0 0 1 2.3-1.9L9 16"/>',
+  loop: '<path d="M12 12c-2-2.7-3.6-4-5-4a4 4 0 0 0 0 8c1.4 0 3-1.3 5-4zm0 0c2 2.7 3.6 4 5 4a4 4 0 0 0 0-8c-1.4 0-3 1.3-5 4z"/>',
+  cardFlip: '<rect x="3" y="6" width="9" height="12" rx="1.5"/><path d="M15 6h4.5A1.5 1.5 0 0 1 21 7.5v9a1.5 1.5 0 0 1-1.5 1.5H15" stroke-dasharray="2 2"/><path d="M8 3c3 0 6 1 7 4M13 5.5 15 7l1.5-2"/>',
+  spot: '<circle cx="12" cy="13" r="5"/><path d="M12 3v2M4 13H2M22 13h-2M5.6 6.6 4.2 5.2M18.4 6.6l1.4-1.4"/>',
+  reveal: '<rect x="3" y="4" width="8" height="6" rx="1"/><rect x="13" y="14" width="8" height="6" rx="1" stroke-dasharray="2 2"/><path d="M7 10v4a3 3 0 0 0 3 3h3M11 15l2 2-2 2"/>',
+  tip: '<path d="M4 5h16v10H10l-4 4v-4H4z"/><path d="M8 9h8M8 12h5"/>',
+  popup: '<rect x="3" y="3" width="10" height="8" rx="1"/><path d="M13 7h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8M11 15h6M11 18h4"/>',
+  zoomClick: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M8 10.5h5M10.5 8v5"/>',
 };
 
 export function ico(name, size = 18) {

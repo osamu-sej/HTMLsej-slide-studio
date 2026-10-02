@@ -127,6 +127,65 @@
 .hs-anim-hide { visibility: hidden; }
 .hs-u { display: inline-block; white-space: pre; }
 .hs-slide.hs-live .hs-obj-video, .hs-slide.hs-live .hs-obj-lottie { pointer-events: auto; }
+
+/* インタラクション: what only HTML does with an object while presenting (objects.js data-*, motion.js activate) */
+.hs-slide.hs-live .hs-obj > .hs-obj-move { transform-origin: var(--ix-ox, 50%) var(--ix-oy, 50%); transition: transform .35s var(--ease-out), filter .35s var(--ease-out), opacity .3s; }
+.hs-slide.hs-live .hs-obj[data-hover], .hs-slide.hs-live .hs-obj[data-tip] { pointer-events: auto; }
+.hs-slide.hs-live .hs-obj.hs-ix-hot[data-hover="lift"] > .hs-obj-move { transform: translateY(-14px); }
+.hs-slide.hs-live .hs-obj.hs-ix-hot[data-hover="zoom"] > .hs-obj-move { transform: scale(1.07); }
+.hs-slide.hs-live .hs-obj.hs-ix-hot[data-hover="glow"] > .hs-obj-move { filter: drop-shadow(0 0 20px color-mix(in srgb, var(--accent) 55%, transparent)) brightness(1.04); }
+.hs-slide.hs-live .hs-obj.hs-ix-hot[data-hover="tilt"] > .hs-obj-move { transform: perspective(1200px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(1.03); transition-duration: .12s; }
+.hs-slide.hs-live .hs-objects.hs-ix-focusing > .hs-obj:not(.hs-ix-hot) > .hs-obj-move { opacity: .28; }
+.hs-slide.hs-live .hs-objects.hs-ix-focusing > .hs-obj.hs-ix-hot > .hs-obj-move { transform: scale(1.03); }
+.hs-tip.hs-tip-obj { white-space: normal; width: max-content; max-width: 640px; font-size: 24px; line-height: 1.5; font-weight: 600; text-align: left; }
+.hs-tip.hs-tip-obj.below { transform: translate(-50%, 18px); }
+/* loops: the motion an object keeps while the slide is on screen */
+.hs-slide.hs-live .hs-obj[data-loop] { transform-origin: var(--ix-ox, 50%) var(--ix-oy, 50%); }
+.hs-slide.hs-live .hs-obj[data-loop="float"] { animation: hs-ix-float 3.4s ease-in-out infinite alternate; }
+.hs-slide.hs-live .hs-obj[data-loop="pulse"] { animation: hs-ix-pulse 1.8s ease-in-out infinite; }
+.hs-slide.hs-live .hs-obj[data-loop="sway"] { animation: hs-ix-sway 3s ease-in-out infinite alternate; }
+.hs-slide.hs-live .hs-obj[data-loop="spin"] { animation: hs-ix-spin 9s linear infinite; }
+.hs-slide.hs-live .hs-obj[data-loop="bounce"] { animation: hs-ix-bounce 1.7s cubic-bezier(.3, 0, .4, 1) infinite; }
+.hs-slide.hs-live .hs-obj[data-loop="shine"] .hs-obj-fx::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(112deg, transparent 38%, rgba(255, 255, 255, .75) 50%, transparent 62%) no-repeat; background-size: 260% 100%; mix-blend-mode: screen; animation: hs-ix-shine 3.6s ease-in-out infinite; }
+@keyframes hs-ix-float { from { transform: translateY(-9px); } to { transform: translateY(9px); } }
+@keyframes hs-ix-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+@keyframes hs-ix-sway { from { transform: rotate(-3deg); } to { transform: rotate(3deg); } }
+@keyframes hs-ix-spin { to { transform: rotate(360deg); } }
+@keyframes hs-ix-bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-22px); } }
+@keyframes hs-ix-shine { 0% { background-position: 130% 0; } 55%, 100% { background-position: -30% 0; } }
+/* HTML-only animation pieces (animate.js): a typewriter's caret, a sweep of light, a ripple, a marker under words */
+.hs-caret { display: inline-block; width: .08em; height: 1em; margin-left: .04em; vertical-align: -.12em; background: currentColor; animation: hs-caret-blink .7s steps(1) infinite; }
+@keyframes hs-caret-blink { 50% { opacity: 0; } }
+.hs-fx-shine { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: linear-gradient(112deg, transparent 36%, rgba(255, 255, 255, .8) 50%, transparent 64%) no-repeat; background-size: 260% 100%; background-position: 130% 0; mix-blend-mode: screen; }
+.hs-fx-ripple { position: absolute; z-index: 3; pointer-events: none; border-radius: 50%; border: 6px solid var(--accent); opacity: 0; }
+.hs-mk { background-image: linear-gradient(transparent 58%, var(--hl, #dce4f2) 58%); background-repeat: no-repeat; background-size: 0% 100%; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+/* a card that turns over (「裏返す」) */
+.hs-obj-flip { position: absolute; inset: 0; transform-style: preserve-3d; transform: perspective(1800px) rotateY(0deg); transition: transform .8s cubic-bezier(.3, .7, .2, 1); }
+.hs-obj-flip > .hs-obj-rot { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.hs-obj.is-flipped .hs-obj-flip { transform: perspective(1800px) rotateY(180deg); }
+/* objects a reveal button shows (「ほかの部品を表示・非表示」); a pressed button stays pressed */
+.hs-slide.hs-live .hs-obj.hs-ix-wait { visibility: hidden; transition: visibility 0s .45s; }
+.hs-slide.hs-live .hs-obj.hs-ix-wait > .hs-obj-move { opacity: 0; transform: translateY(18px); }
+.hs-slide.hs-live .hs-obj.hs-ix-wait.hs-ix-shown { visibility: visible; transition-delay: 0s; }
+.hs-slide.hs-live .hs-obj.hs-ix-wait.hs-ix-shown > .hs-obj-move { opacity: 1; transform: none; }
+.hs-slide.hs-live .hs-obj[data-action="reveal"].is-on > .hs-obj-move { transform: translateY(3px); filter: brightness(.93); }
+/* a spotlight (「スポットライトを当てる」): everything else dims */
+.hs-slide.hs-live > .hs-frame { transition: opacity .4s; }
+.hs-slide.hs-live.hs-ix-spotting > .hs-frame, .hs-slide.hs-live.hs-ix-spotting .hs-objects > .hs-obj:not(.hs-ix-spot) > .hs-obj-move { opacity: .16; }
+.hs-slide.hs-live.hs-ix-spotting .hs-objects > .hs-obj.hs-ix-spot > .hs-obj-move { transform: scale(1.04); }
+/* zoomed in on an object (「拡大して見せる」) */
+.hs-ix-zoomhint { position: absolute; left: 50%; bottom: 3%; z-index: 40; transform: translateX(-50%); padding: 6px 16px; border-radius: 999px; background: rgba(26, 26, 26, .72); color: #fff; font: 600 13px/1.5 system-ui, sans-serif; pointer-events: none; }
+/* a PowerPoint chart answers the mouse: the value under it, the rest dimmed; its legend keys show and hide series */
+.hs-slide.hs-live .hs-ochart .hs-mark, .hs-slide.hs-live .hs-ochart .hs-control { pointer-events: auto; }
+.hs-slide.hs-live .hs-ochart .hs-mark { cursor: pointer; transition: opacity .25s; }
+.hs-slide.hs-live .hs-ochart.hs-has-hot .hs-mark:not(.hs-hot):not(.hs-ohit) { opacity: .35; }
+.hs-ochart .hs-ohit { fill: transparent; }
+.hs-ochart .hs-off { opacity: .07; transition: opacity .3s; }
+.hs-ochart [data-series].hs-off { opacity: .4; }
+@media (prefers-reduced-motion: reduce) {
+  .hs-slide.hs-live .hs-obj[data-loop], .hs-slide.hs-live .hs-obj[data-loop] .hs-obj-fx::after { animation: none; }
+  .hs-obj-flip, .hs-slide.hs-live .hs-obj > .hs-obj-move { transition: none; }
+}
 /* an empty title in the editor shows where to type */
 .hs-slide.hs-editable .hs-title[data-placeholder]:empty::before { content: attr(data-placeholder); color: #b3b3b3; font-weight: 400; }
 

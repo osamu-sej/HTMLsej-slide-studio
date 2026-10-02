@@ -156,7 +156,7 @@ AIが作ったスライドの上にも、白紙のスライドにも、PowerPoin
 - **元資料のマスター**：SEJの資料もほかのテンプレートの資料も、元のロゴ・緑線・秘（B）・背景・飾りを個別の部品として保持します。スタジオ側のマスターは重ねず、元の配色にSEJブランド検査も掛けません。4:3の資料は16:9の画面の中央に置き、元ページの外を表示時に隠します。
 - **編集データに残すもの**：非表示スライドと非表示図形、ページ外の部品、元画像のバイト列、線形グラデーション、外側の影、元フォント名。非表示スライドは発表の順番から除外します。取り込みは最大500枚です。
 - **再現に制限があるもの**：EMF・WMF、3Dや一部のパターン塗り・特殊効果。元フォントが端末にない場合は代替フォントで表示します。再現できない要素の件数は取り込み後に知らせます。原本との照合が必要です。
-- 取り込んだ部品は、ほかの部品と同じように動かして直せます。メッセージの「動きを付ける」（またはリボン「アニメーション」）で動きを足し、発表・HTML出力で使います。
+- 取り込んだ部品は、ほかの部品と同じように動かして直せます。メッセージの「アニメーションを編集」（またはリボン「アニメーション」）で引き継いだアニメーションを直して動きを足し、「✦ HTMLの動きをおまかせで付ける」「自分で付ける」でHTMLならではの動き（下の「HTMLならではの動きとインタラクション」）を付けて、発表・HTML出力で使います。
 
 ## アニメーション（PowerPoint風）
 
@@ -176,6 +176,24 @@ AIが作ったスライドの上にも、白紙のスライドにも、PowerPoin
 - **発表**：レイアウトの「中身の出し方」のクリックのあとに、アニメーションのクリックが続きます（本文の項目にアニメーションを付けると、そのスライドはアニメーションの順番だけで出ます）。再生中のクリックは、まず再生を終わらせます。トリガーの図形はクリックでき、スライドは進みません。
 - **画面切り替え**（リボン「画面切り替え」）：このスライドへの切り替え（資料の設定に従う・フェード・スライド・ズーム・モーフ・ワイプ・サークル・押し上げ・めくる・奥へ・ブラインド・幕・なし）、期間（秒）、自動的に切り替え（秒。残りのクリックも順に再生してから次へ）、すべてに適用、プレビュー。
 - 図形をコピー・複製すると、そのアニメーションも付いてきます。図形を消すと、そのアニメーションも消えます。グループを解除すると、グループのアニメーションは各部品のアニメーションになります。
+
+## HTMLならではの動きとインタラクション
+
+PowerPointにはない、HTMLならではの動きと操作です。手で置いた部品にも、PowerPointから取り込んだ部品にも付けられ、発表・HTML出力でそのまま動きます。
+
+| 種類 | 選べるもの | 付け方 |
+|---|---|---|
+| マウスを乗せたとき | 浮き上がる・拡大する・光る・3Dで傾く・ほかを薄くする、説明（ツールチップ） | リボン「インタラクション」 |
+| クリックしたとき | 詳細を開く（カード、内訳・出所があれば右からのパネル。スライドは進まない）・拡大して見せる・裏返す（カードの裏に答え）・ほかの部品を表示・非表示（「1つだけ表示」でタブのように）・スポットライトを当てる | リボン「インタラクション」 |
+| ずっと動く | ふわふわ浮く・鼓動する・ゆらゆら揺れる・回り続ける・光が走る・弾む | リボン「インタラクション」 |
+| HTMLの効果（アニメーション） | 開始：タイプライター・デコード・マスクから立ち上がる・ぼかしから・線を描く・カウントアップ（数字が数え上がる）・グラフが伸びる／強調：光が走る・波紋・マーカーを引く・スポットライト | リボン「アニメーション」→「HTMLの効果」。ギャラリーの「HTMLならでは」の欄（青緑の印）。クリック・同時・後・トリガーもPowerPointの効果と同じ |
+| PowerPointのグラフ | マウスを乗せると値の吹き出しが出て、ほかの要素が薄くなる。凡例をクリックすると系列を隠す・戻す | 取り込むだけで動く |
+
+- **おまかせ**：リボン「インタラクション」→「HTMLの動きを付ける」（このスライド／すべてのスライド）で、部品の種類に合わせて付けます。タイトルはマスクから立ち上がり、グラフは軸から伸び、大きな数字は数え上がり、線は描かれ、色の付いたカードはマウスで浮き上がり、写真はクリックで拡大します。スライドにもとからあるアニメーション・動作・反応はそのまま残し、何度押しても重ねません。ロゴ・秘（B）・スローガンのように同じ位置で何枚にも出てくる部品（テンプレートの飾り）と非表示のスライドには付けません。⌘Zで1回で元に戻せます。
+- **PowerPointから取り込んだ資料**：取り込んだあとのメッセージの「✦ HTMLの動きをおまかせで付ける」で、資料全体に付けます。「自分で付ける」でリボン「インタラクション」が開きます。
+- **スライド上**：リボン「インタラクション」を開いているとき、付けた部品の右上に印（反応・クリック・ずっと動く）が出ます。「▶ 試す」でそのスライドを発表して確かめられます。
+- **発表**：クリックできる部品は、ページが組み上がったときに一度だけ光って知らせます。拡大・スポットライトはもう一度クリック（またはEsc）で戻ります。「詳細を開く」「裏返す」「表示・非表示」はスライドを進めません。
+- OSで「視差効果を減らす」を設定している人には、ずっと動く動きを止め、マウスの反応と裏返しは動かさずにすぐ切り替えます（クリックの操作は使えます）。
 
 ## 動く資料（クリックで確かめる）
 
@@ -242,10 +260,10 @@ AIが作ったスライドの上にも、白紙のスライドにも、PowerPoin
 | `media` | ユーザーが入れた写真・動画・アニメーション：`{ src, kind, fit, autoplay, loop, muted, placement }`。`kind` は `image` `video` `lottie`、`src` はURL・YouTube・`idb:…`（このブラウザに保存したファイル） |
 | `notes` | スピーカーノート |
 
-| `elements` | 手で置いた部品：`[{ id, kind, x, y, w, h, rot, … }]`（1920×1080の座標）。`kind` は `shape`（`shape` に図形の種類、`adj` に形の調整。`shape: "custom"` は手で描いた形で `path: { pts: [[0..1, 0..1], …], closed, curve }`）・`text`・`image`（`crop: { l, t, r, b }` はトリミングの割合）・`line`（`x1,y1,x2,y2` か `from`/`to` で図形につなぐ、`head`/`tail` に矢印の形、`route`）・`icon`・`video`・`lottie`・`table`（`cells: [[{ text, fill, color, bold, align, valign, rs, cs, merged, bt, br, bb, bl }]]`（`bt` などはセルの上下左右の罫線 `{ c, w }` か `"none"`）・`cols`・`rows`（幅と高さの割合）・`style`・`header` `banded` `firstCol` `lastRow`・`fs`）・`chart`（`chart: { type, labels, series: [{ name, values }], title, unit, style }`。`style` はPowerPointから取り込んだグラフの書式で、あるとPowerPointと同じ描き方になる：`dir`（`bar` は横棒）・`stack`・`gap`・`overlap`・`hole`・`angle`・`font`・`title`・`legend: { pos }`・`cat`/`val: { hide, reverse, min, max, step, format, line, grid, font }`・`plot: { x, y, w, h }`・`series: [{ kind, color, width, dash, smooth, marker: { s, z, at }, points: [{ i, color }], label: { val, pct, cat, ser, pos, format, font }, pointLabels: [{ i, …, runs }] }]`）。`item` は「図形に変換」で元になったレイアウトの項目（`"items[1]"`。その項目の詳細・深掘りページを開く）。文字は `text`（`p` `br` `b` `i` `u` `s` `sup` `sub` `span[style]` `ul` `ol` `li` だけのHTML。段落の `data-indent` はインデント、`data-bullet` は箇条書きの記号）、書式は `fill` `stroke` `strokeW` `dash` `font` `fs` `color` `bold` `align` `valign` `pad` `autofit` `vertical` など、`group` `locked` `hidden` `name` `action`（`{ type: "slide", to: sid }` か `{ type: "url", href }`） |
+| `elements` | 手で置いた部品：`[{ id, kind, x, y, w, h, rot, … }]`（1920×1080の座標）。`kind` は `shape`（`shape` に図形の種類、`adj` に形の調整。`shape: "custom"` は手で描いた形で `path: { pts: [[0..1, 0..1], …], closed, curve }`）・`text`・`image`（`crop: { l, t, r, b }` はトリミングの割合）・`line`（`x1,y1,x2,y2` か `from`/`to` で図形につなぐ、`head`/`tail` に矢印の形、`route`）・`icon`・`video`・`lottie`・`table`（`cells: [[{ text, fill, color, bold, align, valign, rs, cs, merged, bt, br, bb, bl }]]`（`bt` などはセルの上下左右の罫線 `{ c, w }` か `"none"`）・`cols`・`rows`（幅と高さの割合）・`style`・`header` `banded` `firstCol` `lastRow`・`fs`）・`chart`（`chart: { type, labels, series: [{ name, values }], title, unit, style }`。`style` はPowerPointから取り込んだグラフの書式で、あるとPowerPointと同じ描き方になる：`dir`（`bar` は横棒）・`stack`・`gap`・`overlap`・`hole`・`angle`・`font`・`title`・`legend: { pos }`・`cat`/`val: { hide, reverse, min, max, step, format, line, grid, font }`・`plot: { x, y, w, h }`・`series: [{ kind, color, width, dash, smooth, marker: { s, z, at }, points: [{ i, color }], label: { val, pct, cat, ser, pos, format, font }, pointLabels: [{ i, …, runs }] }]`）。`item` は「図形に変換」で元になったレイアウトの項目（`"items[1]"`。その項目の詳細・深掘りページを開く）。文字は `text`（`p` `br` `b` `i` `u` `s` `sup` `sub` `span[style]` `ul` `ol` `li` だけのHTML。段落の `data-indent` はインデント、`data-bullet` は箇条書きの記号）、書式は `fill` `stroke` `strokeW` `dash` `font` `fs` `color` `bold` `align` `valign` `pad` `autofit` `vertical` など、`group` `locked` `hidden` `name` `action`（`{ type: "slide", to: sid }`・`{ type: "url", href }`・`next` `prev` `first` `last` `end`、HTMLならではの `{ type: "popup", title, text, rows: [{ label, value }], source }`・`{ type: "zoom" }`・`{ type: "spot" }`・`{ type: "flip", back, fill }`・`{ type: "reveal", targets: [部品のID], only }`）、`hover`（`lift` `zoom` `glow` `tilt` `focus`）、`tip`（マウスを乗せたときの説明）、`loop`（`float` `pulse` `sway` `spin` `shine` `bounce`） |
 | `sid` | スライドの固定のID（リンク・動作の行き先） |
 | `hideTitle` / `master` | 白紙のスライドで、スタジオのタイトルを出さない（PowerPointから取り込んだスライドは自分のタイトルの枠を持つ）／SEJのマスター（`title` は表紙のマスター、既定は `content`） |
-| `timeline` | アニメーション：`[{ id, el, cls, fx, start, dur, delay, dir, amount, color, by, repeat, rewind, autoReverse, ease, trigger, path }]`。`el` は部品のID・`grp:グループ`・`@title`・`@takeaway`・`@g0`（本文の項目）。`cls` は `in` `em` `out` `path` `media`、`start` は `click` `with` `after`、`dur`・`delay` はミリ秒、`path` は `{ pts: [[0,0],…], closed, curve }`（部品の中心からのpx） |
+| `timeline` | アニメーション：`[{ id, el, cls, fx, start, dur, delay, dir, amount, color, by, repeat, rewind, autoReverse, ease, trigger, path }]`。`el` は部品のID・`grp:グループ`・`@title`・`@takeaway`・`@g0`（本文の項目）。`cls` は `in` `em` `out` `path` `media`、`start` は `click` `with` `after`、`dur`・`delay` はミリ秒、`path` は `{ pts: [[0,0],…], closed, curve }`（部品の中心からのpx）。HTMLの効果は `fx` が `typewriter` `decode` `maskRise` `blurIn` `draw` `countUp` `chartGrow`（開始）・`shine` `ripple` `marker` `spotlight`（強調）で、`decode` `countUp` `chartGrow` には終了がなく、`by`（文字ごと）は使わない |
 | `transitionDur` / `advance` | 画面切り替えの期間（ミリ秒）／自動的に切り替えるまでの秒数 |
 
 `media`・`elements`・`timeline`・`sid`・`transitionDur`・`advance`・`hideTitle`・`master` はユーザーだけが設定する項目で、AIには中身を見せず（`elements` と `timeline` は要約だけ）、AIの変更でも消えません。
@@ -264,7 +282,7 @@ tools/pptx_exact.py          PowerPointを見た目どおりに取り込む（�
 public/layout-looks.mjs      レイアウトの見た目のグループと、単調さのチェック（サーバーとスタジオで共通）
 public/engine/engine.js      スライドエンジン（テーマ・45レイアウト・SVGグラフ・操作できるグラフと試算・文字の自動調整・SEJのマスターとブランド検査）
 public/engine/objects.js     手で置く部品（図形118種類の形と調整・文字・画像・線と矢印・コネクタ・アイコン・表・グラフ。PowerPointの書式のグラフも）の描画と、文字の安全な取り扱い
-public/engine/animate.js     アニメーション（開始・強調・終了・軌跡・メディア、クリック／同時／後、トリガー）の再生（Web Animations API）
+public/engine/animate.js     アニメーション（開始・強調・終了・軌跡・メディア、クリック／同時／後、トリガー、HTMLの効果）の再生（Web Animations API）
 public/editor/canvas.mjs     PowerPoint風の編集（選択・移動・サイズ・回転・形の調整・吸着・描画・文字の入力・クリップボード・キー操作）
 public/editor/ops.mjs        部品の計算（サイズ変更・吸着・整列・等間隔・グループ・順序・反転・単位の換算）
 public/editor/ui.mjs         リボン・書式パネル・選択ウィンドウ・ギャラリー
@@ -273,8 +291,10 @@ public/editor/tables.mjs     表とグラフ（挿入のマス目・テーブル
 public/editor/crop.mjs       スライド上のトリミング
 public/editor/freeform.mjs   曲線・フリーフォーム・フリーハンドの描画と頂点の編集
 public/editor/convert.mjs    図形に変換（描いたレイアウトを読み取り、部品・グループ・アニメーションにする）
+public/editor/interact.mjs   リボンの「インタラクション」（マウスを乗せたとき・クリックしたとき・ずっと動く・おまかせ）とスライド上の印
+public/editor/htmlfx.mjs     おまかせ（部品の種類からHTMLの動きを選ぶ。テンプレートの飾りは除く）
 server/objects.mjs           手で置いた部品の文字と、AIに渡す要約
-public/engine/motion.js      動きと発表プレーヤー（ビルド・カウントアップ・キネティック・タイポグラフィ・Lottie・詳細カード・発表者ビュー）
+public/engine/motion.js      動きと発表プレーヤー（ビルド・カウントアップ・キネティック・タイポグラフィ・Lottie・詳細カード・部品のインタラクション・発表者ビュー）
 public/engine/engine.css     スライドのデザイン（SEJ＋8テーマ）
 assets/sej/                  SEJ原本テンプレート（template.pptx）・ブランドの定義・マスターの画像（ロゴ・コピーライト）
 public/app.js, app.css       スタジオ画面
@@ -310,6 +330,7 @@ npm run qa:animations  # アニメーション（ギャラリー・追加・オ�
 npm run qa:tables      # 表（入力・結合・行と列・スタイル・罫線のドラッグ）・グラフ・語句のリンク・トリミング・フリーフォームと頂点の編集・発表・書き出しの通しテスト
 npm run qa:convert     # 図形に変換（リボンと右クリック・グループ・その場の文字の編集・元に戻す・クリックの出し方・グラフと表・深掘りページ・書き出し）の通しテスト
 npm run qa:import      # PowerPointの取り込み（取り込み方の選択・見た目どおり・グラフの書式・アニメーションと画面切り替え・編集・発表・書き出し・レイアウトに組み直す）の通しテスト
+npm run qa:interact    # HTMLならではの動き（マウスの反応と説明・詳細・裏返す・表示と非表示・ずっと動く・HTMLの効果・グラフの吹き出しと凡例・おまかせ・取り込んだ資料・書き出し）の通しテスト
 npm run qa:objects     # PowerPoint風の編集（白紙・図形・文字・移動・サイズ・回転・吸着・整列・グループ・クリップボード・書式・選択ウィンドウ・ロック・発表・書き出し・ブランド検査）の通しテスト
 ```
 
@@ -319,6 +340,7 @@ npm run qa:objects     # PowerPoint風の編集（白紙・図形・文字・移
 
 | 版 | 内容 |
 |---|---|
+| 1.6.0 | HTMLならではの動きとインタラクション：リボン「インタラクション」で、マウスを乗せたときの反応（浮き上がる・拡大・光る・3Dで傾く・ほかを薄く）と説明、クリックしたときの操作（詳細を開く・拡大・裏返す・ほかの部品を表示/非表示・スポットライト）、ずっと動く（浮く・鼓動・揺れる・回る・光が走る・弾む）を部品に。アニメーションに「HTMLの効果」（タイプライター・デコード・マスクから立ち上がる・ぼかしから・線を描く・カウントアップ・グラフが伸びる・光が走る・波紋・マーカー・スポットライト）。PowerPointのグラフは発表中にマウスで値を出し、凡例で系列を隠せる。「おまかせ」で部品の種類に合う動きをスライド・資料全体に付け（テンプレートの飾りと元のアニメーションはそのまま）、取り込み直後のメッセージからも使える |
 | 1.5.0 | PowerPoint取り込みの忠実度を改善。元資料のマスターと装飾を保持し、スタジオのマスター・ブランド検査・自動モーションを重ねない。非表示スライド・非表示図形・ページ外の部品を編集データに残し、発表では元の表示設定を守る。元画像を再圧縮せず保持し、線形グラデーション・外側の影・元フォント名を描画。表・グラフ・長文・部品・スライドの上限を拡大。マスターと本文の要素IDが重なってもアニメーション対象を保つ。原本との比較テストを追加 |
 | 1.4.0 | PowerPointを見た目どおりに取り込む：図形・テキスト（1文字ずつの書式・箇条書き・段落番号・リンク）・プレースホルダー（レイアウトとマスターから継承）・画像（トリミング）・線とコネクタ・表（表のスタイル・罫線）・SmartArt・グループ・背景・ノートを元の位置と書式のまま部品にし、アニメーション（開始・強調・終了・軌跡）と画面切り替えも引き継ぐ。グラフはPowerPointの書式（系列と要素の色・データラベルと表示形式・軸・目盛線・凡例）で描く。SEJテンプレートの資料はマスターの要素を取り込まずスタジオのマスターに。取り込むときに「見た目どおり」と「HTMLレイアウトに組み直す」を選べる |
 | 1.3.0 | PowerPoint風の編集の仕上げ：表（挿入のマス目・セルの入力とTab移動・範囲選択・結合と分割・行と列・スタイル6種・罫線のドラッグ）、グラフ（7種類・データの編集・Excelから貼り付け）、選んだ語句へのリンク、スライド上のトリミング、曲線・フリーフォーム・フリーハンドと頂点の編集。「図形に変換」で、AIのレイアウトを見た目そのままに図形・テキストボックス・線・画像・アイコン・グラフ・表へ分け、項目ごとのグループ・クリックの出し方のアニメーション・詳細と深掘りページのつながりを引き継ぐ。表の文字サイズ・フォントが編集のたびに元に戻っていたのを修正。編集中、丸い札（チップ）の角が四角く見えていたのを修正 |

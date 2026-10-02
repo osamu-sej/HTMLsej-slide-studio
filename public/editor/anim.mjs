@@ -215,7 +215,8 @@ export function createAnimations(editor, app, kit) {
 
   function fxButton(cls, fx, run, { on = false } = {}) {
     const name = cls === "path" ? E.ANIM_PATHS[fx]?.label : E.animLabel(cls, fx);
-    return h("button", { type: "button", class: ["an-fx", `an-${cls}`, on ? "on" : ""], title: name, "data-fx": `${cls}:${fx}`, onmousedown: (event) => event.preventDefault(), onclick: () => run(cls, fx) },
+    const html = cls !== "path" && E.animIsHtml(cls, fx);
+    return h("button", { type: "button", class: ["an-fx", `an-${cls}`, html ? "an-html" : "", on ? "on" : ""], title: html ? `${name}（HTMLならでは：PowerPointにはない動き）` : name, "data-fx": `${cls}:${fx}`, onmousedown: (event) => event.preventDefault(), onclick: () => run(cls, fx) },
       cls === "path" ? pathThumb(fx) : ico(CLASS_ICON[cls], 22), h("small", {}, name));
   }
   function pathThumb(fx) {
@@ -231,18 +232,28 @@ export function createAnimations(editor, app, kit) {
     svg.append(E.s("circle", { cx: ((pts[0][0] - minX) * k).toFixed(1), cy: ((pts[0][1] - minY) * k).toFixed(1), r: 2.2, fill: PATH_COLORS.start }));
     return svg;
   }
+  // What only HTML can do (typewriter, decode, a pen drawing, figures counting, a chart growing…) comes first.
+  const htmlKeys = (cls) => Object.keys(cls === "em" ? E.ANIM_EM : E.ANIM_IN).filter((fx) => E.animIsHtml(cls, fx) && !(cls === "out" && E.ANIM_IN[fx].noExit));
+  const pptKeys = (cls) => Object.keys(cls === "em" ? E.ANIM_EM : E.ANIM_IN).filter((fx) => !E.animIsHtml(cls, fx));
+  function htmlBlock(go) {
+    return h("div", { class: "an-html-block" },
+      h("div", { class: "rb-gallery-head an-head-html" }, h("b", { class: "an-html-badge" }, "HTML"), "HTMLならでは（PowerPointにはない動き）"),
+      h("div", { class: "an-grid" }, [...htmlKeys("in").map((fx) => fxButton("in", fx, go)), ...htmlKeys("em").map((fx) => fxButton("em", fx, go)), ...htmlKeys("out").map((fx) => fxButton("out", fx, go))]));
+  }
   /** Every effect, by kind (the gallery's ▾ and アニメーションの追加). */
-  function gallery(run, { title = "" } = {}) {
+  function gallery(run, { title = "", htmlOnly = false } = {}) {
     return (close) => {
       const go = (cls, fx) => { close(); run(cls, fx); };
       const hasMedia = selectionTargets().some(mediaOk);
       const section = (cls, keys) => [h("div", { class: `rb-gallery-head an-head-${cls}` }, E.ANIM_CLASSES[cls]), h("div", { class: "an-grid" }, keys.map((fx) => fxButton(cls, fx, go)))];
+      if (htmlOnly) return h("div", { class: "rb-gallery an-gallery" }, title ? h("div", { class: "rb-menu-head" }, title) : null, htmlBlock(go));
       return h("div", { class: "rb-gallery an-gallery" },
         title ? h("div", { class: "rb-menu-head" }, title) : null,
         h("button", { type: "button", class: "an-none", onclick: () => { close(); none(); } }, "なし（アニメーションを外す）"),
-        section("in", Object.keys(E.ANIM_IN)),
-        section("em", Object.keys(E.ANIM_EM)),
-        section("out", Object.keys(E.ANIM_IN)),
+        htmlBlock(go),
+        section("in", pptKeys("in")),
+        section("em", pptKeys("em")),
+        section("out", pptKeys("out")),
         section("path", Object.keys(E.ANIM_PATHS)),
         hasMedia ? section("media", Object.keys(E.ANIM_MEDIA)) : null);
     };
@@ -265,7 +276,7 @@ export function createAnimations(editor, app, kit) {
         const palette = e.fx === "fontColor" ? E.PALETTE.text : e.fx === "lineColor" ? E.PALETTE.line.filter(([c]) => c !== "#ffffff") : E.PALETTE.fill.filter(([c]) => c !== "#ffffff");
         for (const [c, l] of palette) items.push({ label: l, icon: null, swatch: c, on: (e.color || def.color) === c, run: () => setOption({ color: c }) });
       }
-      if (["in", "out", "em"].includes(e.cls) && list.every((x) => textual(x.el))) {
+      if (["in", "out", "em"].includes(e.cls) && list.every((x) => textual(x.el)) && !defOf(e)?.html) {
         items.push("-", { head: "テキストの動作" });
         for (const [k, l] of Object.entries(E.ANIM_BY)) items.push({ label: l, on: (e.by || "all") === k, run: () => setOption({ by: k === "all" ? undefined : k }) });
       }
@@ -334,6 +345,8 @@ export function createAnimations(editor, app, kit) {
         h("div", { class: "an-quick-wrap" }, quick,
           drop("chevron", "", "すべての効果（開始・強調・終了・軌跡）", () => gallery(apply), {})),
         drop("effectOpts", "効果の|オプション", "方向・量・色・テキストの動作・パス", () => optionsMenu(), { big: true, enabled: () => active().length > 0 })),
+      group("HTMLならでは",
+        drop("magic", "HTMLの|効果", "PowerPointにはない動き：タイプライター・デコード・マスク・ぼかし・線を描く・カウントアップ・グラフが伸びる・光が走る・波紋・マーカー・スポットライト", () => gallery(apply, { title: "HTMLならではの効果", htmlOnly: true }), { big: true })),
       group("詳細設定",
         drop("starPlus", "アニメーション|の追加", "選んだ図形にもう1つアニメーションを付ける", () => gallery(add, { title: "アニメーションの追加" }), { big: true, enabled: () => selectionTargets().length > 0 }),
         col(btn("animPane", "ウィンドウ", "アニメーション ウィンドウ：順番とタイミングの一覧", () => app.openAnimationPane()),
