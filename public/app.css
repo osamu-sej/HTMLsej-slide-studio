@@ -939,6 +939,19 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 /* marks on the stage: order numbers, motion paths, drawing a path, picking an object */
 .ed-anim-badge { position: absolute; z-index: 3; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; background: #fff; color: #1f3864; border: 1px solid #1f3864; font: 700 11px/16px var(--font-num, sans-serif); text-align: center; pointer-events: none; box-sizing: border-box; }
 .ed-anim-badge.on { background: #1f3864; color: #fff; }
+/* インタラクション (editor/interact.mjs): what an object does under the mouse, on a click, all along */
+.ed-ix-badge { position: absolute; z-index: 3; transform: translateX(-100%); max-width: 220px; height: 18px; padding: 0 6px; border-radius: 9px; background: #eef4f1; color: #1f3864; border: 1px solid #13a89e; font: 700 10.5px/16px system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; box-sizing: border-box; }
+.ix-form { width: 340px; }
+.ix-form textarea { width: 100%; border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12.5px; resize: vertical; }
+.ix-targets { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow: auto; padding: 4px; border: 1px solid var(--line-2); border-radius: 8px; }
+.ix-targets label, .ix-check { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.ix-targets small { color: var(--muted); }
+.ix-swatches { display: flex; flex-wrap: wrap; gap: 4px; }
+.ix-status { max-width: 220px; padding: 6px 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.an-html-block { margin: 2px 0 6px; padding: 6px 8px 8px; border-radius: 10px; background: linear-gradient(180deg, #f4f7fb, #eef4f1); }
+.an-head-html { display: flex; align-items: center; gap: 6px; }
+.an-html-badge { padding: 0 6px; border-radius: 4px; background: #13a89e; color: #fff; font-size: 10px; letter-spacing: .06em; }
+.an-fx.an-html { --an: #13a89e; }
 .ed-anim-path { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .ed-handle.ed-anim-pt { width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--c); border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); cursor: move; pointer-events: auto; }
 .ed-handle.ed-anim-pt.fixed { cursor: default; pointer-events: none; }

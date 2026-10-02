@@ -15,7 +15,7 @@ function playableMedia(media) {
 
 export function resetDeckActions(source) {
   const deck = structuredClone(source);
-  const removed = { slides: deck.slides.length, timeline: 0, links: 0, details: 0, deepDives: 0, mediaAutoplay: 0 };
+  const removed = { slides: deck.slides.length, timeline: 0, links: 0, interactions: 0, details: 0, deepDives: 0, mediaAutoplay: 0 };
   deck.transition = "none";
   deck.motion = { ...deck.motion, ...STILL_MOTION };
   for (const slide of deck.slides) {
@@ -41,6 +41,9 @@ export function resetDeckActions(source) {
     for (const object of slide.elements ?? []) {
       if (object.action) { delete object.action; removed.links += 1; }
       if (object.item) { delete object.item; removed.links += 1; }
+      if (object.hover) { delete object.hover; removed.interactions += 1; }
+      if (object.tip) { delete object.tip; removed.interactions += 1; }
+      if (typeof object.loop === "string") { delete object.loop; removed.interactions += 1; }
       if (["video", "youtube", "lottie"].includes(object.kind) && object.autoplay !== false) {
         object.autoplay = false;
         removed.mediaAutoplay += 1;

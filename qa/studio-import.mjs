@@ -99,8 +99,8 @@ await step("the page looks as it did: title box, shapes, bullets, table and a ch
   await shot("page");
 });
 
-await step("動きを付ける opens the animation pane with PowerPoint's animations", async () => {
-  await page.click('.callout button:has-text("動きを付ける")');
+await step("アニメーションを編集 opens the animation pane with PowerPoint's animations", async () => {
+  await page.click('.callout button:has-text("アニメーションを編集")');
   await page.waitForTimeout(500);
   assert(await page.isVisible("#animPane"), "the animation pane");
   assert(await page.locator('.rb-tabs [role=tab][aria-selected="true"]:has-text("アニメーション")').count() === 1, "the animation tab");
