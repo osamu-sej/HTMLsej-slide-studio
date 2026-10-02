@@ -5,6 +5,7 @@ import { createCanvas } from "./editor/canvas.mjs?v=__APP_VERSION__";
 import { createEditorUi } from "./editor/ui.mjs?v=__APP_VERSION__";
 import * as ops from "./editor/ops.mjs?v=__APP_VERSION__";
 import { createConverter } from "./editor/convert.mjs?v=__APP_VERSION__";
+import { resetDeckActions } from "./reset-actions.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -1036,6 +1037,7 @@ function markChanged({ structural = false } = {}) {
     renderFilmstrip();
     renderStage();
     renderInspector();
+    if (state.panel === "anim") editorUi.renderAnimPane();
   } else {
     // Typing: refresh the picture without rebuilding the form under the caret.
     clearTimeout(state.stageTimer);
@@ -1838,6 +1840,8 @@ const editorApp = {
   setObjects,
   setTimeline,
   setSlideFields,
+  resetAllActions,
+  prepareActionPlanPrompt,
   previewMotion: (opts) => previewMotion(opts),
   previewTransition: () => previewTransition(),
   stopPreview: () => stopMotionPreview(),
@@ -1912,6 +1916,30 @@ function setSlideFields(patch, { all = false } = {}) {
     }
   }
   markChanged({ structural: true });
+}
+
+/** One undo step removes every imported and studio-authored presentation action. */
+function resetAllActions() {
+  if (!state.deck || state.player || state.aiBusy) return;
+  if (state.inline) finishInlineEdit(true);
+  const { deck, removed, changed } = resetDeckActions(state.deck);
+  if (!changed) return toast("この資料の動きとクリック動作はすでに削除されています");
+  stopMotionPreview({ render: false });
+  pushUndo();
+  state.deck = deck;
+  state.imported = null;
+  thumbCache.clear();
+  markChanged({ structural: true });
+  toast(`全${removed.slides}枚の動きとクリック動作を削除しました（⌘Zで元に戻せます）`);
+}
+
+/** Put a whole-deck, HTML-first animation brief in chat for review before sending it to AI. */
+function prepareActionPlanPrompt() {
+  if (!state.deck) return;
+  setPanel("chat");
+  $("chatInput").value = "全ページの内容と前後の流れを読み、PowerPoint由来の動きに引きずられず、HTMLならではのアニメーションとクリック操作をゼロから考えてください。まずは各ページ番号ごとに、動かす対象、効果、開始条件、目的を具体的に提案してください。元の文字・数値・図形・写真は変えず、過剰な演出は避けてください。今回は提案だけを返し、資料は変更しないでください。";
+  $("chatInput").dispatchEvent(new Event("input", { bubbles: true }));
+  $("chatInput").focus();
 }
 
 /**
@@ -4435,6 +4463,8 @@ function commandList() {
       cmd("資料", "🕘", "版の履歴・過去の資料", () => openHistory()),
       cmd("資料", "{}", "JSONで保存", () => saveJsonFile()),
       cmd("デザイン", "◐", "動き（切り替え・登場・背景）", () => openDesignDialog()),
+      cmd("動き", "✕", "全ページの動き・クリック動作を削除", () => resetAllActions(), "1回の元に戻すで復元可能"),
+      cmd("AI", "✦", "全ページのHTML演出案をAIに相談", () => prepareActionPlanPrompt(), "送信前に依頼文を編集できます"),
       ...Object.entries(E.BACKDROPS).map(([kind, label]) => cmd("動き", "◎", `背景の動き：${label}`, () => { setDeckDesign({ motion: { backdrop: kind } }); toast(`表紙・章扉などの背景を「${label}」にしました`); }, "モーショングラフィック（資料全体）")),
       ...Object.entries(E.KINETIC).map(([style, label]) => cmd("動き", "◎", `文字の動き：${label.replace(/（.*）/, "")}`, () => { setDeckDesign({ motion: { kinetic: style } }); toast(`大きな文字の動きを「${label.replace(/（.*）/, "")}」にしました`); }, "モーショングラフィック（資料全体）")),
       ...Object.entries(E.ENTRANCES).map(([style, label]) => cmd("動き", "◎", `登場のしかた：${label}`, () => { setDeckDesign({ motion: { entrance: style } }); toast(`登場のしかたを「${label}」にしました`); }, "資料全体")),

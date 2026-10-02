@@ -843,7 +843,7 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-slide:not(.hs-static)[data-ambient="on"][data-theme="aurora"] .hs-decor i:nth-child(2) { animation: hs-drift-b 26s ease-in-out infinite; }
 .hs-slide:not(.hs-static)[data-ambient="on"][data-theme="aurora"] .hs-decor i:nth-child(3) { animation: hs-drift-a 30s ease-in-out infinite reverse; }
 .hs-slide:not(.hs-static)[data-ambient="on"] .hs-spin { animation: hs-spin 80s linear infinite; transform-box: fill-box; transform-origin: center; }
-.hs-slide:not(.hs-static) .hs-mile.next .hs-mdot { animation: hs-pulse 2.2s ease-in-out infinite; }
+.hs-slide:not(.hs-static)[data-ambient="on"] .hs-mile.next .hs-mdot { animation: hs-pulse 2.2s ease-in-out infinite; }
 
 /* entrance: the header, then the groups (hs-play is set by the player) */
 .hs-slide.hs-play .hs-head > *, .hs-slide.hs-play .hs-enter { animation: var(--hs-in, hs-rise) .8s var(--ease-out) both; }
@@ -1298,8 +1298,8 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-shift-delta { font-size: .86em; font-weight: 800; color: var(--muted); }
 .hs-shift-row.is-hot .hs-shift-delta { color: var(--accent); }
 @keyframes hs-shift { from { width: var(--from); } to { width: var(--to); } }
-.hs-slide.hs-play .hs-shift-bar { animation: hs-shift 1.3s var(--ease-in-out) both; animation-delay: calc(var(--i, 0) * 110ms + 1.2s); }
-.hs-slide.hs-play .hs-shift-delta { animation: hs-fade .5s ease both; animation-delay: calc(var(--i, 0) * 110ms + 2.3s); }
+.hs-slide.hs-numbers.hs-play .hs-shift-bar { animation: hs-shift 1.3s var(--ease-in-out) both; animation-delay: calc(var(--i, 0) * 110ms + 1.2s); }
+.hs-slide.hs-numbers.hs-play .hs-shift-delta { animation: hs-fade .5s ease both; animation-delay: calc(var(--i, 0) * 110ms + 2.3s); }
 
 /* ---- a result recalculated as conditions move (因果) */
 .hs-sim { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 64px; flex: 1; min-height: 0; }
@@ -1464,7 +1464,7 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 @keyframes hs-sej-open { from { opacity: 0; transform: scale(.55); } to { opacity: 1; transform: none; } }
 .hs-slide:not(.hs-static)[data-ambient="on"] .hs-sej-ripples .wave { animation: hs-sej-wave 8s cubic-bezier(.2, .6, .4, 1) 1.2s infinite; }
 .hs-slide:not(.hs-static)[data-ambient="on"] .hs-sej-ripples .wave.late { animation-delay: 5.2s; }
-.hs-slide.hs-play .hs-sej-ripples :is(.disc, .ring) { animation: hs-sej-open 1.3s var(--ease-out) both; }
+.hs-slide.hs-play[data-ambient="on"] .hs-sej-ripples :is(.disc, .ring) { animation: hs-sej-open 1.3s var(--ease-out) both; }
 .hs-slide.hs-play .hs-sej-ripples :is(.disc, .ring):nth-of-type(2) { animation-delay: .1s; }
 .hs-slide.hs-play .hs-sej-ripples :is(.disc, .ring):nth-of-type(3) { animation-delay: .2s; }
 .hs-slide.hs-play .hs-sej-ripples :is(.disc, .ring):nth-of-type(n+4) { animation-delay: .3s; }

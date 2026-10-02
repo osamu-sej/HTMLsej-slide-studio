@@ -55,10 +55,15 @@ const selectObject = async (index) => {
   await page.waitForTimeout(200);
 };
 const drawShape = async (title, from, to) => {
-  await tab("挿入");
-  await page.locator('.rb-btn.big:has-text("図形")').first().click();
-  await page.click(`.rb-gallery button[title="${title}"]`);
-  await drag(from, to);
+  const before = (await objects()).length;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await tab("挿入");
+    await page.locator('.rb-btn.big:has-text("図形")').first().click();
+    await page.click(`.rb-gallery button[title="${title}"]`);
+    await drag(from, to);
+    if ((await objects()).length > before) return;
+  }
+  throw new Error(`shape was not inserted: ${title}`);
 };
 
 await page.goto(base);
@@ -297,6 +302,33 @@ await step("export: the file carries the animations and plays them", async () =>
   const after = await viewer.evaluate(() => getComputedStyle(document.querySelector(".hs-player .hs-slide .hs-obj .hs-obj-fx")).visibility);
   await viewer.close();
   assert(before === "hidden" && after === "visible", `exported: ${before} → ${after}`);
+});
+
+await step("every page's animations and click actions can be reset in one undo step", async () => {
+  const before = await page.evaluate(() => JSON.parse(JSON.stringify(window.__hsej.deck())));
+  assert(before.slides.some((slide) => slide.timeline?.length), "the fixture has effects before reset");
+  await page.click("#animTab");
+  await page.locator(".an-reset-actions button:has-text('全ページの動き・操作を削除')").click();
+  const cleared = await page.evaluate(() => JSON.parse(JSON.stringify(window.__hsej.deck())));
+  assert(cleared.transition === "none", "deck transitions are disabled");
+  assert(cleared.slides.every((slide) => !slide.timeline?.length && slide.animation === "none" && slide.transition === "none" && slide.advance == null), "all page actions are cleared");
+  assert(cleared.slides.map((slide) => slide.title).join("|") === before.slides.map((slide) => slide.title).join("|"), "content remains");
+  await page.locator(".film-item").first().click();
+  await page.keyboard.press("Shift+F5");
+  await page.waitForSelector(".hs-player .hs-sej-ripples .ring");
+  const coverMotion = await page.evaluate(() => {
+    const slide = document.querySelector(".hs-player .hs-slide");
+    const ring = slide.querySelector(".hs-sej-ripples .ring");
+    return { ambient: slide.dataset.ambient, numbers: slide.classList.contains("hs-numbers"), animation: getComputedStyle(ring).animationName };
+  });
+  assert(coverMotion.ambient === "off" && !coverMotion.numbers && coverMotion.animation === "none", `cover still: ${JSON.stringify(coverMotion)}`);
+  await page.keyboard.press("Escape");
+  await shortcut("z");
+  await page.waitForTimeout(300);
+  const restored = await page.evaluate(() => JSON.parse(JSON.stringify(window.__hsej.deck())));
+  assert(JSON.stringify(restored.slides) === JSON.stringify(before.slides), "one undo restores every page");
+  await page.locator(".an-reset-actions button:has-text('AIにHTML演出を相談')").click();
+  assert((await page.inputValue("#chatInput")).includes("HTMLならでは"), "AI prompt starts from HTML rather than old PowerPoint effects");
 });
 
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");

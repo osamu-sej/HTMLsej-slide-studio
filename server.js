@@ -117,6 +117,7 @@ function loadStatic() {
   const inject = (text) => text.replaceAll("__APP_VERSION__", APP_VERSION).replaceAll("__APP_BUILD__", build);
   add("/", inject(readFileSync(join(PUBLIC, "index.html"), "utf8")), TYPES[".html"]);
   add("/app.js", inject(readFileSync(join(PUBLIC, "app.js"), "utf8")), TYPES[".js"]);
+  add("/reset-actions.mjs", readFileSync(join(PUBLIC, "reset-actions.mjs"), "utf8"), TYPES[".js"]);
   add("/saved-library.js", readFileSync(join(PUBLIC, "saved-library.js"), "utf8"), TYPES[".js"]);
   add("/auto-images.mjs", readFileSync(join(PUBLIC, "auto-images.mjs"), "utf8"), TYPES[".js"]);
   add("/app.css", readFileSync(join(PUBLIC, "app.css"), "utf8"), TYPES[".css"]);
