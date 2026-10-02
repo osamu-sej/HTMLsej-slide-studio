@@ -200,6 +200,19 @@ await step("export: the file carries the objects, the chart and the animation", 
   assert(count >= 8, `objects in the file: ${count}`);
 });
 
+await step("one reset removes every imported action but keeps every source page and object", async () => {
+  const before = await deckNow();
+  await page.click("#animTab");
+  await page.locator(".an-reset-actions button:has-text('全ページの動き・操作を削除')").click();
+  const after = await deckNow();
+  assert(after.slides.length === before.slides.length && after.slides[2].hidden, "hidden source pages remain");
+  assert(after.slides.every((slide, i) => slide.master === "source" && slide.elements.length === before.slides[i].elements.length), "all original objects and masters remain");
+  assert(after.slides.every((slide) => !slide.timeline && !slide.elements.some((object) => object.action)), "animations and click jumps are removed");
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(350);
+  assert(JSON.stringify((await deckNow()).slides) === JSON.stringify(before.slides), "one undo restores all imported actions");
+});
+
 await step("a 4:3 deck in another template: centred on the page, its pictures kept in the browser, its pie chart drawn", async () => {
   await page.evaluate(() => localStorage.clear());
   await page.goto(base);

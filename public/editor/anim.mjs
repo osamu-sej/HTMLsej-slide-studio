@@ -400,6 +400,10 @@ export function createAnimations(editor, app, kit) {
     const keepScroll = pane.querySelector(".fp-body")?.scrollTop ?? 0;
     const head = h("div", { class: "fp-head an-pane-head" }, h("b", {}, "アニメーション ウィンドウ"));
     const body = h("div", { class: "fp-body" });
+    body.append(h("div", { class: "an-reset-actions" },
+      h("p", { class: "hint" }, "全ページの動きとクリック動作をゼロにできます。文字・図形・画像とスライドは残り、⌘Zで復元できます。"),
+      h("button", { type: "button", class: "btn btn-sm", onclick: () => app.resetAllActions() }, "全ページの動き・操作を削除"),
+      h("button", { type: "button", class: "btn btn-sm", onclick: () => app.prepareActionPlanPrompt() }, "✦ AIにHTML演出を相談")));
     if (!onSlide()) {
       body.append(h("p", { class: "hint" }, "1枚表示（標準）で、図形・文字・画像やレイアウトの部品にアニメーションを付けられます。"));
       pane.replaceChildren(head, body);

@@ -331,6 +331,19 @@ await step("a deck brought over from PowerPoint: おまかせ from the import me
   await shot("import-omakase");
 });
 
+await step("one reset removes both PowerPoint and HTML actions from every imported page", async () => {
+  const before = await page.evaluate(() => structuredClone(window.__hsej.deck()));
+  await page.click("#animTab");
+  await page.locator(".an-reset-actions button:has-text('全ページの動き・操作を削除')").click();
+  const cleared = await page.evaluate(() => structuredClone(window.__hsej.deck()));
+  assert(cleared.slides.length === before.slides.length, "all pages remain");
+  assert(cleared.slides.every((s, i) => s.elements.length === before.slides[i].elements.length && !s.timeline?.length), "objects remain and all animations are gone");
+  assert(cleared.slides.every((s) => s.elements.every((o) => !o.action && !o.hover && !o.tip && typeof o.loop !== "string")), "all HTML interactions are gone");
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(350);
+  assert(JSON.stringify((await page.evaluate(() => window.__hsej.deck())).slides) === JSON.stringify(before.slides), "one undo restores every original and HTML action");
+});
+
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");
 await browser.close();
 process.exit(errors.length ? 1 : 0);

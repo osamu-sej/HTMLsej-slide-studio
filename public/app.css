@@ -898,6 +898,8 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 
 .anim-pane .fp-head.an-pane-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .an-pane-btns { display: flex; gap: 4px; margin-left: auto; }
+.an-reset-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--canvas); }
+.an-reset-actions p { flex: 1 0 100%; margin: 0 0 2px; }
 .an-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .an-row { display: grid; grid-template-columns: 22px 16px 18px minmax(0, 1fr) 72px 20px; align-items: center; gap: 4px; min-height: 34px; padding: 2px 4px; border: 1px solid transparent; border-radius: 7px; cursor: pointer; }
 .an-row:hover { background: var(--canvas); }

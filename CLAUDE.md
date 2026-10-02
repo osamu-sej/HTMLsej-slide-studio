@@ -20,6 +20,7 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 - PowerPointの「見た目どおりに取り込む」は `tools/pptx_exact.py`（`/api/import?mode=exact`）。1枚ずつ白紙（`hideTitle`・`master: source`）の部品にし、グラフは書式を `chart.style` に入れて `officeChart`（objects.js）で描く。取り込み資料は元のマスター・装飾・画像を保持し、スタジオのSEJマスターとブランド検査を重ねない。非表示スライドも編集データに残し、発表からは除く。変えたら `test/test_pptx_exact.py`・`test/import-exact.test.js`・`qa/studio-import.mjs` を通し、LibreOfficeで描いた原本と並べて見比べる。
 - HTMLならではの動きは部品の `hover`・`tip`・`loop` と `action`（`popup`・`zoom`・`spot`・`flip`・`reveal`）。描くのは objects.js（発表中だけ `data-*` を付ける。編集画面では動かない）、動かすのは motion.js（プレーヤー）と engine.css、編集はリボン「インタラクション」（`public/editor/interact.mjs`）。HTMLの効果は animate.js の `html: true`（戻せないものは `noExit`）。おまかせ（`public/editor/htmlfx.mjs`）は元のアニメーション・動作を消さず、テンプレートの飾り（`chromeOf`）と非表示のスライドに付けない。変えたら `test/interact.test.js` と `qa/studio-interact.mjs` を通す。
 - アニメーションは `slide.timeline`（再生は `public/engine/animate.js`、編集は `public/editor/anim.mjs`）。開始・終了は `transform`／`opacity`／`clip-path`、強調は `scale`／`rotate`（足し合わせ）と色、軌跡は `translate`（足し合わせ）で動かし、同じ部品の効果が打ち消し合わないようにする。発表のクリックはレイアウトの「中身の出し方」の後にアニメーションが続く（`data-lsteps`・`data-steps`）。
+- 全ページの動き・クリック動作のリセットは `public/reset-actions.mjs`。元の文字・図形・画像とスライドを残し、タイムライン、レイアウトの出し方、モーショングラフィック、画面切り替え、メディアの自動再生、図形のクリックリンク、詳細・深掘りのクリック設定、HTML独自のホバー・説明・連続モーションを消す。アプリ側は1回だけUndoを積む。AIとの通常会話は`timeline`を書けないため、現段階の「AIにHTML演出を相談」は提案文を作るだけで自動反映しない。
 
 ## PRとマージ
 
