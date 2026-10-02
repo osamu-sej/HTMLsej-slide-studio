@@ -108,8 +108,8 @@ export function createTableUi(editor, app, kit) {
         shown.map((s, j) => h("td", {}, h("input", { type: "text", inputmode: "decimal", value: String(s.values[i] ?? 0), "aria-label": `${label}・${s.name}`, oninput: (event) => { const v = Number(String(event.target.value).replace(/[,，]/g, "")); data.series[j].values[i] = Number.isFinite(v) ? v : 0; scheduleDraw(); } })))));
       sheet.replaceChildren(h("table", { class: "tb-sheet", onpaste: onPaste }, h("thead", {}, head), h("tbody", {}, body)),
         h("div", { class: "tb-sheet-btns" },
-          h("button", { type: "button", class: "btn btn-sm", disabled: data.labels.length >= 24 || null, onclick: () => { data.labels.push(`項目${data.labels.length + 1}`); for (const s of data.series) s.values.push(0); draw(); } }, "＋ 項目（行）"),
-          single() ? null : h("button", { type: "button", class: "btn btn-sm", disabled: data.series.length >= 8 || null, onclick: () => { data.series.push({ name: `系列${data.series.length + 1}`, values: data.labels.map(() => 0) }); draw(); } }, "＋ 系列（列）"),
+          h("button", { type: "button", class: "btn btn-sm", disabled: data.labels.length >= E.CHART_MAX_LABELS || null, onclick: () => { data.labels.push(`項目${data.labels.length + 1}`); for (const s of data.series) s.values.push(0); draw(); } }, "＋ 項目（行）"),
+          single() ? null : h("button", { type: "button", class: "btn btn-sm", disabled: data.series.length >= E.CHART_MAX_SERIES || null, onclick: () => { data.series.push({ name: `系列${data.series.length + 1}`, values: data.labels.map(() => 0) }); draw(); } }, "＋ 系列（列）"),
           h("span", { class: "hint" }, "Excelの表をコピーして貼り付けられます（1行目が系列名、1列目が項目名）")));
     }
     let timer = null;
@@ -120,9 +120,9 @@ export function createTableUi(editor, app, kit) {
       event.preventDefault();
       const rows = text.replace(/\r/g, "").split("\n").filter(Boolean).map((line) => line.split("\t"));
       if (rows.length < 2) return;
-      const names = rows[0].slice(1).map((name, j) => name.trim() || `系列${j + 1}`).slice(0, 8);
-      data.labels = rows.slice(1, 25).map((r) => (r[0] || "").trim());
-      data.series = names.map((name, j) => ({ name, values: rows.slice(1, 25).map((r) => { const v = Number(String(r[j + 1] ?? "").replace(/[,，%％\s]/g, "")); return Number.isFinite(v) ? v : 0; }) }));
+      const names = rows[0].slice(1).map((name, j) => name.trim() || `系列${j + 1}`).slice(0, E.CHART_MAX_SERIES);
+      data.labels = rows.slice(1, E.CHART_MAX_LABELS + 1).map((r) => (r[0] || "").trim());
+      data.series = names.map((name, j) => ({ name, values: rows.slice(1, E.CHART_MAX_LABELS + 1).map((r) => { const v = Number(String(r[j + 1] ?? "").replace(/[,，%％\s]/g, "")); return Number.isFinite(v) ? v : 0; }) }));
       if (single() && data.series.length > 1) data.type = data.type === "line" ? "multi-line" : data.type === "bar" ? "stacked-bar" : data.type;
       kind.value = data.type;
       draw();
@@ -206,6 +206,7 @@ export function createTableUi(editor, app, kit) {
     ];
   }
   function chartTab() {
+    const resetStyle = () => { const o = chart(); if (o?.chart.style) editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: { ...x.chart, style: undefined } } : x)), { select: [o.id] }); };
     const setKind = (type) => { const o = chart(); if (o) editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: { ...x.chart, type } } : x)), { select: [o.id] }); };
     const ask = async (key, label, hint) => {
       const o = chart();
@@ -216,7 +217,9 @@ export function createTableUi(editor, app, kit) {
     };
     return [
       group("種類", drop("chartBar", "グラフの種類|の変更", "縦棒・積み上げ・折れ線・ドーナツ・複合", () => chartPicker(setKind), { big: true, enabled: isChart })),
-      group("データ", btn("table", "データの|編集", "項目と値を表で直す（Excelから貼り付けもできます）", () => { const o = chart(); if (o) editChart(o.id); }, { big: true, enabled: isChart })),
+      group("データ", btn("table", "データの|編集", "項目と値を表で直す（Excelから貼り付けもできます）", () => { const o = chart(); if (o) editChart(o.id); }, { big: true, enabled: isChart }),
+        // A chart brought over from PowerPoint keeps its formatting until it is reset to the studio's look.
+        btn("reset", "書式を|リセット", "PowerPointから取り込んだグラフの書式（色・ラベル・軸・凡例）を外し、スタジオのグラフの描き方にします", resetStyle, { big: true, enabled: () => Boolean(chart()?.chart.style) })),
       group("グラフ要素", col(btn("textbox", "タイトル…", "グラフの上に出す見出し", () => ask("title", "グラフのタイトル", "空にすると消えます"), { enabled: isChart }), btn("font", "単位…", "値の単位（例：億円）", () => ask("unit", "値の単位", "例：億円・%"), { enabled: isChart }))),
     ];
   }

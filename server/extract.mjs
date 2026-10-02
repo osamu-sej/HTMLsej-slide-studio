@@ -32,6 +32,6 @@ export function extractText(buffer, fileName, { rootDir, timeoutMs = 60_000 } = 
   return runScript("extract_text.py", [fileName], buffer, { rootDir, timeoutMs, timeoutMessage: "読み込みがタイムアウトしました。" });
 }
 
-export function importDeck(buffer, fileName, { rootDir, timeoutMs = 120_000 } = {}) {
-  return runScript("import_deck.py", [fileName], buffer, { rootDir, timeoutMs, timeoutMessage: "取り込みがタイムアウトしました。" });
+export function importDeck(buffer, fileName, { rootDir, timeoutMs = 120_000, mode = "layout" } = {}) {
+  return runScript("import_deck.py", [fileName, mode], buffer, { rootDir, timeoutMs, timeoutMessage: "取り込みがタイムアウトしました。" });
 }

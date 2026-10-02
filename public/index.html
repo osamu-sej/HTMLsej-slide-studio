@@ -117,7 +117,7 @@
       <div class="create-alt">
         <span class="hint">ほかの始め方：</span>
         <button id="blankDeckBtn" class="btn" type="button">雛形から作る</button>
-        <button id="importDeckBtn" class="btn" type="button" title="PowerPoint・PDF・Wordの資料を取り込み、HTMLスライドに組み直します">既存の資料を取り込む</button>
+        <button id="importDeckBtn" class="btn" type="button" title="PowerPoint・PDF・Wordの資料を取り込みます。PowerPointは元の見た目どおりにも取り込めます">既存の資料を取り込む</button>
         <input id="importDeckFile" class="hidden" type="file" accept=".pptx,.pdf,.docx" />
         <button id="sampleDeckBtn" class="btn btn-ghost" type="button">サンプル資料を開く</button>
         <button id="importJsonBtn" class="btn btn-ghost" type="button">JSONを読み込む</button>
@@ -402,6 +402,7 @@
           <li>右の「✦ AIと話す」で直してほしいことを書く。変更は提案として届くので、確認して採用・却下します。「工程をクリックで1つずつ出して」「各カードにクリックで開く補足を付けて」のように動きも頼めます</li>
           <li>スライド上の文字をクリックすると、その場で書き換えられます。写真・動画・動き・クリックで開く詳細は「編集」タブで</li>
           <li>スライドの上のリボン（ホーム・挿入・図形の書式・表示）で、PowerPointのように図形・テキストボックス・画像・アイコン・線・表・グラフを置いて仕上げられます。「新しいスライド」→「白紙」なら、何もないところから自由に作れます。AIのレイアウトも「図形に変換」で部品に分けて作り込めます。細かい設定は右の「書式」タブで</li>
+          <li>作ったPowerPointに動きを付けたいときは、「作成」→「既存の資料を取り込む」→「見た目どおりに取り込む」。図形・文字・表・グラフ・写真が元の位置と書式のまま部品になり、PowerPointのアニメーションと画面切り替えも引き継ぎます。リボンの「アニメーション」で動きを足せます</li>
           <li>「▶ 発表」でそのままZoomなどで画面共有。「HTML出力」で動きごと1つのファイルに書き出せます</li>
         </ol>
         <h4>編集のショートカット</h4>
@@ -478,6 +479,17 @@
       <div class="dialog-head"><h3 id="askTitle">入力</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
       <div class="dialog-body"><label class="field"><span id="askLabel" class="field-label"></span><input id="askInput" type="text" autocomplete="off" /></label></div>
       <div class="dialog-foot"><button class="btn" type="button" data-close>やめる</button><button id="askOk" class="btn btn-primary" type="button">OK</button></div>
+    </dialog>
+
+    <dialog id="importModeDialog" class="import-mode-dialog">
+      <div class="dialog-head"><h3>PowerPointの取り込み方</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
+      <div class="dialog-body">
+        <p id="importModeName" class="hint"></p>
+        <div class="import-modes">
+          <button type="button" class="import-mode" data-mode="exact"><b>見た目どおりに取り込む<span class="import-badge">おすすめ</span></b><span>元のPowerPointと同じ配置・色・文字で取り込みます。図形・テキスト・表・グラフ・写真は1つずつ動かせる部品になり、PowerPointのアニメーションと画面切り替えも引き継ぎます。作った資料に動きを付けて発表・書き出ししたいときに。</span></button>
+          <button type="button" class="import-mode" data-mode="layout"><b>HTMLレイアウトに組み直す</b><span>文章・表・グラフ・ノートを読み取り、スタジオのレイアウト（結論・カード・図解）に組み直します。AIでブラッシュアップして作り直したいときに。</span></button>
+        </div>
+      </div>
     </dialog>
 
     <div id="presenter" class="presenter hidden" role="dialog" aria-label="発表モード"></div>

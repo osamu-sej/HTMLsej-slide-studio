@@ -648,7 +648,9 @@ const httpServer = createServer(async (req, res) => {
     if (!/\.(pptx|docx|pdf)$/i.test(name)) return json(res, 400, { error: "取り込めるのは PowerPoint（.pptx）・PDF・Word（.docx）です。" });
     try {
       const buffer = await readBody(req, 30_000_000, "ファイルが大きすぎます（30MBまで）。");
-      return json(res, 200, await withExtractSlot(() => importDeck(buffer, name.toLowerCase(), { rootDir: here })));
+      // "exact": a PowerPoint deck as it looks (objects on 白紙 pages); otherwise rebuilt into the studio's layouts.
+      const mode = url.searchParams.get("mode") === "exact" && /\.pptx$/i.test(name) ? "exact" : "layout";
+      return json(res, 200, await withExtractSlot(() => importDeck(buffer, name.toLowerCase(), { rootDir: here, mode })));
     } catch (error) {
       return json(res, 422, { error: error.message });
     }

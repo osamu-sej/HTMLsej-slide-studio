@@ -531,7 +531,13 @@ function normalizeSlide(raw, index, total) {
   if (Number(slide.transitionDur) >= 100 && Number(slide.transitionDur) <= 10000) slide.transitionDur = Math.round(Number(slide.transitionDur)); else delete slide.transitionDur;
   if (slide.advance != null && Number.isFinite(Number(slide.advance)) && Number(slide.advance) >= 0) slide.advance = Math.min(600, Math.round(Number(slide.advance) * 10) / 10); else delete slide.advance;
   if (!(typeof slide.sid === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(slide.sid))) delete slide.sid;
-  if (index === 0 && total > 1 && type !== "title") return { type: "title", title: strip(slide.title) || "無題の資料" };
+  // A page brought over from PowerPoint as it looked keeps its title as an object and may use the cover's master.
+  if (type === "blank") {
+    if (slide.hideTitle === true) slide.hideTitle = true; else delete slide.hideTitle;
+    if (slide.master !== "title" && slide.master !== "content") delete slide.master;
+  } else { delete slide.hideTitle; delete slide.master; }
+  // The first page is the cover: a title page, or a cover brought over from PowerPoint (a 白紙 page).
+  if (index === 0 && total > 1 && type !== "title" && !(type === "blank" && slide.elements?.length)) return { type: "title", title: strip(slide.title) || "無題の資料" };
   return slide;
 }
 
@@ -4483,8 +4489,9 @@ function runCommand(item) {
 function validateForExport() {
   const slides = state.deck.slides;
   const problems = [];
-  if (slides[0]?.type !== "title") problems.push("1枚目を表紙にしてください");
-  if (slides.at(-1)?.type !== "closing") problems.push("最後をクロージングにしてください");
+  // A deck brought over from PowerPoint as it looked keeps its own first and last pages (白紙 pages).
+  if (slides[0]?.type !== "title" && slides[0]?.type !== "blank") problems.push("1枚目を表紙にしてください");
+  if (slides.at(-1)?.type !== "closing" && slides.at(-1)?.type !== "blank") problems.push("最後をクロージングにしてください");
   return problems;
 }
 
@@ -4865,12 +4872,28 @@ async function readSourceFile(file) {
   showStatus("generationStatus", `${file.name} を素材に追加しました（${text.length.toLocaleString("ja-JP")}字）。`, "success");
 }
 
-async function importExistingDeck(file) {
+/** How to bring a PowerPoint over: as it looks (objects in place) or rebuilt into the studio's layouts. */
+function chooseImportMode(name) {
+  return new Promise((resolve) => {
+    const dialog = $("importModeDialog");
+    $("importModeName").textContent = `「${name}」をどのように取り込みますか？`;
+    let answer = null;
+    for (const button of dialog.querySelectorAll("[data-mode]")) button.onclick = () => { answer = button.dataset.mode; dialog.close(); };
+    dialog.addEventListener("close", () => resolve(answer), { once: true });
+    dialog.showModal();
+    dialog.querySelector('[data-mode="exact"]').focus();
+  });
+}
+
+async function importExistingDeck(file, mode = null) {
   if (!file) return;
   if (file.size > 30_000_000) return showStatus("generationStatus", "ファイルが大きすぎます（30MBまで）。", "error");
-  showStatus("generationStatus", `${file.name} を取り込んでいます…`, "info");
+  const pptx = /\.pptx$/i.test(file.name);
+  mode = pptx ? mode || await chooseImportMode(file.name) : "layout";
+  if (!mode) return;
+  showStatus("generationStatus", `${file.name} を${mode === "exact" ? "見た目どおりに" : ""}取り込んでいます…`, "info");
   try {
-    const response = await fetch(`/api/import?name=${encodeURIComponent(file.name)}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: file });
+    const response = await fetch(`/api/import?name=${encodeURIComponent(file.name)}${mode === "exact" ? "&mode=exact" : ""}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: file });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
     clearStatus("generationStatus");
@@ -4878,8 +4901,10 @@ async function importExistingDeck(file) {
     const deck = await adoptDeckMedia(normalizeDeck(result));
     loadDeck(deck, { imported: { name: file.name, fidelity: result.fidelity, stats: result.stats } });
     const s = result.stats || {};
-    const kept = [s.tables && `表${s.tables}`, s.charts && `グラフ${s.charts}`, s.images && `写真${s.images}`, s.notes && `ノート${s.notes}`].filter(Boolean).join("・");
-    toast(`${deck.slides.length}枚を取り込みました${kept ? `（${kept}を保持）` : ""}`);
+    const kept = result.fidelity === "exact"
+      ? [s.pictures && `写真${s.pictures}`, s.tables && `表${s.tables}`, s.charts && `グラフ${s.charts}`, s.animations && `アニメーション${s.animations}`].filter(Boolean).join("・")
+      : [s.tables && `表${s.tables}`, s.charts && `グラフ${s.charts}`, s.images && `写真${s.images}`, s.notes && `ノート${s.notes}`].filter(Boolean).join("・");
+    toast(`${deck.slides.length}枚を${result.fidelity === "exact" ? "見た目どおりに" : ""}取り込みました${kept ? `（${kept}を保持）` : ""}`);
     if (result.comments?.length) postReview(result.comments, file.name);
   } catch (error) {
     showStatus("generationStatus", `取り込めませんでした：${error.message}`, "error");
@@ -4890,13 +4915,25 @@ function importCallout() {
   if (!state.imported) return null;
   const canAi = state.codexAuthorized;
   const { name, fidelity } = state.imported;
+  const close = h("button", { class: "btn btn-ghost btn-icon", type: "button", title: "閉じる", onclick: () => { state.imported = null; renderStage(); } }, "✕");
+  if (fidelity === "exact") {
+    const s = state.imported.stats || {};
+    const notes = [s.hidden && `非表示のスライド${s.hidden}枚は取り込んでいません`, s.unsupported && `表示できない要素が${s.unsupported}個あります（EMF・WMFの図など。画像に置き換えてください）`].filter(Boolean);
+    return h("div", { class: "callout" },
+      h("div", { class: "text" },
+        h("b", {}, `「${name}」を見た目どおりに取り込みました`),
+        `元の配置・色・文字のまま、図形・表・グラフ・写真を1つずつ動かして直せます。${s.animations ? `PowerPointのアニメーション${s.animations}件も引き継いでいます。` : ""}「アニメーション」タブで動きを付けて、発表やHTMLの書き出しに使えます。`,
+        notes.length ? h("span", { class: "callout-note" }, `${notes.join("。")}。`) : null),
+      h("button", { class: "btn btn-primary", type: "button", onclick: () => { if (state.view !== "single") setView("single"); editorUi.showTab("animation"); setPanel("anim"); } }, "動きを付ける"),
+      close);
+  }
   return h("div", { class: "callout" },
     h("div", { class: "text" },
       h("b", {}, `「${name}」を取り込みました`),
       fidelity === "high" ? "文章・表・グラフ・写真・ノートを元の構成のまま読み込んでいます。" : "文章だけを読み込んでいます（PDF・Wordは表やグラフを文章として扱います）。",
       canAi ? "AIでブラッシュアップすると、結論・図解・クリックで開く詳細・ノートを備えたプレゼンに磨き上げます。" : "Codexに接続すると、AIで磨き上げられます。自分で直す場合は構成チェックの指摘を順に直してください。"),
     h("button", { class: "btn btn-ai", type: "button", disabled: !canAi || state.aiBusy, onclick: () => openRewriteDialog(BRUSHUP_INSTRUCTION, true) }, "✦ AIでブラッシュアップ"),
-    h("button", { class: "btn btn-ghost btn-icon", type: "button", title: "閉じる", onclick: () => { state.imported = null; renderStage(); } }, "✕"));
+    close);
 }
 
 async function openSample() {

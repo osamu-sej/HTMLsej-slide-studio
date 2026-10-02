@@ -378,7 +378,7 @@
     }
     const holder = h("div", { class: "hs-chart", "data-field": key });
     const svg = s("svg", { viewBox: `0 0 ${w} ${ht}`, preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": strip(spec?.data?.title || "グラフ") });
-    const draw = { bar: barChart, combo: barChart, line: lineChart, "multi-line": lineChart, donut: donutChart, "stacked-bar": stackedChart, "100-stacked-bar": stackedChart }[model.type] || barChart;
+    const draw = { bar: barChart, combo: barChart, "clustered-bar": clusteredChart, line: lineChart, "multi-line": lineChart, donut: donutChart, "stacked-bar": stackedChart, "100-stacked-bar": stackedChart }[model.type] || barChart;
     draw(svg, model, w, ht);
     holder.append(svg);
     wrap.append(holder);
@@ -390,6 +390,35 @@
     el.setAttribute("data-tip", text);
     el.style.setProperty("--i", String(i));
     return el;
+  }
+
+  /** Bars side by side for each label, one colour per series (集合縦棒). */
+  function clusteredChart(svg, model, w, h) {
+    if (model.series.length < 2) { barChart(svg, model, w, h); return; }
+    const labels = model.labels;
+    const n = Math.max(1, labels.length);
+    const k = model.series.length;
+    const top = 56;
+    const bottom = 64;
+    const plotH = h - top - bottom;
+    const max = niceMax(Math.max(...model.series.flatMap((serie) => serie.values), 0) * 1.05);
+    const slot = w / n;
+    const groupW = Math.min(slot * 0.74, 110 * k);
+    const bw = groupW / k;
+    const y0 = top + plotH;
+    const showValues = n * k <= 18;
+    svg.append(s("line", { class: "hs-axisline", x1: 0, x2: w, y1: y0, y2: y0 }));
+    labels.forEach((label, i) => {
+      const x0 = slot * i + (slot - groupW) / 2;
+      model.series.forEach((serie, si) => {
+        const value = serie.values[i] ?? 0;
+        const bh = (Math.max(0, value) / max) * plotH;
+        const x = x0 + si * bw;
+        svg.append(markTip(s("path", { class: "hs-bar", d: roundTop(x + 2, y0 - bh, Math.max(2, bw - 4), bh, Math.min(8, bw / 4)), fill: SERIES[si % SERIES.length] }), `${label}・${serie.name}：${fmt(value)}`, i * k + si));
+        if (showValues) svg.append(s("text", { class: "hs-val", x: x + bw / 2, y: y0 - bh - 12, "text-anchor": "middle", style: { "font-size": "22px" } }, fmt(value)));
+      });
+      svg.append(s("text", { x: slot * i + slot / 2, y: y0 + 40, "text-anchor": "middle" }, label.length > 10 ? `${label.slice(0, 9)}…` : label));
+    });
   }
 
   function barChart(svg, model, w, h) {
@@ -1851,7 +1880,8 @@
     } else if (FULL[type]) {
       FULL[type](slide, ctx, parts);
     } else {
-      frame.append(header(slide, ctx));
+      // A page brought over from PowerPoint as it looked carries its title as one of its objects.
+      if (!(type === "blank" && slide.hideTitle)) frame.append(header(slide, ctx));
       frame.append(LAYOUTS[type](slide, ctx));
       if (theme === "editorial") root.append(h("div", { class: "hs-vlabel", "aria-hidden": "true" }, chapter ? strip(chapter.title) : strip(deck.title || "")));
     }
@@ -1874,7 +1904,8 @@
       // The master: the cover and chapters use the title master, every other page the content master
       // (its page number counts the story, as ‹#› does in the template; a deep-dive page shows its slide's number
       // and says what it belongs to in the line above its key message).
-      const master = type === "title" || type === "section" ? "title" : "content";
+      // A 白紙 page may take the cover's master (a PowerPoint cover brought over as it looked).
+      const master = type === "title" || type === "section" || (type === "blank" && slide?.master === "title") ? "title" : "content";
       root.dataset.master = master;
       root.insertBefore(sejChrome(master, String(pageNo)), frame);
       const source = strip(slide?.source || "");
@@ -2179,6 +2210,11 @@
       for (const td of obj.querySelectorAll("td[data-fill]")) {
         const cellFill = td.dataset.fill.slice(1).toLowerCase();
         if (Engine.BRAND_FILLS && !Engine.BRAND_FILLS.has(cellFill)) flag(`表のセルの色 #${cellFill} はSEJの面の色（淡青・グレー・淡茶）ではありません`);
+      }
+      // A chart brought over from PowerPoint keeps its own colours.
+      for (const mark of obj.querySelectorAll(".hs-ochart [data-paint]")) {
+        const paint = mark.dataset.paint.slice(1).toLowerCase();
+        if (Engine.BRAND_FILLS && !Engine.BRAND_FILLS.has(paint) && !Engine.BRAND_LINES.has(paint)) flag(`グラフの色 #${paint} はSEJの色（濃紺・淡青・グレー・淡茶）ではありません`);
       }
       const box = String(obj.dataset.bbox || "").split(",").map(Number);
       if (box.length === 4 && box.every(Number.isFinite)) {
