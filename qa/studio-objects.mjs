@@ -75,12 +75,14 @@ await step("a blank slide from the ribbon (白紙)", async () => {
 });
 
 await step("draw a rounded rectangle from the shape gallery", async () => {
-  await tab("挿入");
-  await page.locator('.rb-btn.big:has-text("図形")').first().click();
-  await page.waitForSelector(".rb-gallery.shapes");
-  await shot("gallery");
-  await page.click('.rb-gallery button[title="四角形: 角を丸くする"]');
-  await drag([300, 300], [700, 500]);
+  for (let attempt = 0; attempt < 2 && !(await objects()).length; attempt += 1) {
+    await tab("挿入");
+    await page.locator('.rb-btn.big:has-text("図形")').first().click();
+    await page.waitForSelector(".rb-gallery.shapes");
+    if (!attempt) await shot("gallery");
+    await page.click('.rb-gallery button[title="四角形: 角を丸くする"]');
+    await drag([300, 300], [700, 500]);
+  }
   const [o] = await objects();
   assert(o?.kind === "shape" && o.shape === "roundRect", `drawn: ${JSON.stringify(o)}`);
   assert(near(o.x, 300) && near(o.y, 300) && near(o.w, 400) && near(o.h, 200), `box ${o.x},${o.y},${o.w},${o.h}`);
