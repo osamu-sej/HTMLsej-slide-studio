@@ -818,6 +818,14 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .ed-menu kbd { color: var(--muted); font: 11px ui-monospace, monospace; }
 .ed-menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 .ask-dialog { width: min(440px, 92vw); }
+.import-mode-dialog { width: min(640px, calc(100vw - 32px)); }
+.import-modes { display: grid; gap: 10px; margin-top: 4px; }
+.import-mode { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: 12px; background: #fff; text-align: left; font: inherit; line-height: 1.6; cursor: pointer; }
+.import-mode:hover, .import-mode:focus-visible { border-color: var(--accent); background: var(--ai-soft); outline: none; }
+.import-mode b { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.import-mode span { font-size: 12.5px; color: var(--muted); }
+.import-mode .import-badge { padding: 1px 8px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; }
+.callout .callout-note { display: block; margin-top: 4px; color: var(--muted); }
 .ask-dialog input { width: 100%; height: 36px; border: 1px solid var(--line-2); border-radius: 8px; padding: 0 10px; }
 .stage-single { transition: width .12s; }
 .ed-ico { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }

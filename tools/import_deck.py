@@ -694,7 +694,19 @@ def read_docx(data: bytes) -> tuple[str, list[dict[str, Any]], dict[str, int]]:
 
 def main() -> int:
     name = (sys.argv[1] if len(sys.argv) > 1 else "").lower()
+    mode = sys.argv[2] if len(sys.argv) > 2 else "layout"
     data = sys.stdin.buffer.read()
+    if name.endswith(".pptx") and mode == "exact":
+        # As it looks: every slide a 白紙 page of objects (tools/pptx_exact.py).
+        from pptx_exact import read_pptx_exact
+
+        result = read_pptx_exact(data)
+        if not result["slideData"]:
+            raise ValueError("取り込めるスライドがありませんでした（すべて非表示の可能性があります）")
+        if len(result["slideData"]) == 1:
+            result["slideData"].append({"type": "closing", "title": "おわり"})
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
     if name.endswith(".pptx"):
         title, slides, stats = read_pptx(data)
         fidelity = "high"

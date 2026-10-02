@@ -200,7 +200,9 @@ const AI_SLIDES = [
   }),
 ];
 export const aiSlideSchema = z.discriminatedUnion("type", AI_SLIDES);
-export const blankSlideSchema = z.object({ type: z.literal("blank"), ...titledShape, title: z.string().max(90).optional() });
+// A 白紙 page: objects placed by hand. One brought over from PowerPoint as it looked keeps its title as an object
+// (hideTitle) and may use the cover's master.
+export const blankSlideSchema = z.object({ type: z.literal("blank"), ...titledShape, title: z.string().max(90).optional(), hideTitle: z.boolean().optional(), master: z.enum(["title", "content"]).optional() });
 export const slideSchema = z.discriminatedUnion("type", [...AI_SLIDES, blankSlideSchema]);
 
 export const THEMES = ["sej", "clarity", "midnight", "editorial", "mono", "forest", "sunset", "aurora", "kinari"];
@@ -286,7 +288,7 @@ export const chatResultSchema = z.object({
 });
 
 // Fields only people set (uploaded photos and videos, hand placement) are hidden from the AI's output schema.
-const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "advance"]);
+const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "advance", "hideTitle", "master"]);
 function withoutUserFields(node) {
   if (Array.isArray(node)) return node.map(withoutUserFields);
   if (!node || typeof node !== "object") return node;

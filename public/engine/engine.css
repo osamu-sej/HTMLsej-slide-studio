@@ -70,7 +70,9 @@
 .hs-slide .hs-obj-tx ol { list-style: decimal; }
 .hs-slide .hs-obj-tx ol ol { list-style: lower-alpha; }
 .hs-slide .hs-obj-tx li::marker { color: currentColor; }
-.hs-obj-tx [data-indent="1"] { margin-left: 1.5em; } .hs-obj-tx [data-indent="2"] { margin-left: 3em; } .hs-obj-tx [data-indent="3"] { margin-left: 4.5em; } .hs-obj-tx [data-indent="4"] { margin-left: 6em; }
+.hs-slide .hs-obj-tx p[data-bullet] { padding-left: 1.15em; text-indent: -1.15em; }
+.hs-slide .hs-obj-tx p[data-bullet]::before { content: attr(data-bullet); display: inline-block; min-width: 1.15em; text-indent: 0; }
+.hs-slide .hs-obj-tx [data-indent="1"] { margin-left: 1.5em; } .hs-slide .hs-obj-tx [data-indent="2"] { margin-left: 3em; } .hs-slide .hs-obj-tx [data-indent="3"] { margin-left: 4.5em; } .hs-slide .hs-obj-tx [data-indent="4"] { margin-left: 6em; }
 .hs-obj-tx b { font-weight: 700; }
 .hs-obj-tx a { color: inherit; text-decoration: underline; }
 .hs-obj-img { position: absolute; inset: 0; overflow: hidden; }
@@ -118,6 +120,8 @@
 .hs-obj-chart > .hs-chart-wrap { flex: 1; min-height: 0; }
 .hs-obj-chart .hs-chart { flex: 1; min-height: 0; }
 .hs-obj-chart .hs-chart svg { width: 100%; height: 100%; }
+.hs-obj-chart.is-office > svg { width: 100%; height: 100%; display: block; overflow: visible; font-family: var(--font-body); }
+.hs-ochart text { white-space: pre; }
 
 /* animations (animate.js): what waits for its entrance is hidden; words and letters animated one by one */
 .hs-anim-hide { visibility: hidden; }

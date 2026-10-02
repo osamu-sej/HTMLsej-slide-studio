@@ -1035,6 +1035,9 @@
     if (ALIGN.has(align)) el.setAttribute("style", `text-align: ${align}`);
     const indent = Number(src.getAttribute?.("data-indent"));
     if (Number.isInteger(indent) && indent > 0) el.setAttribute("data-indent", String(Math.min(indent, 4)));
+    // A paragraph's own bullet or number ("■", "①", "1."), as PowerPoint draws it (a hanging mark).
+    const bullet = String(src.getAttribute?.("data-bullet") || "");
+    if (bullet.trim() && /^[^<>"&\s]{1,4}$/u.test(bullet) && el.tagName !== "LI") el.setAttribute("data-bullet", bullet);
   }
 
   function cleanList(src, doc, depth) {
@@ -1166,7 +1169,7 @@
   const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", lottie: "アニメーション", table: "表", chart: "グラフ" };
   // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
   const TABLE_STYLES = { sej: "罫線（SEJ）", rows: "淡い横線", grid: "格子", lines: "横線だけ", plain: "線なし", brown: "淡茶の見出し" };
-  const CHART_KINDS = { bar: "縦棒", "stacked-bar": "積み上げ縦棒", "100-stacked-bar": "100%積み上げ縦棒", line: "折れ線", "multi-line": "折れ線（複数）", donut: "ドーナツ", combo: "複合（棒と折れ線）" };
+  const CHART_KINDS = { bar: "縦棒", "clustered-bar": "集合縦棒", "stacked-bar": "積み上げ縦棒", "100-stacked-bar": "100%積み上げ縦棒", line: "折れ線", "multi-line": "折れ線（複数）", donut: "ドーナツ", combo: "複合（棒と折れ線）" };
   const DASHES = {
     solid: ["実線", null], roundDot: ["丸点線", [0, 2]], squareDot: ["角点線", [1, 1]], dash: ["破線", [4, 3]], dashDot: ["一点鎖線", [4, 3, 1, 3]],
     longDash: ["長破線", [8, 3]], longDashDot: ["長鎖線", [8, 3, 1, 3]], longDashDotDot: ["長二点鎖線", [8, 3, 1, 3, 1, 3]],
@@ -1357,6 +1360,12 @@
       const cs = Math.round(Number(src.cs) || 1);
       if (rs > 1) cell.rs = rs;
       if (cs > 1) cell.cs = cs;
+      // Borders a cell draws itself (a table brought over from PowerPoint): { c: colour, w: width } or "none".
+      for (const side of ["bt", "br", "bb", "bl"]) {
+        const b = src[side];
+        if (b === "none") cell[side] = "none";
+        else if (b && typeof b === "object" && hexColor(b.c)) cell[side] = { c: hexColor(b.c), w: num(b.w, 0.5, 24, 1) };
+      }
       return cell;
     }));
     // Merged cells: a span stays inside the table, the cells it covers are marked, and spans never overlap.
@@ -1377,18 +1386,591 @@
     for (const key of ["header", "banded", "firstCol", "lastRow"]) if (typeof raw[key] === "boolean") out[key] = raw[key];
     return out;
   }
+  // As many categories and series as a PowerPoint chart brought over may carry.
+  const CHART_MAX_LABELS = 60;
+  const CHART_MAX_SERIES = 12;
   /** A chart's kind, category labels and series (numbers), title and unit. */
   function normalizeChart(raw) {
     if (!raw || typeof raw !== "object") return null;
-    const labels = (Array.isArray(raw.labels) ? raw.labels : []).slice(0, 24).map((label) => String(label ?? "").trim().slice(0, 40));
-    const series = (Array.isArray(raw.series) ? raw.series : []).filter((s) => s && typeof s === "object").slice(0, 8).map((s, i) => ({
+    const labels = (Array.isArray(raw.labels) ? raw.labels : []).slice(0, CHART_MAX_LABELS).map((label) => String(label ?? "").trim().slice(0, 40));
+    const series = (Array.isArray(raw.series) ? raw.series : []).filter((s) => s && typeof s === "object").slice(0, CHART_MAX_SERIES).map((s, i) => ({
       name: String(s.name ?? "").trim().slice(0, 40) || `系列${i + 1}`,
       values: labels.map((_, j) => { const v = Number(Array.isArray(s.values) ? s.values[j] : NaN); return Number.isFinite(v) ? Math.round(clamp(v, -1e12, 1e12) * 10000) / 10000 : 0; }),
     }));
     if (!labels.length || !series.length) return null;
     const out = { type: CHART_KINDS[raw.type] ? raw.type : "bar", labels, series };
     for (const key of ["title", "unit"]) if (typeof raw[key] === "string" && raw[key].trim()) out[key] = raw[key].trim().slice(0, key === "unit" ? 10 : 80);
+    const style = normalizeChartStyle(raw.style);
+    if (style) out.style = style;
     return out;
+  }
+
+  // ---------------------------------------------------------------- charts as PowerPoint draws them
+  // A chart brought over from PowerPoint keeps its formatting in `chart.style`: the colour of each series and
+  // point, gap width and overlap, line widths and markers, data labels (number format, position, font, custom
+  // text), axes (labels, lines, scale, gridlines, reversed order), the legend and the plot area. Such a chart is
+  // drawn the way PowerPoint draws it rather than with the layouts' look. Sizes are slide pixels.
+
+  const LABEL_POS = new Set(["outEnd", "inEnd", "ctr", "inBase", "t", "b", "l", "r", "bestFit"]);
+  const MARKERS = new Set(["none", "circle", "square", "diamond", "triangle", "dash", "dot", "x", "plus", "star"]);
+  const SERIES_KINDS = new Set(["bar", "line", "area"]);
+
+  function normalizeChartStyle(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const font = (f) => {
+      if (!f || typeof f !== "object") return null;
+      const out = {};
+      const size = num(f.size, 6, 200);
+      if (size != null) out.size = size;
+      if (typeof f.bold === "boolean") out.bold = f.bold;
+      if (f.italic === true) out.italic = true;
+      const color = hexColor(f.color);
+      if (color) out.color = color;
+      return Object.keys(out).length ? out : null;
+    };
+    const lineColor = (v) => (v === "none" ? "none" : hexColor(v));
+    const fmt = (v) => (typeof v === "string" && v.trim() ? v.slice(0, 60) : null);
+    const label = (l) => {
+      if (!l || typeof l !== "object") return null;
+      const out = {};
+      for (const key of ["val", "pct", "cat", "ser"]) if (l[key] === true) out[key] = true;
+      if (l.show === false) out.show = false;
+      if (LABEL_POS.has(l.pos)) out.pos = l.pos;
+      if (fmt(l.format)) out.format = fmt(l.format);
+      const f = font(l.font);
+      if (f) out.font = f;
+      if (Array.isArray(l.runs)) {
+        const runs = l.runs.filter((r) => r && typeof r.t === "string").slice(0, 8).map((r) => ({ t: r.t.slice(0, 80), ...(font(r.font) ? { font: font(r.font) } : {}) }));
+        if (runs.length) out.runs = runs;
+      }
+      return Object.keys(out).length ? out : null;
+    };
+    const st = {};
+    if (CHART_KINDS[raw.type]) st.type = raw.type;
+    if (raw.dir === "bar" || raw.dir === "col") st.dir = raw.dir;
+    if (raw.stack === "stacked" || raw.stack === "percent") st.stack = raw.stack;
+    const gap = num(raw.gap, 0, 500);
+    if (gap != null) st.gap = gap;
+    const overlap = num(raw.overlap, -100, 100);
+    if (overlap != null) st.overlap = overlap;
+    const hole = num(raw.hole, 0, 90);
+    if (hole != null) st.hole = hole;
+    const angle = num(raw.angle, 0, 360);
+    if (angle != null) st.angle = angle;
+    for (const key of ["font", "title"]) { const f = font(raw[key]); if (f) st[key] = f; }
+    if (raw.legend && typeof raw.legend === "object" && ["b", "t", "r", "l", "tr"].includes(raw.legend.pos)) {
+      st.legend = { pos: raw.legend.pos, ...(font(raw.legend.font) ? { font: font(raw.legend.font) } : {}) };
+    }
+    for (const key of ["cat", "val"]) {
+      const a = raw[key];
+      if (!a || typeof a !== "object") continue;
+      const out = {};
+      if (a.hide === true) out.hide = true;
+      if (a.reverse === true) out.reverse = true;
+      if (a.edge === true) out.edge = true;
+      const f = font(a.font);
+      if (f) out.font = f;
+      const line = lineColor(a.line);
+      if (line) out.line = line;
+      const grid = lineColor(a.grid);
+      if (grid) out.grid = grid;
+      for (const k of ["min", "max", "step"]) { const v = num(a[k], -1e12, 1e12); if (v != null) out[k] = v; }
+      if (out.step != null && out.step <= 0) delete out.step;
+      if (fmt(a.format)) out.format = fmt(a.format);
+      if (Object.keys(out).length) st[key] = out;
+    }
+    if (raw.plot && typeof raw.plot === "object") {
+      const p = { x: num(raw.plot.x, 0, 1), y: num(raw.plot.y, 0, 1), w: num(raw.plot.w, 0.05, 1), h: num(raw.plot.h, 0.05, 1) };
+      if (Object.values(p).every((v) => v != null)) st.plot = { ...p, ...(raw.plot.outer === true ? { outer: true } : {}) };
+    }
+    if (Array.isArray(raw.series)) {
+      st.series = raw.series.slice(0, CHART_MAX_SERIES).map((sr) => {
+        if (!sr || typeof sr !== "object") return {};
+        const out = {};
+        if (SERIES_KINDS.has(sr.kind)) out.kind = sr.kind;
+        const color = hexColor(sr.color);
+        if (color) out.color = color;
+        const width = num(sr.width, 0, 60);
+        if (width != null) out.width = width;
+        if (DASHES[sr.dash] && sr.dash !== "solid") out.dash = sr.dash;
+        if (sr.smooth === true) out.smooth = true;
+        if (sr.marker && typeof sr.marker === "object") {
+          const m = { s: MARKERS.has(sr.marker.s) ? sr.marker.s : "none" };
+          const z = num(sr.marker.z, 2, 80);
+          if (z != null) m.z = z;
+          const mc = hexColor(sr.marker.color);
+          if (mc) m.color = mc;
+          if (Array.isArray(sr.marker.at)) m.at = sr.marker.at.map(Number).filter((i) => Number.isInteger(i) && i >= 0 && i < CHART_MAX_LABELS).slice(0, CHART_MAX_LABELS);
+          out.marker = m;
+        }
+        if (Array.isArray(sr.points)) {
+          const pts = sr.points.filter((p) => p && Number.isInteger(p.i) && p.i >= 0 && p.i < CHART_MAX_LABELS && hexColor(p.color)).slice(0, CHART_MAX_LABELS).map((p) => ({ i: p.i, color: hexColor(p.color) }));
+          if (pts.length) out.points = pts;
+        }
+        const l = label(sr.label);
+        if (l) out.label = l;
+        if (Array.isArray(sr.pointLabels)) {
+          const pls = sr.pointLabels.filter((p) => p && Number.isInteger(p.i) && p.i >= 0 && p.i < CHART_MAX_LABELS).slice(0, CHART_MAX_LABELS).map((p) => ({ i: p.i, ...(label(p) || {}) }));
+          if (pls.length) out.pointLabels = pls;
+        }
+        return out;
+      });
+    }
+    return Object.keys(st).length ? st : null;
+  }
+
+  /** A number in an Excel number format: 0, 0.0, #,##0, 0%, 0.0%, 0"%", "¥"#,##0, [Red] and ; sections, General. */
+  function numFormat(value, code) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return String(value ?? "");
+    const general = (v) => {
+      const a = Math.abs(v);
+      if (a !== 0 && (a >= 1e11 || a < 1e-9)) return v.toExponential(4).replace(/\.?0+e/, "E");
+      return String(Math.round(v * 1e9) / 1e9);
+    };
+    if (!code || /^general$/i.test(code.trim())) return general(n);
+    const sections = [];
+    let cur = "";
+    let quoted = false;
+    for (const ch of code) {
+      if (ch === '"') quoted = !quoted;
+      if (ch === ";" && !quoted) { sections.push(cur); cur = ""; } else cur += ch;
+    }
+    sections.push(cur);
+    let section = sections[0];
+    let neg = n < 0;
+    if (n < 0 && sections.length > 1) { section = sections[1]; neg = false; } else if (n === 0 && sections.length > 2) section = sections[2];
+    if (/^general$/i.test(section.trim())) return (neg ? "-" : "") + general(Math.abs(n));
+    // Split into literal text and the one numeric placeholder block.
+    const parts = [];
+    let block = null;
+    let percent = 0;
+    for (let i = 0; i < section.length; i += 1) {
+      const ch = section[i];
+      if (ch === '"') { const end = section.indexOf('"', i + 1); parts.push({ t: section.slice(i + 1, end < 0 ? undefined : end) }); i = end < 0 ? section.length : end; continue; }
+      if (ch === "\\" && i + 1 < section.length) { parts.push({ t: section[i + 1] }); i += 1; continue; }
+      if (ch === "[") { const end = section.indexOf("]", i); i = end < 0 ? section.length : end; continue; }
+      if (ch === "_" || ch === "*") { i += 1; if (ch === "_") parts.push({ t: " " }); continue; }
+      if ("0#?,.".includes(ch) && (block === null || parts.at(-1) === block)) {
+        if (block === null) { block = { num: "" }; parts.push(block); }
+        block.num += ch;
+        continue;
+      }
+      if (ch === "%") percent += 1;
+      if (/[eE]/.test(ch) && block) return (neg ? "-" : "") + general(Math.abs(n));
+      parts.push({ t: ch });
+    }
+    let v = Math.abs(n) * 100 ** percent;
+    if (!block) return (neg ? "-" : "") + parts.map((p) => p.t ?? "").join("");
+    const [intPart, decPart = ""] = block.num.split(".");
+    const scale = (/,+$/.exec(intPart) || [""])[0].length;
+    v /= 1000 ** scale;
+    const minDec = (decPart.match(/0/g) || []).length;
+    const maxDec = (decPart.match(/[0#?]/g) || []).length;
+    const grouping = intPart.replace(/,+$/, "").includes(",");
+    const minInt = Math.max(1, (intPart.match(/0/g) || []).length);
+    let text = v.toLocaleString("en-US", { minimumIntegerDigits: Math.min(21, minInt), minimumFractionDigits: minDec, maximumFractionDigits: maxDec, useGrouping: grouping });
+    if (!/0/.test(intPart) && text.startsWith("0") && v < 1 && maxDec) text = text.slice(1);
+    block.t = text;
+    return (neg && Math.round(v * 10 ** maxDec) !== 0 ? "-" : "") + parts.map((p) => p.t ?? "").join("");
+  }
+
+  /** About how wide a text is drawn (CJK full width, Latin about half). */
+  function textWidth(text, size) {
+    let w = 0;
+    for (const ch of String(text)) {
+      const c = ch.codePointAt(0);
+      w += c < 0x2e80 ? (/[ilIjt.,:;'|!()[\]\s]/.test(ch) ? 0.32 : /[mwMW%@]/.test(ch) ? 0.86 : /[A-Z0-9#$&]/.test(ch) ? 0.62 : 0.54) : c >= 0xff61 && c <= 0xff9f ? 0.5 : 1;
+    }
+    return w * size;
+  }
+
+  /** A label broken into lines no wider than `width` (at most `max` lines). */
+  function wrapText(text, size, width, max = 3) {
+    const out = [];
+    let line = "";
+    for (const ch of String(text)) {
+      if (line && textWidth(line + ch, size) > width) {
+        out.push(line);
+        line = ch.trim() ? ch : "";
+        if (out.length === max - 1) { line += [...String(text)].slice([...out.join("")].length + 1).join(""); break; }
+      } else line += ch;
+    }
+    if (line) out.push(line);
+    if (out.length === max && textWidth(out.at(-1), size) > width) {
+      let last = out.at(-1);
+      while (last.length > 1 && textWidth(`${last}…`, size) > width) last = last.slice(0, -1);
+      out[out.length - 1] = `${last}…`;
+    }
+    return out;
+  }
+
+  /** The value axis PowerPoint picks: 5% headroom, then the smallest round step (1, 2, 5 × 10ⁿ) that gives at most
+   *  ten divisions (fewer on a short axis); zero stays in unless the values sit far from it. */
+  function valueScale(lo, hi, opt = {}) {
+    const fixedMin = opt.min != null;
+    const fixedMax = opt.max != null;
+    let min = fixedMin ? opt.min : lo >= 0 ? (hi > 0 && (hi - lo) / hi < 1 / 6 ? lo : 0) : lo;
+    let max = fixedMax ? opt.max : hi <= 0 && lo < 0 ? 0 : hi;
+    if (!fixedMax && max > 0) max += (max - Math.min(min, max)) * 0.05;
+    if (!fixedMin && min < 0) min -= (max - min) * 0.05;
+    if (max <= min) max = min + 1;
+    const most = Math.max(2, Math.min(10, Math.floor(opt.divisions || 10)));
+    let step = opt.step;
+    if (!step) {
+      const range = max - min;
+      const exp = 10 ** Math.floor(Math.log10(range / most));
+      step = [1, 2, 5, 10, 20].map((m) => m * exp).find((v) => range / v <= most + 1e-9) || 10 * exp;
+    }
+    if (!fixedMin) min = Math.floor(min / step + 1e-9) * step;
+    if (!fixedMax) max = Math.max(min + step, Math.ceil(max / step - 1e-9) * step);
+    return { min, max, step };
+  }
+
+  /** The chart a PowerPoint deck carried, drawn in SVG with its own formatting (chart.style). */
+  function officeChart(c, W0, H0) {
+    const st = c.style || {};
+    const W = Math.max(60, W0);
+    const H = Math.max(40, H0);
+    const svg = s("svg", { class: "hs-ochart", viewBox: `0 0 ${r2(W)} ${r2(H)}`, preserveAspectRatio: "none", role: "img", "aria-label": c.title || "グラフ" });
+    const base = { size: 24, color: "#595959", ...(st.font || {}) };
+    const fontOf = (...fs) => Object.assign({}, base, ...fs.filter(Boolean));
+    const textEl = (x, y, str, f, anchor = "start", extra = {}) => s("text", { x: r2(x), y: r2(y), "text-anchor": anchor, fill: f.color, style: { "font-size": `${f.size}px`, "font-weight": f.bold ? 700 : 400, "font-style": f.italic ? "italic" : null }, ...extra }, str);
+    const sameType = !st.type || st.type === c.type;
+    const sts = (i) => (sameType ? st.series?.[i] : { color: st.series?.[i]?.color }) || {};
+    const palette = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)"];
+    const colorOf = (i) => sts(i).color || palette[i % palette.length];
+    const pointColor = (si, i) => sts(si).points?.find((p) => p.i === i)?.color || colorOf(si);
+    const isPie = c.type === "donut";
+    const baseKind = /line/.test(c.type) ? "line" : "bar";
+    const kindOf = (i) => sts(i).kind || (c.type === "combo" ? (i === 0 ? "bar" : "line") : baseKind);
+    const stack = sameType && st.stack ? st.stack : c.type === "100-stacked-bar" ? "percent" : c.type === "stacked-bar" ? "stacked" : null;
+    const horizontal = sameType && st.dir === "bar";
+    const n = c.labels.length;
+    const pad = 10;
+    let box = { x: pad, y: pad, w: W - pad * 2, h: H - pad * 2 };
+    // Title
+    if (c.title) {
+      const f = fontOf({ size: Math.round(base.size * 1.2), bold: true }, st.title);
+      svg.append(textEl(W / 2, box.y + f.size, c.title, f, "middle", { class: "hs-ochart-title" }));
+      box = { ...box, y: box.y + f.size * 1.5, h: box.h - f.size * 1.5 };
+    }
+    // Legend
+    const legendItems = isPie ? c.labels.map((label, i) => ({ label, color: pointColor(0, i), kind: "bar" })) : c.series.map((sr, i) => ({ label: sr.name, color: colorOf(i), kind: kindOf(i), i }));
+    if (st.legend && legendItems.length) {
+      const f = fontOf(st.legend.font);
+      const sw = f.size * 0.75;
+      const itemW = (it) => sw + f.size * 0.4 + textWidth(it.label, f.size) + f.size * 1.1;
+      const g = s("g", { class: "hs-ochart-legend" });
+      const drawItem = (it, x, y) => {
+        if (it.kind === "line") {
+          g.append(s("line", { x1: r2(x), x2: r2(x + sw * 1.6), y1: r2(y), y2: r2(y), stroke: it.color, "stroke-width": Math.max(2, sts(it.i).width || 3) }));
+          x += sw * 0.6;
+        } else g.append(s("rect", { x: r2(x), y: r2(y - sw / 2), width: r2(sw), height: r2(sw), fill: it.color }));
+        g.append(textEl(x + sw + f.size * 0.4, y + f.size * 0.36, it.label, f));
+      };
+      const pos = st.legend.pos;
+      if (pos === "b" || pos === "t") {
+        const rows = [[]];
+        let rowW = 0;
+        for (const it of legendItems) {
+          const w = itemW(it);
+          if (rowW + w > box.w && rows.at(-1).length) { rows.push([]); rowW = 0; }
+          rows.at(-1).push(it);
+          rowW += w;
+        }
+        const lh = f.size * 1.5;
+        const y0 = pos === "b" ? box.y + box.h - lh * rows.length + lh / 2 : box.y + lh / 2;
+        rows.forEach((row, ri) => {
+          const total = row.reduce((sum, it) => sum + itemW(it), 0) - f.size * 1.1;
+          let x = box.x + (box.w - total) / 2;
+          for (const it of row) { drawItem(it, x, y0 + ri * lh); x += itemW(it); }
+        });
+        box = pos === "b" ? { ...box, h: box.h - lh * rows.length - 4 } : { ...box, y: box.y + lh * rows.length + 4, h: box.h - lh * rows.length - 4 };
+      } else {
+        const lw = Math.min(box.w * 0.4, Math.max(...legendItems.map(itemW)));
+        const lh = f.size * 1.45;
+        const total = lh * legendItems.length;
+        const x0 = pos === "l" ? box.x : box.x + box.w - lw;
+        const y0 = pos === "tr" ? box.y + lh / 2 : box.y + (box.h - total) / 2 + lh / 2;
+        legendItems.forEach((it, i) => drawItem(it, x0, y0 + i * lh));
+        box = pos === "l" ? { ...box, x: box.x + lw + 8, w: box.w - lw - 8 } : { ...box, w: box.w - lw - 8 };
+      }
+      svg.append(g);
+    }
+    const manual = st.plot ? { x: st.plot.x * W, y: st.plot.y * H, w: st.plot.w * W, h: st.plot.h * H } : null;
+    if (isPie) {
+      pieChart(svg, c, manual || box, { st, sts, pointColor, fontOf, textEl });
+      return svg;
+    }
+    // Values and the value axis
+    const valuesOf = (si) => c.series[si].values;
+    const barIdx = c.series.map((_, i) => i).filter((i) => kindOf(i) === "bar");
+    const lineIdx = c.series.map((_, i) => i).filter((i) => kindOf(i) !== "bar");
+    const totals = c.labels.map((_, i) => {
+      let pos = 0, neg = 0;
+      for (const si of barIdx) { const v = valuesOf(si)[i] || 0; if (v >= 0) pos += v; else neg += v; }
+      return { pos, neg };
+    });
+    const shown = (si, i) => {
+      const v = valuesOf(si)[i] || 0;
+      if (stack === "percent" && kindOf(si) === "bar") { const t = totals[i].pos - totals[i].neg; return t ? (v / t) * 100 : 0; }
+      return v;
+    };
+    let lo = 0, hi = 0;
+    const consider = (v) => { lo = Math.min(lo, v); hi = Math.max(hi, v); };
+    let first = true;
+    const take = (v) => { if (first) { lo = v; hi = v; first = false; } else consider(v); };
+    if (stack && barIdx.length) for (const t of totals) { if (stack === "percent") { take(t.neg ? -100 : 0); take(t.pos ? 100 : 0); } else { take(t.pos); take(t.neg); } }
+    else for (const si of barIdx) valuesOf(si).forEach((v) => take(v));
+    for (const si of lineIdx) valuesOf(si).forEach((v) => take(v));
+    if (first) { lo = 0; hi = 1; }
+    if (barIdx.length) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+    const va = st.val || {};
+    const ca = st.cat || {};
+    const valAxisLen = horizontal ? (manual || box).w * 0.7 : (manual || box).h * 0.8;
+    const percentAxis = stack === "percent" && !lineIdx.length;
+    const scale = valueScale(lo, hi, { min: va.min ?? (percentAxis && lo >= 0 ? 0 : undefined), max: va.max ?? (percentAxis ? (hi > 0 ? 100 : 0) : undefined), step: va.step, divisions: valAxisLen / (fontOf(va.font).size * 1.6) });
+    // A 100% stacked chart's axis runs from 0 to 1 in Excel (shown as 0%–100%); ours from 0 to 100.
+    const tickText = (v) => (percentAxis ? numFormat(v / 100, va.format || "0%") : numFormat(v, va.format));
+    const ticks = [];
+    for (let v = scale.min, k = 0; v <= scale.max + scale.step * 1e-6 && k < 60; v += scale.step, k += 1) ticks.push(Math.round(v / scale.step) * scale.step);
+    const valFont = fontOf(va.font);
+    const catFont = fontOf(ca.font);
+    // The plot area: as the chart placed it, or what is left after the axis labels.
+    let plot;
+    let labelLeft = (manual || box).x;
+    if (manual && !st.plot.outer) plot = manual;
+    else {
+      const area = manual || box;
+      labelLeft = area.x;
+      const valLabelW = va.hide ? 0 : Math.max(...ticks.map((v) => textWidth(tickText(v), valFont.size))) + 10;
+      if (horizontal) {
+        const catW = ca.hide ? 0 : Math.min(area.w * 0.5, Math.max(...c.labels.map((l) => textWidth(l, catFont.size)), 0) + 12);
+        const valH = va.hide ? 0 : valFont.size * 1.5;
+        plot = { x: area.x + catW, y: area.y + (va.hide ? 0 : 0), w: area.w - catW - (va.hide ? 0 : valFont.size), h: area.h - valH };
+      } else {
+        const slotW = (area.w - valLabelW) / Math.max(1, n);
+        const lines = ca.hide ? 0 : Math.max(1, ...c.labels.map((l) => wrapText(l, catFont.size, slotW * 0.92).length));
+        plot = { x: area.x + valLabelW, y: area.y + (va.hide ? 4 : valFont.size * 0.6), w: area.w - valLabelW - 6, h: area.h - lines * catFont.size * 1.25 - 8 - (va.hide ? 4 : valFont.size * 0.6) };
+      }
+    }
+    plot.w = Math.max(10, plot.w);
+    plot.h = Math.max(10, plot.h);
+    // Positions along the value axis and the category axis
+    const valLen = horizontal ? plot.w : plot.h;
+    const vPos = (v) => {
+      const t = (clamp(v, scale.min, scale.max) - scale.min) / (scale.max - scale.min || 1);
+      return horizontal ? plot.x + t * valLen : plot.y + plot.h - t * valLen;
+    };
+    const edge = sameType && ca.edge && !barIdx.length;
+    const slot = (horizontal ? plot.h : plot.w) / Math.max(1, edge ? n - 1 || 1 : n);
+    // Category i's centre along its axis; PowerPoint draws a bar chart's first category at the bottom.
+    const order = (i) => (horizontal ? (ca.reverse ? i : n - 1 - i) : ca.reverse ? n - 1 - i : i);
+    const cPos = (i) => (horizontal ? plot.y : plot.x) + (edge ? order(i) * slot : (order(i) + 0.5) * slot);
+    const zero = vPos(clamp(0, scale.min, scale.max));
+    // Gridlines and axis lines
+    const grid = s("g", { class: "hs-ochart-grid" });
+    if (va.grid && va.grid !== "none") {
+      for (const v of ticks) {
+        const p = vPos(v);
+        grid.append(horizontal ? s("line", { x1: r2(p), x2: r2(p), y1: r2(plot.y), y2: r2(plot.y + plot.h), stroke: va.grid, "stroke-width": 1.5 }) : s("line", { x1: r2(plot.x), x2: r2(plot.x + plot.w), y1: r2(p), y2: r2(p), stroke: va.grid, "stroke-width": 1.5 }));
+      }
+    }
+    svg.append(grid);
+    if (!va.hide) {
+      const g = s("g", { class: "hs-ochart-vaxis" });
+      const valAtTop = horizontal && ca.reverse;
+      for (const v of ticks) {
+        const p = vPos(v);
+        if (horizontal) g.append(textEl(p, valAtTop ? plot.y - valFont.size * 0.5 : plot.y + plot.h + valFont.size * 1.15, tickText(v), valFont, "middle"));
+        else g.append(textEl(plot.x - 8, p + valFont.size * 0.35, tickText(v), valFont, "end"));
+      }
+      if (va.line && va.line !== "none") g.append(horizontal ? s("line", { x1: r2(plot.x), x2: r2(plot.x + plot.w), y1: r2(valAtTop ? plot.y : plot.y + plot.h), y2: r2(valAtTop ? plot.y : plot.y + plot.h), stroke: va.line, "stroke-width": 1.5 }) : s("line", { x1: r2(plot.x), x2: r2(plot.x), y1: r2(plot.y), y2: r2(plot.y + plot.h), stroke: va.line, "stroke-width": 1.5 }));
+      svg.append(g);
+    }
+    // Bars
+    const gap = (sameType ? st.gap : null) ?? 150;
+    const overlap = stack ? 100 : (sameType ? st.overlap : null) ?? 0;
+    const k = stack ? 1 : Math.max(1, barIdx.length);
+    const groupW = slot / (1 + gap / 100);
+    const bw = groupW / (k - ((k - 1) * overlap) / 100);
+    const labelsLayer = s("g", { class: "hs-ochart-labels" });
+    const labelFor = (si, i, value, where) => {
+      const ss = sts(si);
+      const own = ss.pointLabels?.find((p) => p.i === i);
+      const l = { ...(ss.label || {}), ...(own || {}) };
+      if (own && own.show === false) return;
+      if (!own && (!ss.label || ss.label.show === false)) return;
+      if (!l.runs && !l.val && !l.cat && !l.ser && !l.pct) return;
+      const f = fontOf(ss.label?.font, own?.font);
+      const parts = l.runs ? null : [l.ser ? c.series[si].name : "", l.cat ? c.labels[i] : "", l.val ? numFormat(value, l.format) : ""].filter(Boolean);
+      const text = l.runs ? l.runs.map((r) => r.t).join("") : parts.join(", ");
+      const width = textWidth(text, Math.max(f.size, ...(l.runs || []).map((r) => r.font?.size || 0)));
+      const { x, y, anchor } = where(l.pos, width, f);
+      const el = textEl(x, y, l.runs ? "" : text, f, anchor);
+      if (l.runs) for (const r of l.runs) { const rf = fontOf(r.font); el.append(s("tspan", { fill: rf.color, style: { "font-size": `${rf.size}px`, "font-weight": rf.bold ? 700 : 400 } }, r.t)); }
+      labelsLayer.append(el);
+    };
+    const bars = s("g", { class: "hs-ochart-bars" });
+    const stackBase = c.labels.map(() => ({ pos: 0, neg: 0 }));
+    barIdx.forEach((si, bi) => {
+      c.labels.forEach((label, i) => {
+        const raw = valuesOf(si)[i] || 0;
+        const v = shown(si, i);
+        let from = 0, to = v;
+        if (stack) {
+          const b = stackBase[i];
+          if (v >= 0) { from = b.pos; to = b.pos + v; b.pos = to; } else { from = b.neg; to = b.neg + v; b.neg = to; }
+        }
+        const p0 = vPos(from), p1 = vPos(to);
+        const off = (slot - groupW) / 2 + (stack ? 0 : bi * bw * (1 - overlap / 100));
+        const start = (horizontal ? plot.y : plot.x) + order(i) * slot + off;
+        const color = pointColor(si, i);
+        const rect = horizontal
+          ? { x: Math.min(p0, p1), y: start, width: Math.abs(p1 - p0), height: bw }
+          : { x: start, y: Math.min(p0, p1), width: bw, height: Math.abs(p1 - p0) };
+        bars.append(s("rect", { class: `hs-obar${horizontal ? " h" : ""}`, x: r2(rect.x), y: r2(rect.y), width: r2(Math.max(0, rect.width)), height: r2(Math.max(0, rect.height)), fill: color, "data-paint": color.startsWith("#") ? color : null, "data-tip": `${label}・${c.series[si].name}：${numFormat(raw, sts(si).label?.format)}`, style: { "--i": String(i) } }));
+        labelFor(si, i, raw, (pos, width, f) => {
+          const where = pos || (stack ? "ctr" : "outEnd");
+          const up = to >= from;
+          const mid = start + bw / 2;
+          if (horizontal) {
+            const end = vPos(to), begin = vPos(from);
+            const dir = up ? 1 : -1;
+            const x = where === "inEnd" ? end - dir * 6 : where === "ctr" ? (end + begin) / 2 : where === "inBase" ? begin + dir * 6 : end + dir * 6;
+            const anchor = where === "ctr" ? "middle" : (where === "inEnd") === up ? "end" : "start";
+            return { x, y: mid + f.size * 0.35, anchor };
+          }
+          const end = vPos(to), begin = vPos(from);
+          const dir = up ? -1 : 1;
+          const y = where === "inEnd" ? end - dir * (f.size * 1.0) : where === "ctr" ? (end + begin) / 2 + f.size * 0.35 : where === "inBase" ? begin + dir * 6 + (up ? 0 : f.size) : end + dir * 6 + (up ? 0 : f.size * 0.8);
+          return { x: mid, y, anchor: "middle" };
+        });
+      });
+    });
+    svg.append(bars);
+    // Lines and areas
+    const lines = s("g", { class: "hs-ochart-lines" });
+    for (const si of lineIdx) {
+      const ss = sts(si);
+      const color = colorOf(si);
+      const pts = c.labels.map((_, i) => [cPos(i), vPos(valuesOf(si)[i] || 0)]).map(([a, b]) => (horizontal ? [b, a] : [a, b]));
+      if (!pts.length) continue;
+      const d = ss.smooth ? smoothPath(pts) : `M${pts.map((p) => P(p[0], p[1])).join(" L")}`;
+      if (kindOf(si) === "area") {
+        const zx = horizontal ? zero : null;
+        const close = horizontal ? ` L${P(zx, pts.at(-1)[1])} L${P(zx, pts[0][1])} Z` : ` L${P(pts.at(-1)[0], zero)} L${P(pts[0][0], zero)} Z`;
+        lines.append(s("path", { class: "hs-oarea", d: d + close, fill: color, "data-paint": color.startsWith("#") ? color : null }));
+      } else {
+        const width = ss.width ?? 4.5;
+        const dash = DASHES[ss.dash]?.[1];
+        lines.append(s("path", { class: "hs-oline", d, fill: "none", stroke: color, "stroke-width": r2(width), "stroke-linejoin": "round", "stroke-linecap": "round", "stroke-dasharray": dash ? dash.map((v) => r2(v * width)).join(" ") : null, "data-paint": color.startsWith("#") ? color : null }));
+      }
+      const m = ss.marker || (c.type === "combo" || kindOf(si) === "area" ? { s: "none" } : { s: "circle", z: 10 });
+      pts.forEach(([x, y], i) => {
+        const on = m.s !== "none" || m.at?.includes(i);
+        if (on) lines.append(marker(m.s === "none" ? "circle" : m.s, x, y, m.z || 10, m.color || color, `${c.labels[i]}・${c.series[si].name}：${numFormat(valuesOf(si)[i] || 0, ss.label?.format)}`));
+        labelFor(si, i, valuesOf(si)[i] || 0, (pos, width, f) => {
+          const where = pos || "r";
+          const r = (m.z || 10) / 2 + 6;
+          if (where === "l") return { x: x - r, y: y + f.size * 0.35, anchor: "end" };
+          if (where === "t") return { x, y: y - r, anchor: "middle" };
+          if (where === "b") return { x, y: y + r + f.size * 0.8, anchor: "middle" };
+          if (where === "ctr") return { x, y: y + f.size * 0.35, anchor: "middle" };
+          return { x: x + r, y: y + f.size * 0.35, anchor: "start" };
+        });
+      });
+    }
+    svg.append(lines);
+    // The category axis
+    if (!ca.hide) {
+      const g = s("g", { class: "hs-ochart-caxis" });
+      const line = ca.line || "#d9d9d9";
+      if (line !== "none") g.append(horizontal ? s("line", { x1: r2(zero), x2: r2(zero), y1: r2(plot.y), y2: r2(plot.y + plot.h), stroke: line, "stroke-width": 1.5 }) : s("line", { x1: r2(plot.x), x2: r2(plot.x + plot.w), y1: r2(zero), y2: r2(zero), stroke: line, "stroke-width": 1.5 }));
+      c.labels.forEach((label, i) => {
+        const p = cPos(i);
+        if (horizontal) {
+          const rows = wrapText(label, catFont.size, Math.max(40, plot.x - labelLeft - 8), 2);
+          rows.forEach((row, ri) => g.append(textEl(plot.x - 8, p + catFont.size * 0.35 + (ri - (rows.length - 1) / 2) * catFont.size * 1.2, row, catFont, "end")));
+        } else {
+          const rows = wrapText(label, catFont.size, slot * 0.92, 3);
+          rows.forEach((row, ri) => g.append(textEl(p, plot.y + plot.h + catFont.size * 1.15 + ri * catFont.size * 1.2, row, catFont, "middle")));
+        }
+      });
+      svg.append(g);
+    } else if (ca.line && ca.line !== "none") {
+      svg.append(horizontal ? s("line", { x1: r2(zero), x2: r2(zero), y1: r2(plot.y), y2: r2(plot.y + plot.h), stroke: ca.line, "stroke-width": 1.5 }) : s("line", { x1: r2(plot.x), x2: r2(plot.x + plot.w), y1: r2(zero), y2: r2(zero), stroke: ca.line, "stroke-width": 1.5 }));
+    }
+    svg.append(labelsLayer);
+    return svg;
+  }
+
+  /** A smooth line through the points (Catmull-Rom as cubic Béziers, like Office's smoothed lines). */
+  function smoothPath(pts) {
+    if (pts.length < 3) return `M${pts.map((p) => P(p[0], p[1])).join(" L")}`;
+    let d = `M${P(pts[0][0], pts[0][1])}`;
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      d += ` C${P(p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6)} ${P(p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6)} ${P(p2[0], p2[1])}`;
+    }
+    return d;
+  }
+
+  function marker(kind, x, y, size, color, tip) {
+    const r = size / 2;
+    const attrs = { class: "hs-omark", fill: color, "data-tip": tip };
+    if (kind === "square") return s("rect", { ...attrs, x: r2(x - r), y: r2(y - r), width: r2(size), height: r2(size) });
+    if (kind === "diamond") return s("path", { ...attrs, d: `M${P(x, y - r)} L${P(x + r, y)} L${P(x, y + r)} L${P(x - r, y)} Z` });
+    if (kind === "triangle") return s("path", { ...attrs, d: `M${P(x, y - r)} L${P(x + r, y + r)} L${P(x - r, y + r)} Z` });
+    if (kind === "dash") return s("rect", { ...attrs, x: r2(x - r), y: r2(y - size / 8), width: r2(size), height: r2(size / 4) });
+    if (kind === "x" || kind === "plus" || kind === "star") {
+      const d = kind === "plus" ? `M${P(x - r, y)} L${P(x + r, y)} M${P(x, y - r)} L${P(x, y + r)}` : `M${P(x - r, y - r)} L${P(x + r, y + r)} M${P(x + r, y - r)} L${P(x - r, y + r)}${kind === "star" ? ` M${P(x, y - r)} L${P(x, y + r)}` : ""}`;
+      return s("path", { class: "hs-omark", d, stroke: color, "stroke-width": Math.max(1.5, size / 6), fill: "none", "data-tip": tip });
+    }
+    return s("circle", { ...attrs, cx: r2(x), cy: r2(y), r: r2(kind === "dot" ? r / 2 : r) });
+  }
+
+  function pieChart(svg, c, area, { st, sts, pointColor, fontOf, textEl }) {
+    const values = c.series[0].values.map((v) => Math.max(0, v || 0));
+    const total = values.reduce((a, b) => a + b, 0) || 1;
+    const cx = area.x + area.w / 2;
+    const cy = area.y + area.h / 2;
+    const R = Math.max(4, Math.min(area.w, area.h) / 2 - 4);
+    const hole = (st.type && st.type !== c.type ? 50 : st.hole ?? 50) / 100;
+    let a = ((st.angle || 0) - 90) * (Math.PI / 180);
+    const g = s("g", { class: "hs-ochart-pie" });
+    const labels = s("g", { class: "hs-ochart-labels" });
+    const ss = sts(0);
+    values.forEach((v, i) => {
+      const sweep = (v / total) * Math.PI * 2;
+      const a1 = a + sweep;
+      const color = pointColor(0, i);
+      const large = sweep > Math.PI ? 1 : 0;
+      const pt = (r, ang) => P(cx + r * Math.cos(ang), cy + r * Math.sin(ang));
+      let d;
+      if (sweep >= Math.PI * 2 - 1e-6) d = hole ? `M${pt(R, 0)} A${r2(R)} ${r2(R)} 0 1 1 ${pt(R, Math.PI)} A${r2(R)} ${r2(R)} 0 1 1 ${pt(R, 0)} M${pt(R * hole, 0)} A${r2(R * hole)} ${r2(R * hole)} 0 1 0 ${pt(R * hole, Math.PI)} A${r2(R * hole)} ${r2(R * hole)} 0 1 0 ${pt(R * hole, 0)} Z` : `M${pt(R, 0)} A${r2(R)} ${r2(R)} 0 1 1 ${pt(R, Math.PI)} A${r2(R)} ${r2(R)} 0 1 1 ${pt(R, 0)} Z`;
+      else if (hole) d = `M${pt(R, a)} A${r2(R)} ${r2(R)} 0 ${large} 1 ${pt(R, a1)} L${pt(R * hole, a1)} A${r2(R * hole)} ${r2(R * hole)} 0 ${large} 0 ${pt(R * hole, a)} Z`;
+      else d = `M${P(cx, cy)} L${pt(R, a)} A${r2(R)} ${r2(R)} 0 ${large} 1 ${pt(R, a1)} Z`;
+      if (v > 0) g.append(s("path", { class: "hs-oslice", d, fill: color, "fill-rule": "evenodd", stroke: "#ffffff", "stroke-width": 2, "data-paint": color.startsWith("#") ? color : null, "data-tip": `${c.labels[i]}：${numFormat(c.series[0].values[i], ss.label?.format)}（${Math.round((v / total) * 100)}%）`, style: { "--i": String(i) } }));
+      const own = ss.pointLabels?.find((p) => p.i === i);
+      const l = { ...(ss.label || {}), ...(own || {}) };
+      const show = own ? own.show !== false : ss.label && ss.label.show !== false;
+      if (show && v > 0 && (l.runs || l.val || l.pct || l.cat || l.ser)) {
+        const f = fontOf(ss.label?.font, own?.font);
+        const mid = a + sweep / 2;
+        const outside = l.pos === "outEnd";
+        const r = outside ? R + f.size * 0.9 : hole ? R * (1 + hole) / 2 : l.pos === "inEnd" ? R * 0.78 : R * 0.62;
+        const text = l.runs ? l.runs.map((x) => x.t).join("") : [l.ser ? c.series[0].name : "", l.cat ? c.labels[i] : "", l.val ? numFormat(c.series[0].values[i], l.format) : "", l.pct ? `${Math.round((v / total) * 100)}%` : ""].filter(Boolean).join(l.cat && (l.val || l.pct) ? "\n" : ", ");
+        const x = cx + r * Math.cos(mid);
+        const y = cy + r * Math.sin(mid);
+        const anchor = outside ? (Math.cos(mid) > 0.2 ? "start" : Math.cos(mid) < -0.2 ? "end" : "middle") : "middle";
+        const rows = text.split("\n");
+        rows.forEach((row, ri) => labels.append(textEl(x, y + f.size * 0.35 + (ri - (rows.length - 1) / 2) * f.size * 1.2, row, f, anchor)));
+      }
+      a = a1;
+    });
+    svg.append(g, labels);
   }
   /** The engine's chart spec (as the layouts' charts) for a chart object. */
   function chartSpec(c) {
@@ -1397,7 +1979,7 @@
     if (c.type === "stacked-bar" || c.type === "100-stacked-bar") {
       data.barData = c.labels.map((label, i) => ({ label, values: c.series.map((s) => s.values[i] ?? 0) }));
       data.legendLabels = c.series.map((s) => s.name);
-    } else if (c.type === "multi-line") {
+    } else if (c.type === "multi-line" || c.type === "clustered-bar") {
       data.xAxisLabels = c.labels;
       data.series = c.series.map((s) => ({ label: s.name, values: s.values }));
     } else if (c.type === "combo") {
@@ -1590,8 +2172,9 @@
       const tr = h("tr", { "data-r": String(r), style: { height: `${r2(o.rows[r] * o.h)}px` } });
       row.forEach((cell, c) => {
         if (cell.merged) return;
+        const edge = (side) => (cell[side] === "none" ? "none" : cell[side] ? `${cell[side].w}px solid ${cell[side].c}` : null);
         const td = h("td", { "data-r": String(r), "data-c": String(c), rowspan: cell.rs > 1 ? String(cell.rs) : null, colspan: cell.cs > 1 ? String(cell.cs) : null, "data-fill": cell.fill || null,
-          style: { background: cell.fill || null, "vertical-align": cell.valign || null } });
+          style: { background: cell.fill || null, "vertical-align": cell.valign || null, "border-top": edge("bt"), "border-right": edge("br"), "border-bottom": edge("bb"), "border-left": edge("bl") } });
         const tx = h("div", { class: "hs-cell-tx", style: { "text-align": cell.align || null, color: cell.color || null, "font-weight": cell.bold ? "700" : null, "font-style": cell.italic ? "italic" : null,
           "text-decoration": [cell.underline ? "underline" : "", cell.strike ? "line-through" : ""].filter(Boolean).join(" ") || null } });
         tx.append(richFragment(cell.text || ""));
@@ -1606,6 +2189,10 @@
 
   /** A chart drawn by the engine's own charts (the same look as the layouts' charts), with an optional title. */
   function chartBody(o, rotEl) {
+    if (o.chart.style) {
+      rotEl.append(h("div", { class: "hs-obj-chart is-office" }, officeChart(o.chart, o.w, o.h)));
+      return;
+    }
     const box = h("div", { class: "hs-obj-chart" });
     if (o.chart.title) box.append(h("div", { class: "hs-obj-chart-title" }, o.chart.title));
     const titleH = o.chart.title ? 52 : 0;
@@ -1772,7 +2359,7 @@
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS,
-    TABLE_STYLES, CHART_KINDS, chartSpec, freeformD,
+    TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD,
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, objectNode, fitObjects, objectText, objectName,
   });
