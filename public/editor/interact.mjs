@@ -150,6 +150,7 @@ export function createInteractions(editor, app, kit) {
       group("おまかせ",
         btn("magic", "HTMLの動き|を付ける", "このスライドに、HTMLならではの動きをおまかせで付ける（タイトル・グラフ・数字・線・カード・写真）", () => app.enhance("slide"), { big: true }),
         col(btn("applyAll", "すべてのスライドに", "資料のすべてのスライドに、おまかせで付ける", () => app.enhance("all")),
+          btn("check", "取り込み時に自動", "PowerPointを見た目どおりに取り込んだとき、HTMLの動きを自動で付ける（⌘Zで外せます）", () => app.setAutoHtml(!app.autoHtml()), { pressed: () => app.autoHtml() }),
           btn("play", "▶ 試す", "このスライドから発表して、マウスやクリックの動きを確かめる", () => app.present()))),
       group("マウスを乗せたとき",
         drop("hover", "反応", "マウスを乗せたとき：浮き上がる・拡大・光る・3Dで傾く・ほかを薄くする", () => hoverMenu(), { big: true, enabled: any }),

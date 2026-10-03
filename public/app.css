@@ -201,9 +201,44 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .counter { color: var(--muted); font-weight: 600; font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .counter.over { color: var(--danger); }
 
-/* ------------------------------------------------------------------ edit view */
-.edit-view { display: grid; grid-template-columns: 196px minmax(0, 1fr) 384px; height: calc(100vh - 56px); }
-.filmstrip { overflow-y: auto; padding: 12px 10px 40px; background: var(--surface); border-right: 1px solid var(--line); }
+/* ------------------------------------------------------------------ edit view: PowerPoint's window
+   The ribbon across the top, a one-line message bar, [thumbnails | slide + notes | task pane], the status bar.
+   The panes' widths and the notes' height are dragged on the splitters (public/editor/window.mjs). */
+.edit-view {
+  --film-w: 196px; --side-w: 384px;
+  display: grid; height: calc(100vh - 56px);
+  grid-template-columns: min(var(--film-w), 24vw) 5px minmax(0, 1fr) 5px min(var(--side-w), 42vw);
+  grid-template-rows: auto auto minmax(0, 1fr) 28px;
+  grid-template-areas: "ribbon ribbon ribbon ribbon ribbon" "msg msg msg msg msg" "film fsplit stage ssplit side" "status status status status status";
+}
+.edit-view > .ribbon { grid-area: ribbon; min-width: 0; }
+.edit-view > .msg-bar { grid-area: msg; min-width: 0; }
+.edit-view > .filmstrip, .edit-view > .pane-reopen { grid-area: film; min-height: 0; }
+.edit-view > .pane-split[data-split="film"] { grid-area: fsplit; }
+.edit-view > .stage { grid-area: stage; }
+.edit-view > .pane-split[data-split="side"] { grid-area: ssplit; }
+.edit-view > .side-panel { grid-area: side; }
+.edit-view > .status-bar { grid-area: status; }
+.pane-split { position: relative; z-index: 3; cursor: col-resize; background: var(--surface); touch-action: none; }
+.pane-split::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px; background: var(--line); transition: background .15s; }
+.pane-split:hover::after, .pane-split.dragging::after { left: 1px; width: 3px; background: var(--accent); }
+.edit-view.film-closed { --film-w: 30px; }
+.edit-view.film-closed > .filmstrip { display: none; }
+.pane-reopen { display: flex; align-items: flex-start; justify-content: center; padding: 12px 0; border: 0; background: var(--surface); color: var(--ink-2); font-size: 12px; font-weight: 700; cursor: pointer; }
+.pane-reopen span { writing-mode: vertical-rl; letter-spacing: .1em; }
+.pane-reopen:hover { background: var(--canvas); color: var(--ink); }
+.edit-view.side-closed { --side-w: 40px; }
+.edit-view.side-closed > .pane-split[data-split="side"] { pointer-events: none; }
+.side-closed .side-panel > :not(.side-tabs) { display: none !important; }
+.side-closed .side-tabs { flex-direction: column; align-items: stretch; gap: 2px; height: 100%; padding: 6px 0; border-bottom: 0; }
+.side-closed .side-tab { flex: none; height: auto; padding: 12px 0; writing-mode: vertical-rl; letter-spacing: .06em; border-bottom: 0; border-left: 2px solid transparent; font-size: 12px; }
+.side-closed .side-tab[aria-selected="true"] { border-left-color: transparent; color: var(--muted); }
+.side-closed .side-close { order: -1; margin: 0 auto 4px; transform: rotate(180deg); }
+.side-close { flex: none; align-self: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 15px; line-height: 1; }
+.side-close:hover { background: var(--canvas); color: var(--ink); }
+.filmstrip { overflow-y: auto; padding: 12px 10px 40px; background: var(--surface); outline: 0; }
+/* With the focus on the thumbnails, the keys work on slides (Delete, ⌘C/⌘V, ⌘D): the selected one says so. */
+.filmstrip:focus .film-item.selected .hs-scaler { box-shadow: 0 0 0 2px var(--accent), 0 0 0 5px rgba(31, 56, 100, .16); }
 .film-item { position: relative; display: grid; grid-template-columns: 18px 1fr; gap: 6px; align-items: start; margin-bottom: 10px; padding: 4px; border-radius: 9px; cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 104px; }
 .film-item:hover { background: var(--canvas); }
 .film-item.selected { background: var(--accent-soft); }
@@ -225,11 +260,54 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .film-flags span { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 5px; background: rgba(20, 22, 28, .72); color: #fff; font-size: 9px; }
 .film-add { width: 100%; margin-top: 4px; }
 
-.stage { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
-.stage-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--surface); border-bottom: 1px solid var(--line); min-height: 50px; }
-.stage-toolbar .meta { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stage-toolbar .spacer { flex: 1; }
+.stage { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+/* The rulers (表示 → ルーラー, editor/rulers.mjs) sit over the stage's top and left edges; the slide keeps clear of them. */
+.ruler { position: absolute; z-index: 4; pointer-events: none; }
+.stage.with-rulers .stage-body { padding-top: 34px; padding-left: 34px; }
 .design-btn { gap: 8px; padding: 0 10px 0 8px; }
+
+/* The status bar: where you are, the checks, then the notes, the views and the zoom (PowerPoint's order). */
+.status-bar { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 8px 0 12px; background: var(--surface); border-top: 1px solid var(--line); color: var(--ink-2); font-size: 11.5px; overflow: hidden; }
+.status-bar .spacer { flex: 1; }
+.sb-pos { flex: none; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sb-meta { flex: 0 1 auto; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-meta:empty { display: none; }
+.sb-pos { overflow: hidden; text-overflow: ellipsis; max-width: 46%; flex-shrink: 1; }
+.sb-detail { color: var(--muted); font-weight: 500; }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe, body.resizing .stage-body { pointer-events: none; }
+.status-bar .issue-chip { flex: none; height: 20px; padding: 0 8px; font-size: 11px; }
+.status-bar .btn-sm { flex: none; height: 21px; font-size: 11px; }
+.sb-btn { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-2); font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.sb-btn:hover { background: var(--canvas); color: var(--ink); }
+.sb-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.sb-btn.has-notes::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.sb-icon { width: 22px; padding: 0; justify-content: center; font-size: 14px; }
+.sb-pct { min-width: 44px; justify-content: center; font-variant-numeric: tabular-nums; }
+.status-bar .design-btn { gap: 6px; }
+.status-bar .swatch-dots i { width: 11px; height: 11px; border-width: 1.5px; margin-left: -4px; }
+.sb-views { flex: none; padding: 2px; border-radius: 6px; }
+.sb-views span { padding: 1px 10px; border-radius: 5px; font-size: 11px; }
+.sb-zoom { flex: none; display: flex; align-items: center; gap: 1px; }
+#zoomSlider { width: 112px; height: 16px; margin: 0 2px; accent-color: var(--accent); cursor: pointer; }
+
+/* The message bar: one line under the ribbon (PowerPoint's yellow bar), the whole text on 「詳しく」. */
+.msg-bar { border-bottom: 1px solid #d9e2ee; }
+.msg-bar .callout { max-width: none; min-height: 40px; margin: 0; padding: 4px 6px 4px 14px; border: 0; border-radius: 0; gap: 8px; }
+.msg-bar .callout .text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; line-height: 1.5; }
+.msg-bar .callout .text b { display: inline; margin-right: 8px; font-size: 12.5px; }
+.msg-bar .callout .callout-note { display: inline; margin: 0 0 0 6px; color: var(--muted); }
+.msg-bar.open .callout .callout-note { display: block; margin: 2px 0 0; }
+.msg-bar.open .callout .text { white-space: normal; }
+.msg-bar .callout .btn { flex: none; height: 28px; }
+.msg-more { flex: none; border: 0; background: transparent; color: var(--accent); font-size: 11.5px; font-weight: 700; cursor: pointer; padding: 0 4px; }
+
+/* The notes under the slide (PowerPoint's ノート pane). */
+.notes-split { flex: none; height: 5px; cursor: row-resize; background: var(--surface); border-top: 1px solid var(--line); touch-action: none; }
+.notes-split:hover, .notes-split.dragging { background: var(--accent-soft); border-top-color: var(--accent); }
+.notes-pane { flex: none; height: var(--notes-h, 96px); min-height: 36px; background: var(--surface); }
+.notes-pane textarea { display: block; width: 100%; height: 100%; padding: 8px 16px; border: 0; border-radius: 0; resize: none; background: transparent; font-size: 13px; line-height: 1.7; box-shadow: none; }
+.notes-pane textarea:focus { box-shadow: none; }
 .swatch-dots { display: inline-flex; }
 .swatch-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; margin-left: -5px; box-shadow: 0 0 0 1px rgba(20, 22, 28, .12); }
 .swatch-dots i:first-child { margin-left: 0; }
@@ -237,14 +315,12 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .issue-chip.ok { background: var(--ok-soft); color: var(--ok); }
 .issue-chip.warn { background: var(--warn-soft); color: var(--warn); }
 .issue-chip.error { background: var(--danger-soft); color: var(--danger); }
-.stage-body { position: relative; flex: 1; overflow: auto; padding: 28px; background: radial-gradient(1200px 500px at 50% -10%, #fbfbfd, transparent), var(--canvas); }
-.stage-single { max-width: 1280px; margin: 0 auto; }
+/* The slide sits in the middle of the room it has (margin: auto centres it and, when zoomed in past the room,
+   lets it scroll from its edge). */
+.stage-body { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; padding: 24px; background: radial-gradient(1200px 500px at 50% -10%, #fbfbfd, transparent), var(--canvas); }
+.stage-single { flex: none; max-width: 1280px; margin: auto; }
 .slide-wrap { position: relative; }
-.slide-wrap > .hs-scaler { border-radius: 6px; box-shadow: 0 2px 6px rgba(20, 22, 28, .06), 0 18px 48px rgba(20, 22, 28, .14); }
-.stage-caption { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; color: var(--muted); font-size: 12px; }
-.stage-nav { display: flex; gap: 6px; }
-.notes-preview { margin-top: 14px; padding: 12px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); color: var(--ink-2); line-height: 1.75; white-space: pre-wrap; }
-.notes-preview b { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
+.slide-wrap > .hs-scaler { border-radius: 4px; box-shadow: 0 1px 4px rgba(20, 22, 28, .1), 0 12px 32px rgba(20, 22, 28, .12); }
 .stage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
 .grid-item { position: relative; cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 200px; }
 .grid-item .hs-scaler { border-radius: 6px; box-shadow: 0 1px 4px rgba(20, 22, 28, .12); transition: transform .15s; }
@@ -254,6 +330,7 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .empty-stage { display: grid; place-items: center; min-height: 60vh; color: var(--muted); text-align: center; line-height: 1.7; }
 .empty-stage strong { display: block; color: var(--ink-2); font-size: 15px; }
 .callout { display: flex; align-items: center; gap: 12px; max-width: 1280px; margin: 0 auto 14px; padding: 12px 14px; border-radius: 12px; background: var(--ai-soft); border: 1px solid #d9e2ee; }
+.stage-grid, .outline-table, .stage-body > .hint { flex: none; }
 .callout .text { flex: 1; line-height: 1.6; font-size: 12.5px; }
 .callout b { display: block; font-size: 13px; }
 
@@ -278,7 +355,7 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .inline-tools .sep { width: 1px; background: rgba(255, 255, 255, .2); margin: 3px 2px; }
 
 .outline-table { width: 100%; max-width: 1280px; margin: 0 auto; border-collapse: separate; border-spacing: 0 6px; }
-.outline-table th { position: sticky; top: -28px; z-index: 1; padding: 6px 8px; background: var(--canvas); color: var(--muted); font-size: 11px; text-align: left; }
+.outline-table th { position: sticky; top: -24px; z-index: 1; padding: 6px 8px; background: var(--canvas); color: var(--muted); font-size: 11px; text-align: left; }
 .outline-table td { padding: 8px; background: var(--surface); vertical-align: top; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .outline-table td:first-child { border-left: 1px solid var(--line); border-radius: 10px 0 0 10px; width: 46px; text-align: center; }
 .outline-table td:last-child { border-right: 1px solid var(--line); border-radius: 0 10px 10px 0; }
@@ -582,16 +659,19 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
   .top-actions .btn { padding: 0 9px; }
 }
 @media (max-width: 1200px) {
-  .edit-view { grid-template-columns: 150px minmax(0, 1fr) 340px; }
+  .edit-view { --film-w: 150px; --side-w: 340px; }
+  .sb-meta { display: none; }
   .design-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .theme-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {
   .topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; }
   .top-actions { flex-wrap: wrap; flex: 1 1 100%; justify-content: flex-end; }
-  .stage-toolbar { flex-wrap: wrap; }
-  .stage-toolbar .meta { display: none; }
-  .edit-view { grid-template-columns: 1fr; height: auto; }
+  .edit-view { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "ribbon" "msg" "film" "stage" "side" "status"; height: auto; }
+  .edit-view > .pane-split, .edit-view > .pane-reopen { display: none; }
+  .stage { min-height: 60vh; }
+  .status-bar { flex-wrap: wrap; height: auto; padding: 4px 8px; }
+  #zoomSlider { width: 80px; }
   .filmstrip { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px; }
   .film-item { flex: 0 0 150px; margin: 0; }
   .film-add { flex: none; width: auto; }
@@ -630,6 +710,24 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .rb-hint { align-self: center; color: var(--warn); font-size: 12px; font-weight: 700; padding-right: 8px; }
 .rb-collapse { align-self: center; width: 26px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
 .rb-collapse:hover { background: var(--canvas); color: var(--ink); }
+/* Ribbon display options (PowerPoint): always / tabs only (the ribbon floats over the slide on a tab) / auto-hide. */
+.ribbon { position: relative; z-index: 35; }
+.rb-options { display: inline-flex; align-items: center; gap: 4px; align-self: center; height: 24px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; }
+.rb-options:hover { background: var(--canvas); color: var(--ink); }
+.rb-end { position: sticky; right: 0; flex: none; display: flex; align-items: flex-end; margin-left: auto; padding: 0 2px 2px 6px; background: linear-gradient(90deg, transparent, var(--surface) 8px); }
+.rb-pin { width: 24px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; }
+.rb-pin:hover { background: var(--canvas); color: var(--ink); }
+.ribbon[data-mode="tabs"]:not(.rb-floating) .rb-tabs { border-bottom: 0; }
+.ribbon.rb-floating .rb-body { position: absolute; left: 0; right: 0; top: 100%; background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); box-shadow: 0 14px 28px rgba(20, 22, 28, .16); }
+.rb-float { position: absolute; left: 0; right: 0; top: 0; background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 14px 28px rgba(20, 22, 28, .16); }
+.ribbon.rb-floating .rb-float .rb-body { position: static; border: 0; box-shadow: none; }
+.rb-reveal { display: block; width: 100%; height: 12px; padding: 0; border: 0; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 10px; line-height: 10px; letter-spacing: .3em; cursor: pointer; }
+.rb-reveal:hover { background: var(--accent-soft); color: var(--accent); }
+.rb-group.rb-off { opacity: .4; }
+.rb-symbols { display: grid; grid-template-columns: repeat(11, 30px); gap: 3px; }
+.rb-symbols button { height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 15px; cursor: pointer; }
+.rb-symbols button:hover { border-color: var(--accent); background: var(--accent-soft); }
+.stage-body.view-gray .slide-wrap > .hs-scaler { filter: grayscale(1); }
 .rb-body { display: flex; align-items: stretch; gap: 0; padding: 6px 6px 2px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .rb-group { display: flex; flex-direction: column; flex: none; padding: 0 8px; border-right: 1px solid var(--line); }
 .rb-group:last-child { border-right: 0; }
@@ -899,6 +997,24 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .anim-pane .fp-head.an-pane-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .an-pane-btns { display: flex; gap: 4px; margin-left: auto; }
 .an-reset-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--canvas); }
+/* The motion IDE: everything that moves on the slide, by when it happens, each editable in place. */
+.an-sec { margin: 0 0 12px; }
+.an-sec-head { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 12px; }
+.an-sec-head small { margin-left: auto; color: var(--muted); font-size: 10.5px; font-weight: 500; }
+.an-sec-head .ed-ico { color: var(--accent); }
+.an-sec-gap { margin-top: 4px; }
+.an-auto-row { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 8px; margin: 0 0 4px; font-size: 12px; color: var(--ink-2); }
+.an-auto-row select { height: 28px; padding: 2px 6px; font-size: 12px; }
+.an-sec-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.an-ix-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.an-ix-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 8px; }
+.an-ix-row.on { border-color: #13a89e; background: #eef8f6; }
+.an-ix-name { border: 0; background: transparent; padding: 0; color: var(--ink); font-size: 12px; font-weight: 700; cursor: pointer; text-align: left; }
+.an-ix-name:hover { color: var(--accent); text-decoration: underline; }
+.an-ix-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.an-ix-chip { display: inline-flex; align-items: center; gap: 2px; height: 22px; padding: 0 2px 0 8px; border-radius: 11px; background: #e6f4f1; color: #0e6e66; font-size: 11px; font-weight: 700; }
+.an-ix-chip button { width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent; color: inherit; font-size: 12px; line-height: 1; cursor: pointer; }
+.an-ix-chip button:hover { background: rgba(14, 110, 102, .16); }
 .an-reset-actions p { flex: 1 0 100%; margin: 0 0 2px; }
 .an-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .an-row { display: grid; grid-template-columns: 22px 16px 18px minmax(0, 1fr) 72px 20px; align-items: center; gap: 4px; min-height: 34px; padding: 2px 4px; border: 1px solid transparent; border-radius: 7px; cursor: pointer; }

@@ -58,8 +58,8 @@ await step("make a deep-dive page for item 02 from the inspector", async () => {
   await page.waitForSelector(".film-item.is-drill");
   expect(await films(), ["title", "stepUp", "↳", "cards", "statement", "closing"], "filmstrip");
   await page.waitForSelector("#inspector .drill-info");
-  const caption = await page.textContent(".stage-caption");
-  if (!/2枚目の深掘りページ/.test(caption)) throw new Error(`caption: ${caption}`);
+  const caption = await page.textContent("#slidePos");
+  if (!/2枚目の深掘りページ/.test(caption)) throw new Error(`status bar: ${caption}`);
   // The SEJ master's page number counts the story (like ‹#›): the deep-dive page keeps its slide's number
   // and names that slide in the line above its key message.
   const pageNo = await page.textContent(".slide-wrap .hs-page");

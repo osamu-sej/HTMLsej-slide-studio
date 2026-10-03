@@ -128,6 +128,26 @@ const P = {
   tip: '<path d="M4 5h16v10H10l-4 4v-4H4z"/><path d="M8 9h8M8 12h5"/>',
   popup: '<rect x="3" y="3" width="10" height="8" rx="1"/><path d="M13 7h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8M11 15h6M11 18h4"/>',
   zoomClick: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M8 10.5h5M10.5 8v5"/>',
+  // The window and the tabs PowerPoint has around the slide (デザイン・スライド ショー・校閲・表示).
+  showStart: '<rect x="3" y="4" width="18" height="12.5" rx="1.5"/><path d="M10 7.5 15 10.25 10 13zM8 21h8M12 16.5V21"/>',
+  showHere: '<rect x="3" y="4" width="18" height="12.5" rx="1.5"/><path d="M10 7.5 15 10.25 10 13zM3 20.5h5M16 20.5h5M10 20.5h4"/>',
+  hideSlide: '<rect x="3" y="5" width="18" height="13" rx="1.5"/><path d="M4 3.5 20 20.5"/>',
+  find: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5.5 5.5"/>',
+  replace: '<path d="M4 8h12l-3.5-3.5M20 16H8l3.5 3.5"/>',
+  notes: '<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  comment: '<path d="M4 5h16v11H10l-6 4.5z"/>',
+  theme: '<rect x="3" y="4.5" width="18" height="13.5" rx="1.5"/><path d="M6.5 8.5h6M6.5 12.5h11"/><path d="M6.5 15h11" stroke-width="2.4"/>',
+  pin: '<path d="M9 3.5h6l-1 5.5 3 3H7l3-3zM12 12v8.5"/>',
+  presenter: '<rect x="2" y="5" width="12.5" height="9" rx="1"/><rect x="16.5" y="5" width="5.5" height="9" rx="1"/><path d="M8.25 14v3.5M5 20h6.5"/>',
+  ruler: '<rect x="2" y="8" width="20" height="8" rx="1"/><path d="M6 8v3M10 8v4.5M14 8v3M18 8v4.5"/>',
+  thumbs: '<rect x="3" y="4" width="6" height="4" rx=".6"/><rect x="3" y="10" width="6" height="4" rx=".6"/><rect x="3" y="16" width="6" height="4" rx=".6"/><rect x="11" y="4" width="10" height="16" rx="1"/>',
+  taskPane: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M14.5 4v16M16.5 8h2.5M16.5 11h2.5"/>',
+  ribbon: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 8.5h18M3 12h18"/>',
+  review: '<path d="M4 4h16v10H11l-5 4v-4H4z"/><path d="m8.5 9 2 2 4-4"/>',
+  spacing: '<path d="M4.5 14 8 4.5l3.5 9.5M5.7 10.8h4.6M13 4.5l3.5 9.5L20 4.5"/><path d="M3 19h18M5 17.3 3 19l2 1.7M19 17.3l2 1.7-2 1.7"/>',
+  symbol: '<path d="M8 19h-4v-2.5a7 7 0 1 1 8 0V19h-4"/><path d="M14 19h6"/>',
+  date: '<rect x="3.5" y="5" width="17" height="15" rx="1.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/>',
+  grayView: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>',
 };
 
 export function ico(name, size = 18) {

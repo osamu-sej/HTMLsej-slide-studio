@@ -12,6 +12,10 @@ import { createFreeform } from "./freeform.mjs";
 
 const SIZES_PT = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const LINE_WIDTHS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 8, 12];
+// 文字の間隔 (PowerPoint's: tight to very loose), in em.
+const CHAR_SPACING = [[-0.1, "より狭く"], [-0.05, "狭く"], [0, "標準"], [0.05, "広く"], [0.12, "より広く"]];
+// 挿入 → 記号と特殊文字: what Japanese business slides use most (no < > &, which are markup).
+const SYMBOLS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "※", "・", "→", "←", "↑", "↓", "⇒", "⇔", "○", "●", "◎", "△", "▲", "▼", "□", "■", "◇", "◆", "★", "☆", "✓", "✕", "±", "×", "÷", "≒", "≠", "≦", "≧", "∞", "℃", "％", "‰", "㎡", "㎏", "㎞", "￥", "€", "＄", "〒", "©", "®", "™", "…", "〜", "「", "」", "『", "』", "【", "】", "〔", "〕", "♪", "☎", "✉"];
 const LINE_HEIGHTS = [[1, "1.0"], [1.15, "1.15"], [1.35, "1.35"], [1.5, "1.5"], [1.75, "1.75"], [2, "2.0"], [2.5, "2.5"], [3, "3.0"]];
 // Brand quick styles (図形のスタイル): fills and lines of the SEJ palette, text black or navy, never white.
 const QUICK_STYLES = [
@@ -34,7 +38,12 @@ export function createEditorUi(editor, app) {
   const ribbon = document.getElementById("ribbon");
   const pane = document.getElementById("formatPane");
   let tab = "home";
-  let collapsed = false;
+  // Ribbon display options, as PowerPoint's: "full" (always shown), "tabs" (only the tabs; a tab opens the ribbon
+  // over the slide until a command or a click elsewhere), "auto" (hidden behind a thin bar at the top).
+  const RIBBON_MODES = { full: "常にリボンを表示する", tabs: "タブのみを表示する", auto: "自動的に非表示にする（全画面表示モード）" };
+  let ribbonMode = (() => { try { const m = localStorage.getItem("hsej-ribbon-mode"); return RIBBON_MODES[m] ? m : "full"; } catch { return "full"; } })();
+  let floating = false;
+  let grayView = false; // 表示 → グレースケール (only how the slide is shown here)
   let built = "";
   let updaters = [];
   let pop = null;
@@ -58,7 +67,8 @@ export function createEditorUi(editor, app) {
   function btn(icon, label, title, run, { pressed = null, enabled = null, big = false, keep = false } = {}) {
     const el = h("button", { type: "button", class: ["rb-btn", big ? "big" : ""], title: title || plain(label), "aria-label": title || plain(label), "data-keeps-text": keep ? "" : null,
       onmousedown: (event) => { if (keep) event.preventDefault(); },
-      onclick: (event) => { event.preventDefault(); run(event); } }, ico(icon, big ? 26 : 18), caption(label));
+      // A command from the ribbon floating over the slide closes it afterwards (PowerPoint's タブのみを表示).
+      onclick: (event) => { event.preventDefault(); const fromFloat = floating && ribbon.contains(el); run(event); if (fromFloat && floating && !pop) closeFloating(); } }, ico(icon, big ? 26 : 18), caption(label));
     updaters.push(() => {
       if (enabled) el.disabled = !enabled();
       if (pressed) el.setAttribute("aria-pressed", String(Boolean(pressed())));
@@ -87,7 +97,8 @@ export function createEditorUi(editor, app) {
     // Measure first: the anchor may sit in the popover being closed (a button of a folded ribbon group).
     const r = anchor.getBoundingClientRect();
     const nested = pop?.el.contains(anchor);
-    closePop();
+    const fromRibbon = floating && (ribbon.contains(anchor) || (nested && pop?.fromRibbon));
+    closePop(true);
     // A builder may return the content, or a function that builds it with `close`.
     let content = build(closePop);
     while (typeof content === "function") content = content(closePop);
@@ -98,17 +109,21 @@ export function createEditorUi(editor, app) {
     const pr = el.getBoundingClientRect();
     el.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pr.width - 8))}px`;
     el.style.top = `${Math.min(r.bottom + 4, innerHeight - pr.height - 8)}px`;
-    pop = { el, anchor };
+    pop = { el, anchor, fromRibbon };
     setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
     document.addEventListener("keydown", popKey, true);
   }
-  function outside(event) { if (pop && !pop.el.contains(event.target) && !pop.anchor.contains(event.target)) closePop(); }
-  function popKey(event) { if (event.key === "Escape" && pop) { event.stopPropagation(); closePop(); } }
-  function closePop() {
+  // A click elsewhere closes the menu (and the floating ribbon it came from, unless the click is on the ribbon).
+  function outside(event) { if (pop && !pop.el.contains(event.target) && !pop.anchor.contains(event.target)) closePop(ribbon.contains(event.target)); }
+  function popKey(event) { if (event.key === "Escape" && pop) { event.stopPropagation(); closePop(true); } }
+  /** Closes the open menu or gallery; one opened from the floating ribbon closes the ribbon too (a command was chosen). */
+  function closePop(keepRibbon = false) {
+    const fromRibbon = pop?.fromRibbon;
     pop?.el.remove();
     pop = null;
     document.removeEventListener("pointerdown", outside, true);
     document.removeEventListener("keydown", popKey, true);
+    if (fromRibbon && !keepRibbon && floating) { floating = false; renderRibbon(true); }
   }
   const menu = (items) => (close) => h("div", { class: "rb-menu" }, items.filter(Boolean).map((item) => (item === "-" ? h("div", { class: "rb-sep" })
     : item.head ? h("div", { class: "rb-menu-head" }, item.head)
@@ -236,6 +251,26 @@ export function createEditorUi(editor, app) {
     img.onerror = () => editor.insert([ops.makeObject("image", { x: 0, y: 0, w: 960, h: 540 }, { src: `asset:${key}` })]);
     img.src = `/assets/${file}`;
   }
+  /** 挿入 → 記号と特殊文字・日付と時刻: at the caret while typing, else a new text box in the middle of the slide. */
+  function insertWords(text) {
+    if (editor.typing && editor.restoreRange()) { document.execCommand("insertText", false, text); return; }
+    const width = Math.min(1600, Math.max(160, [...text].length * 46 + 48));
+    editor.insert([ops.makeObject("text", { x: 0, y: 0, w: width, h: 96 }, { text: `<p>${text}</p>`, fs: 40 })]);
+  }
+  function symbolGallery() {
+    return (close) => h("div", { class: "rb-gallery symbols" }, h("div", { class: "rb-gallery-head" }, "記号と特殊文字"),
+      h("div", { class: "rb-symbols" }, SYMBOLS.map((ch) => h("button", { type: "button", title: ch, "aria-label": ch, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); insertWords(ch); } }, ch))));
+  }
+  function dateMenu() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth() + 1;
+    const d = now.getDate();
+    const wd = "日月火水木金土"[now.getDay()];
+    const era = y >= 2019 ? `令和${y - 2018 === 1 ? "元" : y - 2018}年${m}月${d}日` : `${y}年${m}月${d}日`;
+    const pad = (n) => String(n).padStart(2, "0");
+    return menu([{ head: "日付と時刻（今日）" }, ...[`${y}年${m}月${d}日`, `${y}年${m}月${d}日（${wd}）`, `${y}/${pad(m)}/${pad(d)}`, `${y}年${m}月`, era, `${m}月${d}日（${wd}）`, `${pad(now.getHours())}:${pad(now.getMinutes())}`].map((text) => ({ label: text, run: () => insertWords(text) }))]);
+  }
   function pickTool(tool) {
     if (tool.kind === "freeform") { freeform.start(tool.mode); return; }
     editor.setTool(tool);
@@ -294,9 +329,12 @@ export function createEditorUi(editor, app) {
   const TABS = [
     { id: "home", label: "ホーム" },
     { id: "insert", label: "挿入" },
+    { id: "design", label: "デザイン" },
     { id: "transition", label: "画面切り替え" },
     { id: "animation", label: "アニメーション" },
     { id: "interact", label: "インタラクション" },
+    { id: "slideshow", label: "スライド ショー" },
+    { id: "review", label: "校閲" },
     { id: "view", label: "表示" },
     { id: "shape", label: "図形の書式", contextual: () => hasShape() },
     { id: "picture", label: "図の形式", contextual: () => hasImage() },
@@ -307,38 +345,92 @@ export function createEditorUi(editor, app) {
 
   function signature() {
     const ctx = TABS.filter((t) => t.contextual?.()).map((t) => t.id).join(",");
-    return `${tab}|${ctx}|${collapsed}|${onSlide()}`;
+    return `${tab}|${ctx}|${ribbonMode}|${floating}|${onSlide()}`;
+  }
+
+  // ---------------------------------------------------------------- ribbon display options
+  function setRibbonMode(mode) {
+    if (!RIBBON_MODES[mode]) return;
+    ribbonMode = mode;
+    floating = false;
+    try { localStorage.setItem("hsej-ribbon-mode", mode); } catch { /* private window */ }
+    closePop(true);
+    renderRibbon(true);
+  }
+  /** ⌘F1 / Ctrl+F1, a double-click on a tab, the ˄ button: the ribbon folds to its tabs, or comes back. */
+  function toggleRibbon() { setRibbonMode(ribbonMode === "full" ? "tabs" : "full"); }
+  function openFloating(id = tab) { tab = id; floating = true; renderRibbon(true); editor.draw(); }
+  function closeFloating() { if (!floating) return; floating = false; closePop(true); renderRibbon(true); }
+  function floatingOutside(event) { if (floating && !ribbon.contains(event.target) && !pop?.el.contains(event.target)) closeFloating(); }
+  function floatingKey(event) { if (floating && !pop && event.key === "Escape") { event.stopPropagation(); closeFloating(); } }
+  function ribbonOptions(anchor) {
+    openPop(anchor, menu([
+      { head: "リボンの表示オプション" },
+      ...Object.entries(RIBBON_MODES).map(([mode, label]) => ({ label, icon: mode === "full" ? "ribbon" : mode === "tabs" ? "chevron" : "zoomFit", on: ribbonMode === mode, keys: mode === "tabs" ? "⌘F1" : "", run: () => setRibbonMode(mode) })),
+    ]));
   }
 
   function renderRibbon(force = false) {
     if (!ribbon) return;
-    const visible = onSlide();
+    // The ribbon is there in every view of the deck, as in PowerPoint; off the 1枚 view only what works on whole
+    // slides (new slides, design, slide show, review, view) can be used.
+    const visible = Boolean(app.deck());
     ribbon.hidden = !visible;
-    if (!visible) { built = ""; return; }
+    if (!visible) { built = ""; floating = false; return; }
     const tabs = TABS.filter((t) => !t.contextual || t.contextual());
     if (!tabs.some((t) => t.id === tab)) tab = "home";
     const sig = signature();
     if (!force && sig === built) { refresh(); return; }
     built = sig;
     updaters = [];
+    ribbon.dataset.mode = ribbonMode;
+    ribbon.classList.toggle("rb-floating", floating);
+    document.removeEventListener("pointerdown", floatingOutside, true);
+    document.removeEventListener("keydown", floatingKey, true);
+    if (floating) { document.addEventListener("pointerdown", floatingOutside, true); document.addEventListener("keydown", floatingKey, true); }
     const head = h("div", { class: "rb-tabs", role: "tablist" },
       // Switching tabs keeps the caret (and the cells picked in a table), as in PowerPoint.
-      tabs.map((t) => h("button", { type: "button", role: "tab", class: t.contextual ? "contextual" : "", "aria-selected": String(t.id === tab), "data-keeps-text": "", onmousedown: (event) => event.preventDefault(), onclick: () => { tab = t.id; collapsed = false; renderRibbon(true); editor.draw(); }, ondblclick: () => { collapsed = !collapsed; renderRibbon(true); } }, t.label)),
+      tabs.map((t) => h("button", { type: "button", role: "tab", class: t.contextual ? "contextual" : "", "aria-selected": String(t.id === tab && (ribbonMode === "full" || floating)), "data-tab": t.id, "data-keeps-text": "", onmousedown: (event) => event.preventDefault(),
+        onclick: () => {
+          if (ribbonMode === "full") { tab = t.id; renderRibbon(true); editor.draw(); }
+          else if (floating && tab === t.id) closeFloating();
+          else openFloating(t.id);
+        },
+        ondblclick: () => toggleRibbon() }, t.label)),
       h("span", { class: "rb-spacer" }),
       h("span", { class: "rb-hint" }, editor.tool ? "描画中（Escでやめる）" : editor.painter ? "書式を貼り付ける図形をクリック（Esc）" : ""),
-      h("button", { type: "button", class: "rb-collapse", title: collapsed ? "リボンを表示" : "リボンを折りたたむ", onclick: () => { collapsed = !collapsed; renderRibbon(true); } }, collapsed ? "▾" : "▴"));
-    const body = collapsed ? null : h("div", { class: "rb-body", role: "tabpanel" }, ...buildTab(tab));
-    if (pop && !pop.anchor.isConnected) closePop();
-    ribbon.replaceChildren(head, body || "");
-    if (pop && !pop.anchor.isConnected) closePop();
+      h("button", { type: "button", class: "rb-options", title: "リボンの表示オプション（常に表示・タブのみ・自動的に非表示）", "aria-haspopup": "true", onclick: (event) => ribbonOptions(event.currentTarget) }, ico("ribbon", 15), h("span", {}, "表示オプション"), h("b", { class: "rb-caret" }, "▾")));
+    const showBody = ribbonMode === "full" || floating;
+    const pin = h("div", { class: "rb-end" }, floating
+      ? h("button", { type: "button", class: "rb-pin", title: "リボンを固定する（常に表示）", "aria-label": "リボンを固定する", onclick: () => setRibbonMode("full") }, ico("pin", 15))
+      : h("button", { type: "button", class: "rb-pin", title: "リボンを折りたたむ（⌘F1）：タブだけを表示します", "aria-label": "リボンを折りたたむ", onclick: () => setRibbonMode("tabs") }, "˄"));
+    const body = showBody ? h("div", { class: "rb-body", role: "tabpanel" }, ...buildTab(tab), pin) : null;
+    if (body && !onSlide()) {
+      for (const g of body.querySelectorAll(":scope > .rb-group")) {
+        const label = g.querySelector(":scope > .rb-label")?.textContent || "";
+        if (OFF_SLIDE_TABS.has(tab) || OFF_SLIDE_GROUPS.has(label)) continue;
+        g.classList.add("rb-off");
+        g.inert = true;
+        g.title = "1枚表示（標準）で使えます";
+      }
+    }
+    if (pop && !pop.anchor.isConnected) closePop(true);
+    const reveal = h("button", { type: "button", class: "rb-reveal", title: "リボンを表示する（自動的に非表示）", "aria-label": "リボンを表示する", onclick: () => (floating ? closeFloating() : openFloating()) }, "•••");
+    if (ribbonMode === "auto") ribbon.replaceChildren(reveal, floating ? h("div", { class: "rb-float" }, head, body) : "");
+    else ribbon.replaceChildren(head, body || "");
+    if (pop && !pop.anchor.isConnected) closePop(true);
     refresh();
     fitRibbon();
   }
+  // Off the 1枚 view: whole tabs and groups that work on slides rather than on the objects of the one on the stage.
+  const OFF_SLIDE_TABS = new Set(["design", "transition", "slideshow", "review", "view"]);
+  const OFF_SLIDE_GROUPS = new Set(["スライド"]);
   // A narrow window squeezes the ribbon as PowerPoint does, from the right-hand groups first: small buttons
   // lose their words (the tooltip keeps them), then whole groups fold into one button that opens them;
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
   const GROUP_ICONS = { スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
-    図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane" };
+    図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane",
+    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review" };
   function fold(g) {
     const items = g.querySelector(":scope > .rb-items");
     const label = g.querySelector(":scope > .rb-label")?.textContent || "";
@@ -420,6 +512,7 @@ export function createEditorUi(editor, app) {
           btn("shrink", "", "フォントサイズの縮小（⇧⌘<）", () => editor.textFormat("shrink"), { enabled: hasText, keep: true }),
           drop("fontColor", "", "文字の色（SEJの文字色：黒・濃紺・グレー）", () => colors(E.PALETTE.text, textColorOf(), (c) => editor.textFormat("color", c), { custom: false, note: "白抜き文字は使いません（SEJテンプレート）" }), { enabled: hasText, keep: true, swatch: textColorOf }),
           drop("highlight", "", "蛍光ペン（マーカー）", () => colors(E.PALETTE.highlight, "", (c) => editor.textFormat("highlight", c === "none" ? null : c), { none: "マーカーなし", custom: false }), { enabled: hasText, keep: true }),
+          drop("spacing", "", "文字の間隔", () => menu(CHAR_SPACING.map(([v, label]) => ({ label, on: Math.abs((one()?.ls || 0) - v) < 0.001, run: () => editor.textFormat("ls", v) }))), { enabled: hasText, keep: true }),
           btn("clear", "", "書式のクリア", () => editor.textFormat("clear"), { enabled: hasText, keep: true }))),
       group("段落",
         row(btn("bullet", "", "箇条書き", () => editor.textFormat("bullet"), { enabled: hasText, pressed: () => editor.textState()?.list === "bullet", keep: true }),
@@ -440,8 +533,62 @@ export function createEditorUi(editor, app) {
         col(drop("fill", "塗り", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし" }), { enabled: hasText, swatch: fillOf }),
           drop("outline", "枠線", "図形の枠線", () => outlineMenu(), { enabled: () => any() && !kinds().has("icon") || kinds().has("icon"), swatch: strokeOf }))),
       group("編集",
-        col(btn("selectAll", "すべて選択", "このスライドのオブジェクトをすべて選択（⌘A）", () => editor.select(editor.objects().filter((o) => !o.hidden).map((o) => o.id))),
+        col(btn("find", "検索・置換", "資料全体の文字を検索・置換（⌘F）", () => app.openReplace()),
+          btn("selectAll", "すべて選択", "このスライドのオブジェクトをすべて選択（⌘A）", () => editor.select(editor.objects().filter((o) => !o.hidden).map((o) => o.id))),
           btn("pane", "選択ウィンドウ", "オブジェクトの一覧・表示/非表示・順番", () => app.openPanel("format", "selection")))),
+    ];
+  }
+
+  /** デザイン: the theme is the SEJ template; what changes is the deck's motion (as the 動き dialog, one menu each). */
+  function designTab() {
+    const motion = () => app.deckMotion() || {};
+    const choose = (head, entries, current, apply) => () => menu([{ head }, ...entries.map(([value, label]) => ({ label, on: current() === value, run: () => apply(value) }))]);
+    const setMotion = (key) => (value) => app.setDeckDesign({ motion: { [key]: value } });
+    return [
+      group("テーマ",
+        btn("theme", "SEJ|テンプレート", "デザインはSEJの原本テンプレート（ロゴ・緑線・秘（B）・社内限り・スローガン）に決まっています", () => app.toast("デザインはSEJテンプレートに決まっています。配色・ロゴ・緑線はそのままで、動きを選べます"), { big: true, pressed: () => true })),
+      group("動き（資料全体）",
+        btn("motionPath", "動きの|設定", "切り替え・登場・背景の動き・文字の動き・強調を見比べて選ぶ（資料全体）", () => app.openDesign(), { big: true }),
+        col(drop("transition", "切り替え", "スライドの切り替え（資料全体。1枚ずつは「画面切り替え」タブ）", choose("スライドの切り替え", Object.entries(E.TRANSITIONS), () => motion().transition, (value) => app.setDeckDesign({ transition: value }))),
+          drop("previewPlay", "登場のしかた", "スライドの見出しと中身が現れるとき", choose("登場のしかた", [...Object.entries(E.ENTRANCES), ["none", "動かさない"]], () => motion().entrance, setMotion("entrance"))),
+          drop("hover", "マウスを乗せたとき", "発表中、項目にマウスを乗せたとき", choose("マウスを乗せたとき", [...Object.entries(E.HOVERS), ["none", "変化なし"]], () => motion().hover, setMotion("hover")))),
+        col(drop("loop", "背景の動き", "表紙・章扉・ひと言・最後のスライドの背景", choose("背景の動き", [["none", "テンプレートの波紋だけ"], ...Object.entries(E.BACKDROPS)], () => motion().backdrop, setMotion("backdrop"))),
+          drop("textbox", "文字の動き", "表紙・章扉などの大きな文字", choose("大きな文字の動き", [["none", "動かさない"], ...Object.entries(E.KINETIC)], () => motion().kinetic, setMotion("kinetic"))),
+          drop("highlight", "強調の見せ方", "**語句** で囲んだ語句", choose("強調の見せ方", Object.entries(E.EMPHASES), () => motion().emphasis, setMotion("emphasis"))))),
+      group("ユーザー設定",
+        btn("slide", "スライドの|サイズ", "ワイド画面（16:9・13.33×7.5インチ）：SEJテンプレートの大きさです", () => app.toast("スライドのサイズはワイド画面（16:9・13.33×7.5インチ）です（SEJテンプレート）"), { big: true }),
+        col(btn("chartBar", "数字を数え上げる", "数字のカウントアップとグラフが伸びる動き（資料全体）", () => app.setDeckDesign({ motion: { numbers: !motion().numbers } }), { pressed: () => motion().numbers }),
+          btn("spot", "波紋を広げる", "SEJの波紋を発表中にゆっくり広げる", () => app.setDeckDesign({ motion: { ambient: !motion().ambient } }), { pressed: () => motion().ambient }),
+          btn("pen", "線を描くように", "アイコン・線・マーカーを描くように見せる", () => app.setDeckDesign({ motion: { draw: !motion().draw } }), { pressed: () => motion().draw }))),
+    ];
+  }
+
+  /** スライド ショー: start from the beginning or from here, hide a slide, rehearse its motion here. */
+  function slideshowTab() {
+    return [
+      group("スライド ショーの開始",
+        btn("showStart", "最初から", "最初のスライドから発表する（F5）", () => app.presentFrom(0), { big: true }),
+        btn("showHere", "このスライド|から", "このスライドから発表する（⇧F5）", () => app.presentFrom(app.index()), { big: true })),
+      group("設定",
+        btn("hideSlide", "非表示スライド|に設定", "発表ではこのスライドを飛ばす（編集用に残ります。もう一度で戻す）", () => app.toggleHiddenSlide(), { big: true, pressed: () => Boolean(app.slide()?.hidden), enabled: () => app.index() > 0 }),
+        col(btn("presenter", "発表者ツールを使用", "発表を始めると、ノート・次のスライド・経過時間の発表者ビューを別ウィンドウで開く（発表中は P）", () => app.setPresenterView(!app.presenterView()), { pressed: () => app.presenterView() }),
+          btn("previewPlay", "動きを確認", "閲覧表示：このスライドの動きをこの画面で再生する", () => app.previewMotion()),
+          btn("clock", "自動で切り替え", "このスライドを何秒で次へ進めるか（画面切り替えタブ）", () => showTab("transition", { open: true })))),
+    ];
+  }
+
+  /** 校閲: the checks, find and replace, notes, the AI's review, and review files to and from others. */
+  function reviewTab() {
+    return [
+      group("チェック",
+        btn("check", "チェック", "構成・文字のあふれ・SEJブランドを確かめる", () => app.openCheck(), { big: true }),
+        btn("magic", "あふれを|AIで直す", "文字が収まらないスライドをAIで順番に直す", () => app.fixOverflow(), { big: true, enabled: () => app.canFixOverflow() })),
+      group("検索", btn("find", "検索・|置換", "資料全体の文字を検索・置換（⌘F）", () => app.openReplace(), { big: true })),
+      group("ノート", btn("notes", "ノートを|作成", "スピーカーノートをまとめて作る（簡易・AI）", () => app.openNotes(), { big: true })),
+      group("AI", btn("magic", "AIで全体を|見直す", "指示を出して資料全体をAIに見直してもらう（Codexに接続しているとき）", () => app.reviseDeck(), { big: true, enabled: () => app.canAi() })),
+      group("レビュー",
+        btn("review", "レビュー用|ファイル", "相手はブラウザで開いてスライドごとにコメントを書き、結果のファイルを返送します", () => app.exportReview(), { big: true }),
+        btn("comment", "レビューを|取り込む", "コメント付きのPowerPoint、またはレビュー結果（.json）からコメントを読み込み、AIで反映します", () => app.importReview(), { big: true })),
     ];
   }
 
@@ -476,6 +623,9 @@ export function createEditorUi(editor, app) {
           { label: "このデバイスのビデオ・Lottie…", icon: "video", run: insertVideoFile },
           { label: "YouTube・URL…", icon: "link", run: () => insertFromUrl("video") },
         ]), { big: true })),
+      group("記号と日付",
+        col(drop("symbol", "記号と特殊文字", "記号を入れる（文字の入力中はカーソルの位置に）", () => symbolGallery(), { keep: true }),
+          drop("date", "日付と時刻", "今日の日付を入れる（文字の入力中はカーソルの位置に）", () => dateMenu(), { keep: true }))),
       group("リンク", h("span", { "data-rb": "link" }, btn("link", "リンク・|動作", "選んだ文字にリンク／図形をクリックしたときの動作（スライドへ移動・Webページを開く）", editLink, { big: true, keep: true, enabled: () => Boolean(one()) || editor.typing }))),
     ];
   }
@@ -618,33 +768,52 @@ export function createEditorUi(editor, app) {
     ];
   }
 
+  // PowerPoint's zoom steps (100% is the slide at its real size: 13.33 inches at 96 dpi).
+  const ZOOMS = [400, 300, 200, 150, 100, 66, 50, 33];
+  function zoomMenu() {
+    return menu([{ head: "ズーム" }, { label: "スライドを現在のウィンドウに合わせる", icon: "zoomFit", keys: "⌘0", on: editor.zoom === "fit", run: () => editor.setZoom("fit") }, "-",
+      ...ZOOMS.map((z) => ({ label: `${z}%`, on: editor.zoom === z, run: () => editor.setZoom(z) }))]);
+  }
+
   function viewTab() {
     const st = editor.state;
-    const zoomItems = [["fit", "全体を表示"], [0.5, "50%"], [0.66, "66%"], [0.75, "75%"], [1, "100%（実寸）"], [1.5, "150%"], [2, "200%"]];
     return [
-      group("表示",
+      group("プレゼンテーションの表示",
         btn("slide", "標準", "1枚ずつ編集", () => app.setView("single"), { big: true, pressed: () => app.state().view === "single" }),
-        col(btn("grid", "一覧", "スライド一覧", () => app.setView("grid")), btn("textLeft", "構成", "見出しとキーメッセージの一覧", () => app.setView("outline")))),
+        col(btn("grid", "スライド一覧", "スライド一覧", () => app.setView("grid"), { pressed: () => app.state().view === "grid" }),
+          btn("textLeft", "構成", "見出しとキーメッセージの一覧（アウトライン）", () => app.setView("outline"), { pressed: () => app.state().view === "outline" }),
+          btn("previewPlay", "閲覧表示", "このスライドの動きをこの画面で確認する", () => app.previewMotion()))),
       group("表示/非表示",
-        col(btn("grid", "グリッド線", "1cmごとの線を表示", () => editor.setView("grid", !st.grid), { pressed: () => st.grid }),
+        col(btn("ruler", "ルーラー", "スライドの上と左に目盛り（cm、スライドの中央が0）を表示", () => app.toggleRulers(), { pressed: () => app.rulersShown() }),
+          btn("grid", "グリッド線", "1cmごとの線を表示", () => editor.setView("grid", !st.grid), { pressed: () => st.grid }),
           btn("guides", "ガイド", "SEJの本文の領域（安全領域）と中央に合わせる", () => editor.setView("guides", !st.guides), { pressed: () => st.guides })),
-        col(btn("smart", "スマートガイド", "ほかの図形の端・中央・等間隔に吸着（Altで一時的に外す）", () => editor.setView("smart", !st.smart), { pressed: () => st.smart }),
+        col(btn("notes", "ノート", "スライドの下にスピーカーノートを表示", () => app.toggleNotes(), { pressed: () => app.notesShown() }),
+          btn("smart", "スマートガイド", "ほかの図形の端・中央・等間隔に吸着（Altで一時的に外す）", () => editor.setView("smart", !st.smart), { pressed: () => st.smart }),
           btn("snapGrid", "グリッドに|合わせる", "0.25cmごとに吸着", () => editor.setView("snapGrid", !st.snapGrid), { pressed: () => st.snapGrid }))),
+      group("カラー/グレースケール",
+        btn("grayView", "グレース|ケール", "スライドを白黒で見る（白黒印刷やコピーで読めるかの確認。資料は変わりません）", () => { grayView = !grayView; document.getElementById("stageBody")?.classList.toggle("view-gray", grayView); refresh(); }, { big: true, pressed: () => grayView })),
       group("ズーム",
-        drop("zoomIn", "ズーム", "表示の大きさ", () => menu(zoomItems.map(([z, label]) => ({ label, on: editor.zoom === z, run: () => editor.setZoom(z) }))), { big: true }),
-        btn("zoomFit", "全体表示", "スライド全体をウィンドウに合わせる", () => editor.setZoom("fit"), { big: true, pressed: () => editor.zoom === "fit" })),
+        drop("zoomIn", "ズーム", "表示の倍率", () => zoomMenu(), { big: true }),
+        btn("zoomFit", "ウィンドウに|合わせる", "スライド全体を現在のウィンドウに合わせる（⌘0）", () => editor.setZoom("fit"), { big: true, pressed: () => editor.zoom === "fit" })),
       group("ウィンドウ",
-        btn("pane", "選択|ウィンドウ", "オブジェクトの一覧", () => app.openPanel("format", "selection"), { big: true })),
+        col(btn("thumbs", "サムネイル", "左のスライドのサムネイルを表示する", () => app.togglePane("film"), { pressed: () => app.paneOpen("film") }),
+          btn("taskPane", "作業ウィンドウ", "右の作業ウィンドウ（AIと話す・編集・書式・アニメーション）を表示する", () => app.togglePane("side"), { pressed: () => app.paneOpen("side") }),
+          btn("pane", "選択ウィンドウ", "オブジェクトの一覧", () => app.openPanel("format", "selection"))),
+        drop("ribbon", "リボンの|表示", "リボンの表示オプション（常に表示・タブのみ・自動的に非表示。⌘F1で折りたたみ）", () => menu(Object.entries(RIBBON_MODES).map(([mode, label]) => ({ label, on: ribbonMode === mode, run: () => setRibbonMode(mode) }))), { big: true })),
     ];
   }
 
   function buildTab(id) {
-    return { home: homeTab, insert: insertTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, shape: shapeTab, picture: pictureTab, view: viewTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab }[id]();
+    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab }[id]();
   }
 
-  function showTab(id) {
+  /**
+   * Makes a tab the current one. When only the tabs show, the ribbon opens over the slide only when asked
+   * (`open`: a button that says "open this tab"), not after an insertion, as in PowerPoint.
+   */
+  function showTab(id, { open = false } = {}) {
     tab = id;
-    collapsed = false;
+    if (ribbonMode !== "full") { if (open) openFloating(id); else renderRibbon(true); return; }
     renderRibbon(true);
   }
 
@@ -882,5 +1051,9 @@ export function createEditorUi(editor, app) {
 
   editor.subscribe(() => { renderRibbon(); renderPane(); });
 
-  return { renderRibbon, renderPane, renderAnimPane: () => anim.renderPane(), editChart: (id) => tables.editChart(id), startCrop: (id) => crop.start(id), editPoints: (id) => freeform.editPoints(id), showTab, closePop, openPop, shapeGallery, iconGallery, photoGallery, get tab() { return tab; } };
+  return {
+    renderRibbon, renderPane, renderAnimPane: () => anim.renderPane(), editChart: (id) => tables.editChart(id), startCrop: (id) => crop.start(id), editPoints: (id) => freeform.editPoints(id),
+    showTab, closePop, openPop, shapeGallery, iconGallery, photoGallery, toggleRibbon, setRibbonMode, zoomMenu,
+    get tab() { return tab; }, get ribbonMode() { return ribbonMode; }, get floating() { return floating; },
+  };
 }

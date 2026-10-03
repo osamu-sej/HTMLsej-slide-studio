@@ -39,7 +39,7 @@ const goTo = async (n) => { await page.click(`.film-item:nth-child(${n})`); awai
 const text = (html) => String(html || "").replace(/<[^>]+>/g, "");
 
 await page.goto(base);
-await page.evaluate(() => localStorage.clear());
+await page.evaluate(() => { localStorage.clear(); localStorage.setItem("hsej-auto-html", "0"); });
 await page.goto(base);
 await page.waitForSelector("#importDeckBtn");
 await page.waitForTimeout(600);
@@ -214,7 +214,7 @@ await step("one reset removes every imported action but keeps every source page 
 });
 
 await step("a 4:3 deck in another template: centred on the page, its pictures kept in the browser, its pie chart drawn", async () => {
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("hsej-auto-html", "0"); });
   await page.goto(base);
   await page.waitForSelector("#importDeckBtn");
   await page.setInputFiles("#importDeckFile", join(decks, "plain43.pptx"));
@@ -234,7 +234,7 @@ await step("a 4:3 deck in another template: centred on the page, its pictures ke
 });
 
 await step("HTMLレイアウトに組み直す still rebuilds a deck into the studio's layouts", async () => {
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("hsej-auto-html", "0"); });
   await page.goto(base);
   await page.waitForSelector("#importDeckBtn");
   await page.setInputFiles("#importDeckFile", join(decks, "plain43.pptx"));

@@ -304,7 +304,8 @@ await step("export: the file carries the interactions and plays them", async () 
 });
 
 await step("a deck brought over from PowerPoint: おまかせ from the import message", async () => {
-  await page.evaluate(() => localStorage.clear());
+  // おまかせ by hand from the message bar (the automatic path is studio-motion-ide.mjs).
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("hsej-auto-html", "0"); });
   await page.goto(base);
   await page.waitForSelector("#importDeckBtn");
   await page.setInputFiles("#importDeckFile", join(decks, "sej.pptx"));
