@@ -11,7 +11,7 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 
 ## 編集画面（PowerPointと同じ配置）
 
-- 上からリボン（全幅）・メッセージバー（1行）・［サムネイル｜スライドとノート｜作業ウィンドウ］・ステータス バー。配置と境目・開閉・ノート・ステータス バーとズームは `public/editor/window.mjs`、リボンの表示オプション（常に表示・タブのみ・自動的に非表示、⌘F1）は `public/editor/ui.mjs`。スライドはウィンドウに合わせて全体が見えること（ズームの100%は1280px）。リボンやメッセージを増やすときもスライドを押し出さない。ルーラーは `public/editor/rulers.mjs`。変えたら `qa/studio-layout.mjs` を通す。
+- 上からリボン（全幅）・メッセージバー（1行）・［サムネイル｜スライドとノート｜作業ウィンドウ］・ステータス バー。配置と境目・開閉・ノート・ステータス バーとズームは `public/editor/window.mjs`、リボンの表示オプション（常に表示・タブのみ・自動的に非表示、⌘F1）は `public/editor/ui.mjs`。スライドはウィンドウに合わせて全体が見えること（ズームの100%は1280px）。リボンやメッセージを増やすときもスライドを押し出さない。ルーラーは `public/editor/rulers.mjs`、資料のガイド（`deck.guides`）は canvas.mjs（吸着はSEJのガイドと合わせて `allGuides()`）。変えたら `qa/studio-layout.mjs` を通す。
 - セクション（`slide.section`＝そのスライドから始まるセクション名）・コメント（`slide.comments`、`public/editor/comments.mjs`）・非表示（`hidden`）はユーザーだけの項目（`USER_ONLY_FIELDS`）。AIの変更のあとも `restoreUserFields`（server/chat.mjs）で残す。リハーサルは `slide.advance` に入れる。開発タブの「スライドのJSON」は `normalizeSlide` を通してから反映する。変えたら `qa/studio-powerpoint.mjs` を通す。
 - 動きのIDE：アニメーション ウィンドウ（`public/editor/anim.mjs`）はスライドで動くものを起きる順に並べる（スライドの自動の動き＝`autoMotionInfo()`（app.js）・アニメーション・インタラクション）。どれもその場で変えられ、1回のUndoで戻る。見た目どおりの取り込みにはHTMLの動き（おまかせ）を自動で付け（設定 `hsej-auto-html`、既定はオン）、メッセージバーから元に戻せる。取り込みの忠実度を見るQA（`studio-import.mjs`）は自動をオフにして走らせ、自動の流れは `qa/studio-motion-ide.mjs` で確かめる。
 

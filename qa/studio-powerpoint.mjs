@@ -1,7 +1,8 @@
 // More of PowerPoint, in a real browser: sections in the thumbnails (added, folded, renamed, swapped, in the slide
 // sorter too) and dragging slides in the sorter; review comments (校閲 → 新しいコメント: post, resolve, delete, the
 // thumbnail's mark); rehearse timings (スライド ショー → リハーサル: the times become 自動で切り替え); the 開発 tab
-// (the slide's JSON edited and applied, checked first; the HTML it becomes); ⌘H for find and replace.
+// (the slide's JSON edited and applied, checked first; the HTML it becomes); ⌘H for find and replace; the ファイル
+// menu; guides (added, dragged with the distance shown, snapped to, dragged off to delete, kept).
 // Usage: node qa/studio-powerpoint.mjs [--base=http://127.0.0.1:8787]   (with `npm start` running)
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -199,6 +200,83 @@ await step("⌘H opens find and replace", async () => {
   await page.keyboard.press("Control+h");
   await page.waitForSelector("#replaceDialog[open]");
   await page.keyboard.press("Escape");
+});
+
+await step("ファイル: the menu at the start of the ribbon (open the help, back to 作成)", async () => {
+  await page.click("#ribbon .rb-file");
+  await page.waitForSelector(".rb-pop .rb-menu");
+  for (const label of ["新規", "開く", "上書き保存", "名前を付けて保存", "HTMLファイル", "PDF", "JSONで保存", "版の履歴"]) assert(await page.locator(`.rb-pop .rb-menu button:has-text("${label}")`).count(), `menu: ${label}`);
+  await page.click('.rb-pop .rb-menu button:has-text("使い方とショートカット")');
+  await page.waitForSelector("#helpDialog[open]");
+  await page.keyboard.press("Escape");
+});
+
+await step("ガイド: added from 表示 and from a right-click, dragged (cm from the middle), objects snap to it, dragged off to delete, kept", async () => {
+  await filmByIndex(3).click();
+  await page.waitForTimeout(300);
+  await tab("表示");
+  await ribbonBtn("ガイド");
+  await page.click('.rb-pop .rb-menu button:has-text("垂直ガイドを追加")');
+  await page.waitForTimeout(300);
+  let d = await deck();
+  assert(JSON.stringify(d.guides) === JSON.stringify({ x: [960], y: [] }), `a vertical guide in the middle: ${JSON.stringify(d.guides)}`);
+  const guide = page.locator(".ed-cguide.v").first();
+  const g = await guide.boundingBox();
+  const slide = await page.locator(".slide-wrap .hs-scaler").boundingBox();
+  const k = slide.width / 1920;
+  await page.mouse.move(g.x + g.width / 2, slide.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(g.x + g.width / 2 - 150 * k, slide.y + 200, { steps: 6 });
+  assert(/cm/.test(await page.textContent(".ed-cguide-label")), "the distance from the middle while dragging");
+  await shot("guide-drag");
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  d = await deck();
+  assert(Math.abs(d.guides.x[0] - 810) <= 2, `moved to 810: ${d.guides.x}`);
+  // A right-click on the slide's background adds a horizontal guide there.
+  await page.mouse.click(slide.x + 40 * k, slide.y + 600 * k, { button: "right" });
+  await page.click('.ed-menu button:has-text("水平ガイドを追加")');
+  await page.waitForTimeout(300);
+  d = await deck();
+  assert(d.guides.y.length === 1 && Math.abs(d.guides.y[0] - 600) <= 2, `horizontal guide at 600: ${d.guides.y}`);
+  // Drag an object so its left edge comes near the guide: it snaps onto it.
+  await tab("挿入");
+  await ribbonBtn("テキスト ボックス");
+  await page.click('.rb-pop .rb-menu button:has-text("横書き")');
+  await page.mouse.move(slide.x + 300 * k, slide.y + 300 * k);
+  await page.mouse.down();
+  await page.mouse.move(slide.x + 600 * k, slide.y + 380 * k, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.type("吸着");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  d = await deck();
+  const box = d.slides[3].elements.at(-1);
+  const b = await page.locator(`.slide-wrap .hs-obj[data-el="${box.id}"]`).boundingBox();
+  const at = d.guides.x[0];
+  const dx = (at + 4 - box.x) * k;
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2 + dx / 2, b.y + b.height / 2, { steps: 3 });
+  await page.mouse.move(b.x + b.width / 2 + dx, b.y + b.height / 2, { steps: 3 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const snapped = (await deck()).slides[3].elements.find((o) => o.id === box.id);
+  assert(Math.abs(snapped.x - at) <= 0.6, `the box's left edge snaps to the guide at ${at}: ${snapped.x}`);
+  // Off the slide: deleted; ⌘Z brings it back; a reload keeps the guides.
+  const g2 = await page.locator(".ed-cguide.v").first().boundingBox();
+  await page.mouse.move(g2.x + g2.width / 2, slide.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(slide.x - 40, slide.y + 100, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  assert(!(await deck()).guides?.x?.length, "dragged off the slide: deleted");
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(300);
+  assert((await deck()).guides.x.length === 1, "⌘Z brings it back");
+  await page.reload();
+  await page.waitForSelector(".slide-wrap .hs-scaler");
+  assert(await page.locator(".ed-cguide").count() === 2 || (await deck()).guides.x.length === 1, "kept after a reload");
 });
 
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");

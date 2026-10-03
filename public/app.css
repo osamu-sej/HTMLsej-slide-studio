@@ -931,6 +931,15 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .ed-line-outline { position: absolute; height: 0; border-top: 1.5px dashed #2b6be0; transform-origin: 0 0; }
 .ed-line-outline.quiet { border-top-style: dotted; }
 .ed-guide { position: absolute; pointer-events: none; }
+/* The deck's guides (表示 → ガイド): dashed, dragged on a wider invisible strip. */
+.ed-cguide { position: absolute; pointer-events: auto; }
+.ed-cguide.v { top: 0; bottom: 0; width: 0; border-left: 1px dashed #b07a00; cursor: col-resize; }
+.ed-cguide.h { left: 0; right: 0; height: 0; border-top: 1px dashed #b07a00; cursor: row-resize; }
+.ed-cguide::before { content: ""; position: absolute; }
+.ed-cguide.v::before { top: 0; bottom: 0; left: -5px; width: 9px; }
+.ed-cguide.h::before { left: 0; right: 0; top: -5px; height: 9px; }
+.ed-cguide.out { border-color: var(--danger); }
+.ed-cguide-label { position: absolute; z-index: 5; padding: 2px 6px; border-radius: 4px; background: rgba(20, 22, 28, .85); color: #fff; font: 700 11px/1.4 system-ui, sans-serif; white-space: nowrap; pointer-events: none; }
 .ed-guide.v { width: 0; border-left: 1px dashed #e8463a; }
 .ed-guide.h { height: 0; border-top: 1px dashed #e8463a; }
 .ed-guide.guide, .ed-guide.slide { border-color: #f08c00; }

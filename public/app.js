@@ -606,8 +606,16 @@ function normalizeDeck(value, base = null) {
     transition,
     motion: normalizeMotion(meta.motion ?? base?.motion ?? DEFAULT_MOTION),
     memo: String(meta.memo ?? base?.memo ?? "").slice(0, 2000),
+    ...(guidesOf(meta.guides ?? base?.guides) ? { guides: guidesOf(meta.guides ?? base?.guides) } : {}),
     slides: normalized,
   });
+}
+
+/** The deck's guides (表示 → ガイド): positions in slide px, up to 20 each way. */
+function guidesOf(value) {
+  const list = (axis, max) => (Array.isArray(value?.[axis]) ? value[axis] : []).map(Number).filter((v) => Number.isFinite(v) && v >= 0 && v <= max).slice(0, 20).map((v) => Math.round(v * 2) / 2);
+  const guides = { x: list("x", E.W), y: list("y", E.H) };
+  return guides.x.length || guides.y.length ? guides : null;
 }
 
 /** Make the deck acceptable to the server schema without changing what the user sees. */
@@ -2180,6 +2188,7 @@ const editorApp = {
   rulersShown: () => shell.rulersShown(),
   paneOpen: (which) => shell.paneOpen(which),
   zoomChanged: () => shell?.renderZoom(),
+  setGuides: (next) => { if (!state.deck) return; pushUndo(); const g = guidesOf(next); if (g) state.deck.guides = g; else delete state.deck.guides; saveCurrent(); scheduleVersion(); },
   // The motion IDE: the slide's automatic motion (one row each in the animation pane), HTML motion on import.
   autoMotion: () => autoMotionInfo(),
   setAutoMotion: (key, value) => setAutoMotion(key, value),

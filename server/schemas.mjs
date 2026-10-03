@@ -243,6 +243,8 @@ export const deckShape = z.object({
   motion: deckMotionSchema.optional(),
   // Standing instructions for every AI request on this deck ("役員向け", "数値は9月時点"…).
   memo: z.string().max(2000).optional().default(""),
+  // The guides people drag on the slides (表示 → ガイド), in slide px.
+  guides: z.object({ x: z.array(z.number()).max(20).optional(), y: z.array(z.number()).max(20).optional() }).optional(),
   slides: z.array(slideSchema).min(1).max(500),
 });
 export const reviseRequestSchema = z.object({
