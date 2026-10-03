@@ -385,6 +385,7 @@ export function createEditorUi(editor, app) {
       "-",
       { label: "JSONを読み込む…", icon: "up", run: () => app.openJson() },
       { label: "版の履歴・過去の資料…", icon: "clock", run: () => app.openHistory() },
+      "-", { label: "共有（共同編集）…", icon: "share", run: () => app.share() },
       "-", { head: "オプション" },
       { label: `ユーザー名：${app.userName() || "未設定"}…`, icon: "people", run: () => app.changeUserName() },
       { label: "使い方とショートカット", icon: "tip", keys: "?", run: () => app.openHelp() },
@@ -1200,6 +1201,7 @@ export function createEditorUi(editor, app) {
     renderRibbon, renderPane, renderAnimPane: () => anim.renderPane(), editChart: (id) => tables.editChart(id),
     editSmartart: (id, item) => { editor.select([id]); showTab("smartartDesign"); smart.openPane(id, item); }, smartartToShapes: (id) => smart.toShapes(id), startCrop: (id) => crop.start(id), editPoints: (id) => freeform.editPoints(id),
     showTab, closePop, openPop, shapeGallery, iconGallery, photoGallery, toggleRibbon, setRibbonMode, zoomMenu,
+    popMenu: (anchor, items) => openPop(anchor, menu(items)),
     get tab() { return tab; }, get ribbonMode() { return ribbonMode; }, get floating() { return floating; },
   };
 }

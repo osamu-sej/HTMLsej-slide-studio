@@ -56,7 +56,7 @@ button { cursor: pointer; }
 .mode-tabs button { border: 0; background: transparent; padding: 6px 14px; border-radius: 8px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
 .mode-tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
 .mode-tabs button:disabled { opacity: .4; cursor: not-allowed; }
-.deck-title-input { flex: 1 1 auto; min-width: 80px; max-width: 520px; border: 1px solid transparent; background: transparent; padding: 6px 8px; border-radius: 8px; font-weight: 700; font-size: 14px; text-overflow: ellipsis; }
+.deck-title-input { flex: 1 1 auto; min-width: 140px; max-width: 520px; border: 1px solid transparent; background: transparent; padding: 6px 8px; border-radius: 8px; font-weight: 700; font-size: 14px; text-overflow: ellipsis; }
 .deck-title-input:hover { border-color: var(--line); }
 .deck-title-input:focus { outline: 0; border-color: var(--accent); box-shadow: var(--focus); background: #fff; }
 .top-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
@@ -1296,3 +1296,22 @@ audio.trim-media { background: transparent; }
 .sa-layout-quick { padding: 2px; border: 1px solid var(--line); border-radius: 4px; background: #fff; cursor: pointer; }
 .sa-layout-quick.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
 .sa-layout-quick:disabled { opacity: .45; cursor: default; }
+
+/* 共同編集 (coedit.mjs): the share button with the people in it, their marks on thumbnails and around selections. */
+.share-btn { display: inline-flex; align-items: center; gap: 6px; }
+.share-btn.is-shared { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.share-btn .pp-avatar { margin-left: -6px; border: 2px solid #fff; }
+.share-btn .pp-avatar:first-of-type { margin-left: 0; }
+.co-dot { width: 8px; height: 8px; border-radius: 50%; background: #9aa3ad; }
+.co-dot.connected { background: #2e7d32; }
+.co-dot.reconnecting { background: #f59e0b; }
+.co-film { position: absolute; right: 4px; bottom: 4px; display: flex; gap: 2px; z-index: 2; }
+.co-film .pp-avatar { border: 2px solid #fff; }
+.co-sel { position: absolute; pointer-events: none; border: 2px solid var(--co); border-radius: 3px; box-sizing: border-box; }
+.co-sel-name { position: absolute; left: -2px; top: -20px; padding: 1px 6px; border-radius: 3px 3px 3px 0; background: var(--co); color: #fff; font: 700 11px/16px system-ui, sans-serif; white-space: nowrap; }
+.share-dialog { width: min(560px, calc(100vw - 32px)); }
+.share-row { display: flex; gap: 8px; }
+.share-row input { flex: 1; min-width: 0; font-size: 12.5px; }
+@media (max-width: 1760px) {
+  .command-btn span { display: none; }
+}

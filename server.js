@@ -27,6 +27,7 @@ import { reconcileChatVisuals, slideMeaning } from "./server/visual-relevance.mj
 import { imageBrief } from "./server/image-brief.mjs";
 import { extractText, importDeck } from "./server/extract.mjs";
 import { varietyIssues } from "./public/layout-looks.mjs";
+import { createRooms } from "./server/rooms.mjs";
 import {
   chatRequestSchema,
   chatResultSchema,
@@ -632,9 +633,12 @@ const httpServer = createServer(async (req, res) => {
   }
 
   const stateless = STATELESS_API.has(url.pathname);
-  if (url.pathname.startsWith("/api/") && req.method === "POST" && !stateless && !sameOrigin(req)) {
+  if (url.pathname.startsWith("/api/") && (req.method === "POST" || req.method === "PUT") && !stateless && !sameOrigin(req)) {
     return json(res, 403, { error: "Origin mismatch" });
   }
+
+  // 共同編集 (server/rooms.mjs): create a room, listen to it, post changes and presence, share media.
+  if (url.pathname === "/api/rooms" || url.pathname.startsWith("/api/rooms/")) return roomRoute(req, res, url);
 
   if (url.pathname === "/api/client-error" && req.method === "POST") {
     // Browser-side failures end up in the server log, where they can actually be seen.
@@ -865,6 +869,71 @@ const httpServer = createServer(async (req, res) => {
   return json(res, 404, { error: "Not found" });
 });
 
+// ---------------------------------------------------------------- 共同編集 (co-editing rooms)
+
+const rooms = createRooms();
+setInterval(() => rooms.heartbeat(), 20_000).unref();
+
+/** With a team passcode, only members share decks; otherwise the unguessable link is the key. */
+function roomAllowed(req, res) {
+  if (!TEAM_MODE) return true;
+  const session = getSession(req, res);
+  return Boolean(session?.member);
+}
+
+async function roomRoute(req, res, url) {
+  if (!roomAllowed(req, res)) return json(res, 403, { error: "チームのパスコードを入れると共同編集できます" });
+  const parts = url.pathname.split("/").filter(Boolean); // api, rooms, id?, action?, mid?
+  try {
+    if (parts.length === 2 && req.method === "POST") {
+      const body = await readJson(req, 25_000_000);
+      const room = rooms.create(body.deck, { id: typeof body.id === "string" ? body.id : null });
+      return json(res, 200, { id: room.id, version: room.version });
+    }
+    const room = rooms.get(parts[2]);
+    if (!room) return json(res, 404, { error: "共同編集の部屋が見つかりません（時間が経って閉じられたか、サーバーが再起動しました）", gone: true });
+    const action = parts[3] || "";
+    if (!action && req.method === "GET") {
+      res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
+      const client = String(url.searchParams.get("client") || "");
+      rooms.join(room, res, { client, name: url.searchParams.get("name"), uid: url.searchParams.get("uid") });
+      req.on("close", () => rooms.leave(room, client, res));
+      return;
+    }
+    if (action === "ops" && req.method === "POST") {
+      const body = await readJson(req, 25_000_000);
+      return json(res, 200, { version: rooms.apply(room, String(body.client || ""), body.ops) });
+    }
+    if (action === "presence" && req.method === "POST") {
+      const body = await readJson(req, 20_000);
+      rooms.presence(room, String(body.client || ""), body);
+      return res.writeHead(204).end();
+    }
+    if (action === "leave" && req.method === "POST") {
+      const body = await readJson(req, 2_000);
+      rooms.leave(room, String(body.client || ""));
+      return res.writeHead(204).end();
+    }
+    if (action === "media" && parts[4]) {
+      const mid = decodeURIComponent(parts[4]);
+      if (req.method === "PUT") {
+        const body = await readBody(req, 200_000_000, "ファイルが大きすぎます（200MBまで）。");
+        rooms.putMedia(room, mid, req.headers["content-type"], body);
+        return res.writeHead(204).end();
+      }
+      if (req.method === "GET" || req.method === "HEAD") {
+        const media = rooms.getMedia(room, mid);
+        if (!media) return json(res, 404, { error: "ありません" });
+        res.writeHead(200, { "content-type": media.type, "content-length": media.body.length, "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff" });
+        return res.end(req.method === "HEAD" ? undefined : media.body);
+      }
+    }
+    return json(res, 404, { error: "Not found" });
+  } catch (error) {
+    return json(res, 400, { error: error.message });
+  }
+}
+
 httpServer.listen(PORT, process.env.HOST ?? "0.0.0.0", () => {
   console.log(`HTML SEJ Slide Studio: http://localhost:${PORT}`);
 });
@@ -872,6 +941,10 @@ httpServer.listen(PORT, process.env.HOST ?? "0.0.0.0", () => {
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.once(signal, () => {
     codex.close();
+    // Open streams (co-editing rooms, job progress) would hold the server open: end them so it can stop now.
+    rooms.closeAll();
     httpServer.close(() => process.exit(0));
+    httpServer.closeAllConnections?.();
+    setTimeout(() => process.exit(0), 3000).unref();
   });
 }
