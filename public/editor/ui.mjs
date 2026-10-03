@@ -639,6 +639,7 @@ export function createEditorUi(editor, app) {
         btn("presenter", "スライド ショー|の設定", "種類（自動プレゼンテーション）・繰り返し・発表するスライド（範囲・目的別）・タイミング・アニメーションなし・ペンの色", () => app.openShowSettings(), { big: true }),
         btn("hideSlide", "非表示スライド|に設定", "発表ではこのスライドを飛ばす（編集用に残ります。もう一度で戻す）", () => app.toggleHiddenSlide(), { big: true, pressed: () => Boolean(app.slide()?.hidden), enabled: () => app.index() > 0 }),
         btn("clock", "リハーサル", "最初から発表して1枚ずつの時間を計り、終わったらその時間で自動的に切り替えるようにできます", () => app.rehearse(), { big: true }),
+        btn("mic", "コーチによる|リハーサル", "話す練習：マイクで聞き取り、ペース・つなぎ言葉・繰り返し・スライドの読み上げをその場とレポートで知らせます（Chrome・Edge）", () => app.rehearseWithCoach(), { big: true }),
         drop("record", "記録", "スライド ショーの記録：発表しながらマイクでナレーションを録り、スライドごとのナレーションとタイミングにする", () => menu([
           { head: "スライド ショーの記録" },
           { label: "先頭から記録", icon: "record", run: () => app.recordShow(0) },

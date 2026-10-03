@@ -756,6 +756,41 @@
   // These clip the incoming slide itself, so edges and click points share the slide's own coordinates.
   const CLIPPED = new Set(["wipe", "circle", "blinds", "curtain"]);
 
+  // ---------------------------------------------------------------- transition options
+
+  // 画面切り替え → 効果のオプション. Directions are where the new slide comes from; going back reverses them.
+  const MOVE = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] };
+  const OPPOSITE = { right: "left", left: "right", down: "up", up: "down" };
+  const CLIP_FROM = { right: "inset(0 0 0 100%)", left: "inset(0 100% 0 0)", down: "inset(100% 0 0 0)", up: "inset(0 0 100% 0)" };
+  /**
+   * What a transition's option adds to the elements coming in and going out (classes and variables). Returns
+   * { rev, band }: whether the reversed animation plays, and whether the wipe's colour band shows.
+   */
+  function transitionOption(type, option, back, entering, leaving) {
+    const list = E.TRANSITION_OPTIONS?.[type];
+    const valid = list && list.some(([key]) => key === option);
+    if (!valid || option === list[0][0]) return { rev: back, band: true };
+    if (type === "slide" || type === "push" || type === "wipe") {
+      const way = back ? OPPOSITE[option] : option;
+      const first = list[0][0];
+      if (way === first) return { rev: false, band: true };
+      if (way === OPPOSITE[first]) return { rev: true, band: true };
+      const [x, y] = MOVE[way];
+      for (const el of [entering, leaving]) {
+        el.classList.add("tr-dir");
+        el.style.setProperty("--tr-dx", `${x * 100}%`);
+        el.style.setProperty("--tr-dy", `${y * 100}%`);
+      }
+      entering.style.setProperty("--tr-clip", CLIP_FROM[way]);
+      return { rev: false, band: false };
+    }
+    // 右へ (flip) turns the other way; 縦 (blinds) always opens across; 横 (curtain) opens up and down.
+    if (type === "flip") return { rev: !back, band: false };
+    if (type === "blinds") return { rev: true, band: false };
+    if (type === "curtain") { entering.classList.add("tr-h"); return { rev: back, band: false }; }
+    return { rev: back, band: true };
+  }
+
   // ---------------------------------------------------------------- transition sounds
 
   // 画面切り替え → サウンド: each sound is made with Web Audio (oscillators and filtered noise), so a deck and its
@@ -1165,10 +1200,11 @@
         stage.append(next);
         E.scale(next);
         current = next;
-        const suffix = dir < 0 ? " rev" : "";
         // Wipe and circle clip the incoming slide itself, so the edge, its colour band and the click point
         // share the slide's own coordinates (letterboxing never shows them).
         const entering = CLIPPED.has(type) ? slide : next;
+        const option = transitionOption(type, via ? null : slides[dir < 0 ? from : i]?.transitionDir, dir < 0, entering, prevScaler);
+        const suffix = option.rev ? " rev" : "";
         let band = null;
         if (type === "circle") {
           const box = slide.getBoundingClientRect();
@@ -1176,7 +1212,7 @@
           slide.style.setProperty("--cx", `${Math.round(at.x)}%`);
           slide.style.setProperty("--cy", `${Math.round(at.y)}%`);
         }
-        if (type === "wipe") {
+        if (type === "wipe" && option.band) {
           const tone = win.getComputedStyle(slide);
           band = h("div", { class: `hs-tr-band${suffix}` });
           band.style.setProperty("--band", tone.getPropertyValue("--accent").trim() || "#2451e6");
@@ -1191,7 +1227,7 @@
         busy = new Promise((resolve) => setTimeout(resolve, trMs ? trMs + 40 : TRANSITION_MS[type] ?? 620)).then(() => {
           prevScaler.remove();
           band?.remove();
-          entering.classList.remove(`hs-tr-in-${type}`, "rev");
+          entering.classList.remove(`hs-tr-in-${type}`, "rev", "tr-dir", "tr-h");
           busy = null;
         });
       }
@@ -1630,7 +1666,7 @@
    * Play one slide transition in a box (the studio's 画面切り替え「プレビュー」): `from` gives way to `to`, as the
    * player would show it. Resolves when it is over.
    */
-  function transitionPreview(host, fromEl, toEl, type, { dur = null } = {}) {
+  function transitionPreview(host, fromEl, toEl, type, { dur = null, dir = null } = {}) {
     const kind = TRANSITIONS.has(type) && type !== "morph" ? type : type === "morph" ? "fade" : "none";
     host.replaceChildren();
     const prev = E.mount(fromEl, { contain: true, className: "hs-player-slide" });
@@ -1641,19 +1677,20 @@
     host.append(next);
     E.scale(next);
     const entering = CLIPPED.has(kind) ? toEl : next;
+    const option = transitionOption(kind, dir, false, entering, prev);
     let band = null;
-    if (kind === "wipe") {
+    if (kind === "wipe" && option.band) {
       const tone = getComputedStyle(toEl);
-      band = h("div", { class: "hs-tr-band" });
+      band = h("div", { class: `hs-tr-band${option.rev ? " rev" : ""}` });
       band.style.setProperty("--band", tone.getPropertyValue("--accent").trim() || "#2451e6");
       band.style.setProperty("--band2", tone.getPropertyValue("--accent2").trim() || "#13a89e");
       toEl.append(band);
     }
-    entering.className += ` hs-tr-in-${kind}`;
-    prev.className += ` hs-tr-out-${kind}`;
+    entering.className += ` hs-tr-in-${kind}${option.rev ? " rev" : ""}`;
+    prev.className += ` hs-tr-out-${kind}${option.rev ? " rev" : ""}`;
     const ms = dur >= 100 ? dur : TRANSITION_MS[kind] ?? 620;
     if (dur >= 100) for (const el of [entering, prev, band].filter(Boolean)) el.style.animationDuration = `${dur}ms`;
-    return new Promise((resolve) => setTimeout(() => { prev.remove(); band?.remove(); entering.classList.remove(`hs-tr-in-${kind}`); resolve(); }, ms + 40));
+    return new Promise((resolve) => setTimeout(() => { prev.remove(); band?.remove(); entering.classList.remove(`hs-tr-in-${kind}`, "rev", "tr-dir", "tr-h"); resolve(); }, ms + 40));
   }
 
   const PV_CSS = `

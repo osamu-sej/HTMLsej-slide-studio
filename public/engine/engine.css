@@ -1312,6 +1312,15 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 @keyframes hs-tr-curtain { from { clip-path: inset(0 50% 0 50%); } to { clip-path: inset(0 0 0 0); } }
 .hs-tr-in-curtain { animation: hs-tr-curtain .9s cubic-bezier(.65, 0, .35, 1) both; }
 .hs-tr-out-blinds, .hs-tr-out-curtain { animation: hs-tr-dim .9s ease both; }
+/* 効果のオプション (slide.transitionDir): from the other sides (motion.js sets --tr-dx / --tr-dy / --tr-clip). */
+.hs-tr-in-slide.tr-dir, .hs-tr-in-push.tr-dir { animation-name: hs-tr-move-in; }
+.hs-tr-out-slide.tr-dir, .hs-tr-out-push.tr-dir { animation-name: hs-tr-move-out; }
+.hs-tr-in-wipe.tr-dir { animation-name: hs-tr-clip-in; }
+.hs-tr-in-curtain.tr-h { animation-name: hs-tr-curtain-h; }
+@keyframes hs-tr-move-in { from { transform: translate(var(--tr-dx, 0%), var(--tr-dy, 0%)); } to { transform: none; } }
+@keyframes hs-tr-move-out { from { transform: none; } to { transform: translate(calc(var(--tr-dx, 0%) * -1), calc(var(--tr-dy, 0%) * -1)); } }
+@keyframes hs-tr-clip-in { from { clip-path: var(--tr-clip, inset(0 0 0 100%)); } to { clip-path: inset(0 0 0 0); } }
+@keyframes hs-tr-curtain-h { from { clip-path: inset(50% 0 50% 0); } to { clip-path: inset(0 0 0 0); } }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .5s; }
 ::view-transition-group(hs-title), ::view-transition-group(hs-eyebrow), ::view-transition-group(hs-takeaway) { animation-duration: .6s; animation-timing-function: cubic-bezier(.65, 0, .35, 1); }
 @media (prefers-reduced-motion: reduce) { .hs-player * { animation: none !important; transition: none !important; } }

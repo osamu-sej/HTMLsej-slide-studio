@@ -376,13 +376,25 @@ export function createAnimations(editor, app, kit) {
 
   function transitionTab() {
     const current = () => slide()?.transition || "auto";
-    const set = (key) => { app.setSlideFields({ transition: key === "auto" ? undefined : key }); if (auto && key !== "auto") app.previewTransition(); };
+    const set = (key) => {
+      const type = key === "auto" ? app.deck()?.transition || "fade" : key;
+      const keep = (E.TRANSITION_OPTIONS[type] || []).some(([k]) => k === slide()?.transitionDir);
+      app.setSlideFields({ transition: key === "auto" ? undefined : key, ...(keep ? {} : { transitionDir: undefined }) });
+      if (auto && key !== "auto") app.previewTransition();
+    };
     const kinds = [["auto", "資料の設定"], ...Object.entries(E.TRANSITIONS).map(([k, l]) => [k, l.replace(/（.*$/, "")])];
     const items = kinds.map(([key, name]) => {
       const b = h("button", { type: "button", class: "an-tr", "data-tr": key, title: key === "auto" ? `資料全体の切り替え（${E.TRANSITIONS[app.deck()?.transition] || "フェード"}）に従う` : E.TRANSITIONS[key], onclick: () => set(key) }, h("span", { class: `an-tr-icon an-tr-${key}` }), h("small", {}, name));
       updater(() => b.classList.toggle("on", current() === key));
       return b;
     });
+    // 効果のオプション: the directions the slide's transition can come from (its first is the default).
+    const typeNow = () => { const s = slide(); return s?.transition || app.deck()?.transition || "fade"; };
+    const optionMenu = () => {
+      const list = E.TRANSITION_OPTIONS[typeNow()] || [];
+      const now = slide()?.transitionDir;
+      return menu([{ head: "方向" }, ...list.map(([key, label], k) => ({ label, on: now ? now === key : k === 0, run: () => { app.setSlideFields({ transitionDir: k === 0 ? undefined : key }); if (auto) app.previewTransition(); } }))]);
+    };
     // サウンド: a short sound as the slide arrives (played once here to hear it).
     const soundMenu = () => menu([
       { label: "［サウンドなし］", on: !slide()?.transitionSound, run: () => app.setSlideFields({ transitionSound: undefined }) },
@@ -395,12 +407,13 @@ export function createAnimations(editor, app, kit) {
     updater(() => { advanceOn.checked = slide()?.advance != null; });
     return [
       group("プレビュー", btn("previewPlay", "プレビュー", "このスライドへの切り替えを見る", () => app.previewTransition(), { big: true })),
-      group("画面切り替え", h("div", { class: "an-tr-grid" }, items)),
+      group("画面切り替え", h("div", { class: "an-tr-grid" }, items),
+        drop("effectOpts", "効果の|オプション", "切り替えの方向（押し上げ・ワイプ・スライドなど）", optionMenu, { big: true, enabled: () => Boolean(slide() && E.TRANSITION_OPTIONS[typeNow()]) })),
       group("タイミング",
         col(drop("audio", "サウンド", "スライドが現れるときに鳴らす音", soundMenu, { enabled: () => Boolean(slide()) }),
           soundName),
         col(field("期間", seconds(() => { const s = slide(); const type = s?.transition || app.deck()?.transition || "fade"; return s ? (s.transitionDur ?? E.transitionMs(type)) / 1000 : null; }, (v) => app.setSlideFields({ transitionDur: Math.round(v * 1000) }), { title: "切り替えにかける時間（秒）", min: 0.1, max: 10, stepS: 0.05, enabled: () => Boolean(slide()) && (slide().transition || app.deck()?.transition || "fade") !== "none" })),
-          btn("applyAll", "すべてに適用", "このスライドの切り替え・サウンド・期間・自動の切り替えを全スライドに", () => { const s = slide(); app.setSlideFields({ transition: s.transition, transitionDur: s.transitionDur, transitionSound: s.transitionSound, advance: s.advance }, { all: true }); app.toast("すべてのスライドに同じ切り替えを設定しました"); })),
+          btn("applyAll", "すべてに適用", "このスライドの切り替え・サウンド・期間・自動の切り替えを全スライドに", () => { const s = slide(); app.setSlideFields({ transition: s.transition, transitionDir: s.transitionDir, transitionDur: s.transitionDur, transitionSound: s.transitionSound, advance: s.advance }, { all: true }); app.toast("すべてのスライドに同じ切り替えを設定しました"); })),
         col(h("label", { class: "rb-field an-field an-check" }, h("input", { type: "checkbox", checked: true, disabled: true }), h("span", {}, "クリック時")),
           h("label", { class: "rb-field an-field an-check" }, advanceOn, h("span", {}, "自動的に切り替え")),
           field("秒後", seconds(() => slide()?.advance ?? null, (v) => app.setSlideFields({ advance: v }), { title: "自動的に切り替えるまでの秒数", min: 0, max: 600, stepS: 0.5, enabled: () => Boolean(slide()) })))),

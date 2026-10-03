@@ -104,6 +104,7 @@ const shared = {
   // 画面切り替え set by hand: the way in's length (ms) and moving on by itself after some seconds.
   transitionDur: z.number().min(100).max(10000).optional(),
   transitionSound: z.enum(["chime", "click", "camera", "whoosh", "drum", "applause", "coin", "bell", "stop"]).optional(),
+  transitionDir: z.enum(["right", "left", "down", "up", "horizontal", "vertical"]).optional(),
   advance: z.number().min(0).max(600).optional(),
   // 読み取り順序 (校閲 → アクセシビリティ): the objects' ids in the order a screen reader reads them.
   readingOrder: z.array(z.string().max(32)).max(5000).optional(),
@@ -307,7 +308,7 @@ export const chatResultSchema = z.object({
 });
 
 // Fields only people set (uploaded photos and videos, hand placement) are hidden from the AI's output schema.
-const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "transitionSound", "advance", "hideTitle", "master", "sourceViewport", "hidden", "section", "comments", "readingOrder"]);
+const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "hideTitle", "master", "sourceViewport", "hidden", "section", "comments", "readingOrder"]);
 function withoutUserFields(node) {
   if (Array.isArray(node)) return node.map(withoutUserFields);
   if (!node || typeof node !== "object") return node;
