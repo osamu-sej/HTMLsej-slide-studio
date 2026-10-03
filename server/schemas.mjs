@@ -69,7 +69,7 @@ export const detailSchema = z.object({
 // Objects people place by hand (shapes, text boxes, pictures, lines…), their animations, and a slide's id that
 // links between slides point at. People make them in the editor; the AI never writes them (USER_ONLY_FIELDS) and
 // every AI change keeps them (server/chat.mjs). public/engine/objects.js validates their contents.
-export const OBJECT_KINDS = ["shape", "text", "image", "line", "icon", "video", "lottie", "table", "chart"];
+export const OBJECT_KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart"];
 export const objectSchema = z.object({ id: z.string().min(1).max(32), kind: z.enum(OBJECT_KINDS) }).passthrough();
 export const timelineEntrySchema = z.object({ el: z.string().min(1).max(64) }).passthrough();
 
@@ -93,7 +93,12 @@ const shared = {
   hidden: z.boolean().optional(),
   // PowerPoint's sections (the first slide of each carries its name) and review comments on a slide.
   section: z.string().max(40).optional(),
-  comments: z.array(z.object({ id: z.string().max(32), text: z.string().max(2000), at: z.string().max(40).optional(), done: z.boolean().optional() }).passthrough()).max(200).optional(),
+  // A thread: who wrote it (by, and the browser's uid), the object it is pinned to (anchor), and replies.
+  comments: z.array(z.object({
+    id: z.string().max(32), text: z.string().max(2000), at: z.string().max(40).optional(), done: z.boolean().optional(),
+    by: z.string().max(40).optional(), uid: z.string().max(24).optional(), anchor: z.string().max(40).optional(), doneBy: z.string().max(40).optional(), edited: z.string().max(40).optional(),
+    replies: z.array(z.object({ id: z.string().max(40), text: z.string().max(2000), at: z.string().max(40).optional(), by: z.string().max(40).optional(), uid: z.string().max(24).optional(), edited: z.string().max(40).optional() }).passthrough()).max(100).optional(),
+  }).passthrough()).max(200).optional(),
   timeline: z.array(timelineEntrySchema).max(5000).optional(),
   sid: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).optional(),
   // 画面切り替え set by hand: the way in's length (ms) and moving on by itself after some seconds.

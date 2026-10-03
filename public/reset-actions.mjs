@@ -48,6 +48,12 @@ export function resetDeckActions(source) {
         object.autoplay = false;
         removed.mediaAutoplay += 1;
       }
+      // A sound that starts by itself or plays on across slides waits for a click on its icon instead.
+      if (object.kind === "audio" && (object.autoplay || object.across)) {
+        object.autoplay = false;
+        delete object.across;
+        removed.mediaAutoplay += 1;
+      }
     }
   }
   return { deck, removed, changed: JSON.stringify(deck) !== JSON.stringify(source) };

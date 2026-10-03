@@ -167,7 +167,7 @@
       const fx = Object.hasOwn(FX[cls], raw.fx) ? raw.fx : null;
       if (!fx) continue;
       if (cls === "out" && IN[fx].noExit) continue;
-      if (cls === "media" && !["video", "lottie"].includes(kinds.get(el))) continue;
+      if (cls === "media" && !["video", "audio", "lottie"].includes(kinds.get(el))) continue;
       let id = typeof raw.id === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(raw.id) ? raw.id : "";
       while (!id || seen.has(id)) id = `a${Math.random().toString(36).slice(2, 9)}`;
       seen.add(id);
@@ -988,10 +988,13 @@
 
   function media(parts, fx) {
     for (const part of parts) {
-      const video = part.node.querySelector("video");
+      const video = part.node.querySelector("video, audio");
       const frame = part.node.querySelector("iframe");
       const lottie = part.node.querySelector(".hs-lottie-host");
-      if (video) {
+      if (video && E.mediaPlay) {
+        if (fx === "play") E.mediaPlay(video);
+        else E.mediaPause(video, { stop: fx === "stop" });
+      } else if (video) {
         if (fx === "play") video.play().catch(() => { video.muted = true; video.play().catch(() => {}); });
         else { video.pause(); if (fx === "stop") video.currentTime = 0; }
       }

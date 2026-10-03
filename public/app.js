@@ -9,6 +9,7 @@ import { resetDeckActions } from "./reset-actions.mjs?v=__APP_VERSION__";
 import { chromeOf, describeAdded, enhanceSlide } from "./editor/htmlfx.mjs?v=__APP_VERSION__";
 import { createShell } from "./editor/window.mjs?v=__APP_VERSION__";
 import { createComments } from "./editor/comments.mjs?v=__APP_VERSION__";
+import { userName } from "./editor/people.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -549,11 +550,31 @@ function normalizeSlide(raw, index, total) {
   if (typeof slide.section === "string" && slide.section.trim()) slide.section = slide.section.trim().slice(0, 40); else delete slide.section;
   // Review comments on the slide (校閲 → 新しいコメント).
   const comments = (Array.isArray(slide.comments) ? slide.comments : []).filter((c) => c && typeof c.text === "string" && c.text.trim()).slice(0, 200)
-    .map((c, i) => ({ id: /^[A-Za-z0-9_-]{1,32}$/.test(c.id || "") ? c.id : `c${Date.now().toString(36)}${i}`, text: c.text.trim().slice(0, 2000), ...(typeof c.at === "string" ? { at: c.at.slice(0, 40) } : {}), ...(c.done === true ? { done: true } : {}) }));
+    .map((c, i) => normalizeComment(c, `c${Date.now().toString(36)}${i}`, true));
   if (comments.length) slide.comments = comments; else delete slide.comments;
   // The first page is the cover: a title page, or a cover brought over from PowerPoint (a 白紙 page).
   if (index === 0 && total > 1 && type !== "title" && slide.master !== "source" && !(type === "blank" && slide.elements?.length)) return { type: "title", title: strip(slide.title) || "無題の資料" };
   return slide;
+}
+
+/** A review comment (or, thread = false, a reply): text, who and when, kept as people wrote it. */
+function normalizeComment(c, fallbackId, thread = false) {
+  const str = (v, max) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
+  const out = { id: /^[A-Za-z0-9_-]{1,32}$/.test(c.id || "") ? c.id : fallbackId, text: c.text.trim().slice(0, 2000) };
+  if (str(c.at, 40)) out.at = str(c.at, 40);
+  if (str(c.by, 40)) out.by = str(c.by, 40).replace(/[<>]/g, "");
+  if (/^[a-z0-9]{6,24}$/.test(c.uid || "")) out.uid = c.uid;
+  if (str(c.edited, 40)) out.edited = str(c.edited, 40);
+  if (!thread) return out;
+  if (/^[A-Za-z0-9_-]{1,40}$/.test(c.anchor || "")) out.anchor = c.anchor;
+  if (c.done === true) {
+    out.done = true;
+    if (str(c.doneBy, 40)) out.doneBy = str(c.doneBy, 40).replace(/[<>]/g, "");
+  }
+  const replies = (Array.isArray(c.replies) ? c.replies : []).filter((r) => r && typeof r.text === "string" && r.text.trim()).slice(-100)
+    .map((r, i) => normalizeComment(r, `${out.id.slice(0, 24)}r${i}`));
+  if (replies.length) out.replies = replies;
+  return out;
 }
 
 function normalizeMotion(motion = {}) {
@@ -1697,6 +1718,7 @@ function renderFilmstrip() {
     const flags = [];
     if (slide.media?.kind === "video" || E.youtubeId(slide.media?.src)) flags.push(h("span", { title: "動画あり" }, "▶"));
     if (slide.media?.kind === "lottie") flags.push(h("span", { title: "アニメーション（Lottie）あり" }, "✦"));
+    if ((slide.elements || []).some((o) => o.kind === "audio")) flags.push(h("span", { title: "オーディオあり" }, "♪"));
     if (E.backdropOf(slide, slide.type, state.deck.motion) || (slide.kinetic && slide.kinetic !== "none")) flags.push(h("span", { title: "モーショングラフィックあり" }, "◎"));
     if (slide.details?.length) flags.push(h("span", { title: "クリックで開く詳細あり" }, "＋"));
     if (story.drills[index]?.length) flags.push(h("span", { title: `クリックで移る深掘りページ ${story.drills[index].length}枚` }, `↗${story.drills[index].length}`));
@@ -2018,11 +2040,11 @@ function toggleHiddenSlide() {
 }
 
 /** The comments on a slide changed (comments.mjs): one undo step. */
-function setCommentsOf(index, list) {
+function setCommentsOf(index, list, { undo = true } = {}) {
   const slide = state.deck?.slides[index];
   if (!slide) return;
-  pushUndo();
-  const clean = list.filter((c) => c && String(c.text || "").trim()).map(({ done, ...c }) => (done ? { ...c, done: true } : c));
+  if (undo) pushUndo();
+  const clean = list.filter((c) => c && typeof c.text === "string" && c.text.trim()).slice(0, 200).map((c, i) => normalizeComment(c, `c${Date.now().toString(36)}${i}`, true));
   if (clean.length) slide.comments = clean; else delete slide.comments;
   markChanged({ structural: true });
   comments.render();
@@ -2143,6 +2165,7 @@ const editorApp = {
   focusStage: () => { if (state.inline) finishInlineEdit(true); },
   insertFiles: (files, at) => insertObjectFiles(files, at),
   insertUrl: (url, kind) => insertObjectUrl(url, kind),
+  insertRecording: (blob, opts) => insertRecording(blob, opts),
   replaceImage: (id, file) => replaceObjectImage(id, file),
   pickFiles,
   ask: askDialog,
@@ -2197,6 +2220,11 @@ const editorApp = {
   // 校閲 → コメント; ホーム・サムネイル → セクション; スライド ショー → リハーサル; 開発 (the slide's code).
   newComment: () => { setPanel("comment"); comments.focusNew(); },
   commentGo: (dir) => comments.go(dir),
+  clearComments: (scope) => comments.clear(scope),
+  commentPins: () => comments.showPins(),
+  setCommentPins: (on) => comments.setShowPins(on),
+  userName: () => userName(),
+  changeUserName: () => comments.changeName(),
   addSection: () => addSection(),
   rehearse: () => rehearse(),
   designIdeas: () => { setPanel("chat"); requestVariants(state.selected); },
@@ -2226,8 +2254,14 @@ const shell = createShell({
   openZoomMenu: (anchor) => editorUi.openPop(anchor, editorUi.zoomMenu()),
   ribbonChanged: () => editorUi.renderRibbon(),
 });
+// Shared editing (共有, public/editor/coedit.mjs): set once the deck is shared.
+let coedit = null;
 // Review comments (校閲, public/editor/comments.mjs).
-const comments = createComments({ h, deck: () => state.deck, index: () => state.selected, select: (i) => select(i), toast, setCommentsOf });
+const comments = createComments({
+  h, E, editor, deck: () => state.deck, index: () => state.selected, select: (i) => select(i), toast, setCommentsOf, ask: askDialog,
+  showPanel: (panel) => setPanel(panel, { reveal: true }), onSlide: () => state.view === "single",
+  people: () => coedit?.names() || [], nameChanged: (name) => coedit?.rename(name),
+});
 // Read-only access for the browser checks (qa/studio-objects.mjs): the deck and the slide on the stage.
 window.__hsej = { deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection, typing: () => editor.state.typing?.cell ?? (editor.typing ? "text" : null), cellRange: () => editor.cellRange };
 
@@ -2452,23 +2486,52 @@ async function insertObjectFiles(files, at = null) {
         if (file.size > 400_000_000) { toast("動画が大きすぎます（400MBまで）"); continue; }
         const src = await putMedia(file, file.name);
         made.push(ops.makeObject("video", fitBox(await videoSize(mediaUrls[src])), { src, fileName: file.name, autoplay: true, loop: true, muted: true }));
+      } else if (file.type.startsWith("audio/") || /\.(mp3|m4a|wav|ogg|oga|aac|flac|opus)$/i.test(file.name)) {
+        if (file.size > 200_000_000) { toast("音声が大きすぎます（200MBまで）"); continue; }
+        const src = await putMedia(file, file.name);
+        made.push(audioObject(src, file.name));
       } else if (file.type.startsWith("image/")) {
         const blob = /gif|svg/.test(file.type) ? file : await downscaleImage(file, 2400, /png|webp/.test(file.type) ? "image/png" : "image/jpeg");
         const src = await putMedia(blob, file.name);
         made.push(ops.makeObject("image", fitBox(await naturalSize(mediaUrls[src])), { src, fileName: file.name, alt: file.name.replace(/\.[a-z0-9]+$/i, "") }));
-      } else toast(`「${file.name}」は入れられません（画像・動画・Lottie JSON）`);
+      } else toast(`「${file.name}」は入れられません（画像・動画・音声・Lottie JSON）`);
     } catch (error) {
       toast(`読み込めませんでした：${error.message}`);
     }
   }
-  if (made.length) editor.insert(made, { at });
+  // A sound goes in the middle of the slide, as PowerPoint puts it.
+  if (made.length) editor.insert(made, { at: at ?? (made.every((o) => o.kind === "audio") ? [E.W / 2, E.H / 2] : null) });
   return made;
 }
 
-/** An image, a video (YouTube, mp4) or a Lottie animation from the web → an object. */
+/** A sound on the slide: the speaker icon in the middle of the slide, as PowerPoint puts it (挿入 → オーディオ). */
+function audioObject(src, name) {
+  const size = 120;
+  return ops.makeObject("audio", { x: (E.W - size) / 2, y: (E.H - size) / 2, w: size, h: size }, { src, fileName: name, name: String(name || "オーディオ").replace(/\.[a-z0-9]+$/i, "").slice(0, 60) });
+}
+
+/** A recording made in the studio (オーディオの録音・画面録画): kept in this browser, then placed on the slide. */
+async function insertRecording(blob, { kind = "audio", name = "" } = {}) {
+  if (!state.deck || !blob?.size) return;
+  const src = await putMedia(blob, name);
+  if (kind === "video") {
+    editor.insert([ops.makeObject("video", fitBox(await videoSize(mediaUrls[src])), { src, fileName: name, autoplay: false, loop: false, muted: false })]);
+    toast("画面録画をビデオとして入れました（再生タブでトリミングできます）");
+  } else {
+    editor.insert([audioObject(src, name)], { at: [E.W / 2, E.H / 2] });
+    toast("録音を入れました（発表中にアイコンをクリックすると再生します）");
+  }
+}
+
+/** An image, a video (YouTube, mp4), a sound or a Lottie animation from the web → an object. */
 async function insertObjectUrl(url, kind) {
   if (!/^https:\/\//i.test(url)) return toast("https:// で始まるURLを入れてください");
   try {
+    if (kind === "audio" || /\.(mp3|m4a|wav|ogg|oga|aac|flac|opus)(\?|#|$)/i.test(url)) {
+      editor.insert([audioObject(url, decodeURIComponent(url.split("/").pop().split("?")[0]).slice(0, 60) || "オーディオ")], { at: [E.W / 2, E.H / 2] });
+      toast("オーディオを入れました（発表の画面で再生されます。インターネットにつながっている必要があります）");
+      return;
+    }
     if (/\.json(\?|#|$)/i.test(url) || /^https:\/\/(lottie\.host|[a-z0-9-]+\.lottiefiles\.com)\//i.test(url)) {
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -3396,11 +3459,29 @@ function autoMotionInfo() {
     rows.push({ key: "backdrop", label: "背景の動き", options: opts(BACKDROP_INFO, `おまかせ（${backdrop ? E.BACKDROPS[backdrop] : "なし"}）`), value: slide.backdrop || "auto" });
     if (!blank) rows.push({ key: "emphasis", label: "強調（**語句**）", options: opts(EMPHASIS_INFO, deckWord(E.EMPHASES[deckMotion.emphasis])), value: slide.emphasis || "auto" });
   }
+  // Sounds and videos: how each starts (再生 →「開始」), so what plays by itself is in the same list.
+  const media = (slide.elements || []).filter((o) => (o.kind === "audio" || (o.kind === "video" && !E.youtubeId(o.src))) && !o.hidden);
+  for (const o of media) {
+    const inSequence = (slide.timeline || []).some((e) => e.cls === "media" && e.fx === "play" && e.el === o.id && !e.trigger);
+    const name = o.name || o.fileName || E.KIND_LABELS[o.kind];
+    rows.push({ key: `media:${o.id}`, label: `${o.kind === "audio" ? "🔊" : "▶"} ${String(name).slice(0, 18)}${o.across ? "（切り替え後も）" : ""}`,
+      options: [["auto", "自動で再生"], ["sequence", "一連のクリック動作"], ["click", "クリック時（アイコン）"]], value: o.autoplay ? "auto" : inSequence ? "sequence" : "click" });
+  }
   return { source, rows };
 }
 function setAutoMotion(key, value) {
+  if (key.startsWith("media:")) return setMediaStart(key.slice(6), value);
   if (!["transition", "entrance", "animation", "kinetic", "backdrop", "emphasis"].includes(key)) return;
   setSlideFields({ [key]: value === "auto" ? null : value });
+}
+/** How a sound or a video starts, in one undo step: with the slide, in the click order, or on a click on it. */
+function setMediaStart(id, value) {
+  const slide = state.deck?.slides[state.selected];
+  if (!slide?.elements?.some((o) => o.id === id)) return;
+  const elements = slide.elements.map((o) => (o.id === id ? { ...o, autoplay: value === "auto" } : o));
+  let timeline = (slide.timeline || []).filter((e) => !(e.cls === "media" && e.fx === "play" && e.el === id && !e.trigger));
+  if (value === "sequence") timeline = [...timeline, { id: `a${Math.random().toString(36).slice(2, 9)}`, el: id, cls: "media", fx: "play", start: "click", dur: 1, delay: 0 }];
+  setObjects(elements, { timeline });
 }
 
 // ---- motion graphics for one slide (the deck's defaults live in the design dialog)
@@ -4859,7 +4940,30 @@ function reviewCard(message) {
           const lines = picked.map((comment) => `- ${comment.slide == null ? "全体" : `@${comment.slide + 1}`}${comment.author ? `（${comment.author}）` : ""}：${comment.text}`);
           sendChat(`次のレビューコメントを反映してください。対応しないほうがよいものは理由を教えてください。\n${lines.join("\n")}`);
         } }, "✦ 選んだコメントを反映して"),
+        h("button", { class: "btn", type: "button", title: "選んだコメントを各スライドのコメント（校閲）として残す。書いた人の名前も付きます", onclick: () => {
+          const picked = comments.filter((_, index) => selected.has(index));
+          if (!picked.length) return toast("残すコメントを選んでください");
+          reviewToComments(picked);
+        } }, "スライドのコメントにする"),
         h("button", { class: "btn", type: "button", onclick: () => { meta.status = "dismissed"; saveChat(); renderChat(); } }, "閉じる")));
+}
+
+/** Review comments from a file become the slides' own comments (校閲), with the reviewer's name: one undo step. */
+function reviewToComments(picked) {
+  if (!state.deck) return;
+  pushUndo();
+  const at = new Date().toISOString();
+  picked.forEach((comment, k) => {
+    const index = comment.slide ?? 0;
+    const slide = state.deck.slides[index];
+    if (!slide) return;
+    const text = `${comment.slide == null ? "（資料全体）" : ""}${comment.text}`;
+    if ((slide.comments || []).some((c) => c.text === text && (c.by || "") === (comment.author || ""))) return;
+    slide.comments = [...(slide.comments || []), normalizeComment({ id: `rv${Date.now().toString(36)}${k}`, text, at, by: comment.author || "レビュー" }, `rv${k}`, true)].slice(0, 200);
+  });
+  markChanged({ structural: true });
+  setPanel("comment", { reveal: true });
+  toast(`${picked.length}件をスライドのコメントにしました（校閲 → コメント）`);
 }
 
 // ---------------------------------------------------------------- attachments in the chat
@@ -5854,6 +5958,12 @@ function bind() {
     if (meta && event.key.toLowerCase() === "z" && state.mode === "edit" && !typing) {
       event.preventDefault();
       undoRedo(event.shiftKey ? "redo" : "undo");
+      return;
+    }
+    // ⌘Y / Ctrl+Y: やり直し, as in PowerPoint.
+    if (meta && !event.shiftKey && event.key.toLowerCase() === "y" && state.mode === "edit" && !typing) {
+      event.preventDefault();
+      undoRedo("redo");
       return;
     }
     if (!typing && event.key === "?") { event.preventDefault(); $("helpDialog").showModal(); return; }

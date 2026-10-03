@@ -204,3 +204,68 @@ class SourceEffectsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewCommentsTest(unittest.TestCase):
+    """PowerPoint's comments come over as threads with who wrote them, when, replies and the shape they are on."""
+
+    @staticmethod
+    def _part(prs, name, content_type, xml):
+        from pptx.opc.package import Part
+        from pptx.opc.packuri import PackURI
+        return Part(PackURI(name), content_type, prs.part.package, blob=xml.encode("utf-8"))
+
+    def test_modern_comments_keep_authors_replies_status_and_their_shape(self):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(3), Inches(1))
+        box.text = "Target"
+        p188 = "http://schemas.microsoft.com/office/powerpoint/2018/8/main"
+        authors = self._part(prs, "/ppt/authors.xml", "application/vnd.ms-powerpoint.authors+xml",
+                             f'<p188:authorLst xmlns:p188="{p188}"><p188:author id="{{A1}}" name="山田 太郎" initials="YT" userId="y" providerId="None"/>'
+                             f'<p188:author id="{{B2}}" name="Sato" initials="S" userId="s" providerId="None"/></p188:authorLst>')
+        prs.part.relate_to(authors, "http://schemas.microsoft.com/office/2018/10/relationships/authors")
+        body = '<p188:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>{}</a:t></a:r></a:p></p188:txBody>'
+        cm = self._part(prs, "/ppt/comments/modernComment_100_0.xml", "application/vnd.ms-powerpoint.comments+xml",
+                        f'<p188:cmLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p188="{p188}">'
+                        f'<p188:cm id="{{C1}}" authorId="{{A1}}" created="2026-09-01T10:00:00.000">'
+                        '<ac:deMkLst xmlns:ac="http://schemas.microsoft.com/office/drawing/2013/main/command" xmlns:pc="http://schemas.microsoft.com/office/powerpoint/2013/main/command">'
+                        f'<pc:docMk/><pc:sldMk cId="0" sldId="256"/><ac:spMk id="{box.shape_id}" creationId="{{X}}"/></ac:deMkLst>'
+                        f'<p188:replyLst><p188:reply id="{{R1}}" authorId="{{B2}}" created="2026-09-02T09:00:00.000">{body.format("直しました")}</p188:reply></p188:replyLst>'
+                        f'{body.format("数字を確認 @Sato")}</p188:cm>'
+                        f'<p188:cm id="{{C2}}" authorId="{{B2}}" created="2026-09-03T09:00:00.000" status="resolved">{body.format("済み")}</p188:cm></p188:cmLst>')
+        slide.part.relate_to(cm, "http://schemas.microsoft.com/office/2018/10/relationships/comments")
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        page = deck["slideData"][0]
+        first, second = page["comments"]
+        self.assertEqual(first["text"], "数字を確認 @Sato")
+        self.assertEqual(first["by"], "山田 太郎")
+        self.assertTrue(first["at"].startswith("2026-09-01"))
+        self.assertEqual(first["anchor"], by_text(page, "Target")["id"])
+        self.assertEqual([(r["by"], r["text"]) for r in first["replies"]], [("Sato", "直しました")])
+        self.assertTrue(second["done"])
+        self.assertNotIn("done", first)
+
+    def test_classic_comments_and_their_threaded_replies(self):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        authors = self._part(prs, "/ppt/commentAuthors.xml", "application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml",
+                             '<p:cmAuthorLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+                             '<p:cmAuthor id="0" name="Reviewer A" initials="RA" lastIdx="1" clrIdx="0"/><p:cmAuthor id="1" name="Writer B" initials="WB" lastIdx="1" clrIdx="1"/></p:cmAuthorLst>')
+        prs.part.relate_to(authors, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/commentAuthors")
+        cm = self._part(prs, "/ppt/comments/comment1.xml", "application/vnd.openxmlformats-officedocument.presentationml.comments+xml",
+                        '<p:cmLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+                        '<p:cm authorId="0" dt="2026-08-01T10:00:00.000" idx="1"><p:pos x="10" y="10"/><p:text>Shorter title?</p:text></p:cm>'
+                        '<p:cm authorId="1" dt="2026-08-02T10:00:00.000" idx="1"><p:pos x="10" y="10"/><p:text>Done.</p:text>'
+                        '<p:extLst><p:ext uri="{C676402C-5697-4E1C-873F-D02D1690AC5C}"><p15:threadingInfo xmlns:p15="http://schemas.microsoft.com/office/powerpoint/2012/main" timeZoneBias="-540">'
+                        '<p15:parentCm authorId="0" idx="1"/></p15:threadingInfo></p:ext></p:extLst></p:cm></p:cmLst>')
+        slide.part.relate_to(cm, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments")
+        out = io.BytesIO()
+        prs.save(out)
+        page = read_pptx_exact(out.getvalue())["slideData"][0]
+        self.assertEqual(len(page["comments"]), 1)
+        thread = page["comments"][0]
+        self.assertEqual((thread["by"], thread["text"]), ("Reviewer A", "Shorter title?"))
+        self.assertEqual([(r["by"], r["text"]) for r in thread["replies"]], [("Writer B", "Done.")])

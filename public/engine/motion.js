@@ -336,10 +336,16 @@
 
   // ---------------------------------------------------------------- media
 
-  function playMedia(slide, { sound = false } = {}) {
+  function playMedia(slide, { sound = false, skip = null } = {}) {
     for (const video of slide.querySelectorAll("video[data-autoplay]")) {
       video.muted = !sound || video.hasAttribute("data-muted");
-      video.play().catch(() => { video.muted = true; video.play().catch(() => {}); });
+      if (E.mediaPlay) E.mediaPlay(video, { fromStart: true });
+      else video.play().catch(() => { video.muted = true; video.play().catch(() => {}); });
+    }
+    // Sounds that start with the slide (再生 →「自動」); one still playing from an earlier slide is not doubled.
+    for (const audio of slide.querySelectorAll("audio[data-autoplay]")) {
+      if (skip?.has(audio.closest("[data-el]")?.dataset.el)) continue;
+      E.mediaPlay?.(audio, { fromStart: true });
     }
     for (const frame of slide.querySelectorAll("iframe[data-autoplay]")) {
       const send = () => frame.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*");
@@ -351,7 +357,10 @@
 
   function stopMedia(slide) {
     E.animStop?.(slide);
-    for (const video of slide.querySelectorAll("video")) { try { video.pause(); } catch { /* detached */ } }
+    for (const media of slide.querySelectorAll("video, audio")) {
+      if (E.mediaPause) E.mediaPause(media);
+      else { try { media.pause(); } catch { /* detached */ } }
+    }
     for (const frame of slide.querySelectorAll("iframe")) frame.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
     stopLottie(slide);
   }
@@ -676,7 +685,22 @@
       const video = event.target.closest?.("video");
       if (video) {
         event.stopPropagation();
-        if (video.paused) { video.muted = video.hasAttribute("data-muted"); video.play().catch(() => {}); } else video.pause();
+        if (video.paused) { video.muted = video.hasAttribute("data-muted"); if (E.mediaPlay) E.mediaPlay(video); else video.play().catch(() => {}); } else if (E.mediaPause) E.mediaPause(video); else video.pause();
+      }
+      // A sound's icon (or its bar's button) plays and pauses it; a click on the bar's track moves through it.
+      const sound = event.target.closest?.(".hs-audio");
+      if (sound && !sound.hasAttribute("data-hide-icon")) {
+        event.stopPropagation();
+        event.preventDefault();
+        const audio = sound.querySelector("audio");
+        const track = event.target.closest(".hs-audio-track");
+        if (audio && track && E.mediaSpan) {
+          const r = track.getBoundingClientRect();
+          const [start, end] = E.mediaSpan(audio);
+          if (Number.isFinite(end)) audio.currentTime = start + ((event.clientX - r.left) / r.width) * (end - start);
+          if (audio.paused) E.mediaPlay(audio);
+        } else if (audio) E.mediaToggle?.(audio);
+        return;
       }
       // A Lottie animation that does not play by itself starts (or pauses) on click.
       const anim = event.target.closest?.(".hs-lottie-host")?.hsAnim;
@@ -782,8 +806,35 @@
     const grid = h("div", { class: "hs-player-grid", hidden: true });
     const black = h("div", { class: "hs-player-black", hidden: true, onclick: (event) => { event.stopPropagation(); black.hidden = true; } });
     const backBtn = h("button", { class: "hs-player-back", type: "button", hidden: true, title: "元のスライドへ戻る（Esc・←）", onclick: (event) => { event.stopPropagation(); closeDrill(); } }, "← 元のスライドへ");
-    const player = h("div", { class: "hs-player", tabindex: "-1" }, stage, progress, notes, backBtn, bar, grid, black);
+    // Sounds set to play on across slides (再生 →「スライド切り替え後も再生」) move here when their slide is left.
+    const carryHost = h("div", { class: "hs-carry", hidden: true });
+    const carried = [];
+    const player = h("div", { class: "hs-player", tabindex: "-1" }, stage, progress, notes, backBtn, bar, grid, black, carryHost);
     host.append(player);
+
+    /** Leaving a slide: its playing sounds that go on across slides keep playing (moved out of the slide). */
+    function carrySounds(slideEl, from) {
+      for (const audio of slideEl.querySelectorAll("audio[data-across]")) {
+        if (audio.paused) continue;
+        const n = Number(audio.dataset.across) || 0;
+        const start = place(from);
+        carried.push({ audio, id: audio.closest("[data-el]")?.dataset.el, start, until: n >= 999 ? Infinity : start + n - 1 });
+        carryHost.append(audio); // moved in the same task, so it does not pause
+      }
+    }
+    /** A carried sound stops once the talk goes beyond its slides (or back before the one it started on). */
+    function pruneSounds(i) {
+      const pos = place(i);
+      for (let k = carried.length - 1; k >= 0; k -= 1) {
+        const c = carried[k];
+        if (pos > c.until || pos < c.start || c.audio.paused) {
+          E.mediaPause?.(c.audio, { stop: true });
+          c.audio.remove();
+          carried.splice(k, 1);
+        }
+      }
+      return new Set(carried.map((c) => c.id).filter(Boolean));
+    }
 
     const renderAt = (i) => {
       const el = E.render(slides[i], { ...(opts.renderOptions || {}), deck, index: i, mode: "present", fit: opts.fitFor?.(i) });
@@ -834,9 +885,10 @@
       clearTimeout(autoTimer);
       const prevScaler = current;
       const prevSlide = prevScaler?.firstElementChild;
-      if (prevSlide) { interaction?.destroy(); stopMedia(prevSlide); }
+      if (prevSlide) { interaction?.destroy(); carrySounds(prevSlide, index); stopMedia(prevSlide); }
       const from = index;
       index = i;
+      const playing = pruneSounds(i);
       const next = renderAt(i);
       const slide = next.firstElementChild;
       step = Math.min(still ? Infinity : atStep ?? (fullStep ? Infinity : 0), stepsOf(slide));
@@ -854,7 +906,7 @@
         const wayIn = type === "none" || type === "morph" ? 0 : Math.round((trMs ?? TRANSITION_MS[type] ?? 620) * 0.85);
         play(slide, { step, animate: atStep == null && !still, delay: wayIn });
         interaction = activate(slide, { details: [...(slides[i]?.details || []), ...(E.objectDetails?.(slides[i]) || [])], elements: slides[i]?.elements || [], onDrill: back ? null : (to, el) => openDrill(to, el) });
-        playMedia(slide, { sound: gesture });
+        playMedia(slide, { sound: gesture, skip: playing });
         scheduleAdvance(slide, i);
         if (still) return;
         // The first slide with clickable items says how to use them (once per presentation), and every page
@@ -1256,6 +1308,7 @@
       doc.removeEventListener("keydown", onKey);
       interaction?.destroy();
       if (current?.firstElementChild) stopMedia(current.firstElementChild);
+      for (const c of carried.splice(0)) E.mediaPause?.(c.audio, { stop: true });
       clearTimeout(idle);
       if (pv?.win && !pv.win.closed) pv.win.close();
       clearInterval(pv?.timer);

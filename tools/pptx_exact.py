@@ -266,8 +266,9 @@ class Deck:
         self.images: dict[str, str | None] = {}
         self.themes: dict[str, Theme] = {}
         self.sids: dict[str, str] = {}
-        self.stats = {"slides": 0, "objects": 0, "pictures": 0, "tables": 0, "charts": 0, "animations": 0, "skipped": 0, "hidden": 0, "unsupported": 0}
+        self.stats = {"slides": 0, "objects": 0, "pictures": 0, "tables": 0, "charts": 0, "animations": 0, "skipped": 0, "hidden": 0, "unsupported": 0, "comments": 0}
         self.sej = self._is_sej()
+        self.comment_authors = comment_authors(prs)
 
     def _is_sej(self) -> bool:
         for master in self.prs.slide_masters:
@@ -1498,8 +1499,95 @@ class SlideReader:
             slide["timeline"] = timeline
             self.deck.stats["animations"] += len(timeline)
         slide.update(transition_of(self.slide._element))
+        comments = comments_of(self.slide, self.deck.comment_authors, self.by_spid, self.index)
+        if comments:
+            slide["comments"] = comments
+            self.deck.stats["comments"] += len(comments)
         self.deck.stats["objects"] += len(self.objects)
         return slide
+
+
+# ---------------------------------------------------------------- review comments
+
+def comment_authors(prs) -> dict[str, str]:
+    """Who wrote the comments: classic (commentAuthors.xml, numeric ids) and modern (authors.xml, GUIDs)."""
+    authors: dict[str, str] = {}
+    for part in prs.part.package.iter_parts():
+        if str(part.partname) not in {"/ppt/commentAuthors.xml", "/ppt/authors.xml"}:
+            continue
+        try:
+            root = etree.fromstring(part.blob)
+        except etree.XMLSyntaxError:
+            continue
+        for node in root:
+            if node.get("id") is not None:
+                authors[str(node.get("id"))] = (node.get("name") or node.get("initials") or "")[:40]
+    return authors
+
+
+def _comment_text(node) -> str:
+    body = node.find("{*}txBody")
+    if body is not None:  # modern: <p188:txBody>…<a:t>, a paragraph per line
+        lines = ["".join(t.text or "" for t in p.iter(A + "t")) for p in body.iter(A + "p")]
+        return "\n".join(lines).strip()
+    text = node.find("{*}text")  # classic: <p:text>
+    return (text.text or "").strip() if text is not None else ""
+
+
+def comments_of(slide, authors: dict[str, str], by_spid: dict[str, str], index: int) -> list[dict[str, Any]]:
+    """The slide's review comments as threads: who and when, replies, resolved, and the shape a modern comment is on."""
+    threads: list[dict[str, Any]] = []
+    classic: dict[tuple[str, str], dict[str, Any]] = {}
+    n = 0
+    for rel in slide.part.rels.values():
+        if rel.is_external or not rel.reltype.endswith("/relationships/comments"):
+            continue
+        try:
+            root = etree.fromstring(rel.target_part.blob)
+        except (etree.XMLSyntaxError, AttributeError):
+            continue
+        for cm in root:
+            if not isinstance(cm.tag, str) or local(cm) != "cm":
+                continue
+            text = _comment_text(cm)
+            if not text:
+                continue
+            n += 1
+            item: dict[str, Any] = {"id": f"pc{index}x{n}", "text": text[:2000]}
+            by = authors.get(str(cm.get("authorId")), "")
+            if by:
+                item["by"] = by
+            at = cm.get("created") or cm.get("dt")
+            if at:
+                item["at"] = at[:40]
+            if (cm.get("status") or "").lower() == "resolved":
+                item["done"] = True
+            mark = next((m for m in cm.iter() if isinstance(m.tag, str) and local(m) == "spMk"), None)
+            if mark is not None and by_spid.get(str(mark.get("id"))):
+                item["anchor"] = by_spid[str(mark.get("id"))][:40]
+            replies = []
+            for k, reply in enumerate(r for r in cm.iter() if isinstance(r.tag, str) and local(r) == "reply"):
+                rtext = _comment_text(reply)
+                if not rtext:
+                    continue
+                r_item: dict[str, Any] = {"id": f"{item['id']}r{k}", "text": rtext[:2000]}
+                if authors.get(str(reply.get("authorId"))):
+                    r_item["by"] = authors[str(reply.get("authorId"))]
+                if reply.get("created"):
+                    r_item["at"] = reply.get("created")[:40]
+                replies.append(r_item)
+            # A classic reply is a comment of its own that names its parent (p15:threadingInfo / p15:parentCm).
+            parent = next((m for m in cm.iter() if isinstance(m.tag, str) and local(m) == "parentCm"), None)
+            if parent is not None and (str(parent.get("authorId")), str(parent.get("idx"))) in classic:
+                host = classic[(str(parent.get("authorId")), str(parent.get("idx")))]
+                host.setdefault("replies", []).append({k: v for k, v in item.items() if k in ("id", "text", "by", "at")})
+                continue
+            if replies:
+                item["replies"] = replies[:100]
+            if cm.get("idx") is not None:
+                classic[(str(cm.get("authorId")), str(cm.get("idx")))] = item
+            threads.append(item)
+    return threads[:200]
 
 
 # ---------------------------------------------------------------- pieces

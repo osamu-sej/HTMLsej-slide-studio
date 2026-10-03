@@ -618,7 +618,7 @@ const httpServer = createServer(async (req, res) => {
       etag: file.etag,
       "cache-control": url.pathname.startsWith("/assets/") ? "public, max-age=31536000, immutable" : html ? "no-store" : "no-cache",
       "x-content-type-options": "nosniff",
-      ...(html ? { "content-security-policy": CSP, "referrer-policy": "same-origin", "permissions-policy": "camera=(), microphone=(self), geolocation=()" } : {}),
+      ...(html ? { "content-security-policy": CSP, "referrer-policy": "same-origin", "permissions-policy": "camera=(self), microphone=(self), display-capture=(self), geolocation=()" } : {}),
       ...(req.headers["x-forwarded-proto"] === "https" ? { "strict-transport-security": "max-age=31536000" } : {}),
     }).end(req.method === "HEAD" ? undefined : file.body);
     return;
