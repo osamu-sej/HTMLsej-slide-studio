@@ -97,3 +97,20 @@ test("video plan: saved timings or the default seconds, slide by slide (video.mj
   assert.ok(track && track.getAttribute("kind") === "captions" && track.getAttribute("src").startsWith("data:text/vtt"), "a captions track");
   assert.equal(E.normalizeObject({ id: "v", kind: "video", src: "https://example.com/a.mp4", x: 0, y: 0, w: 640, h: 360, captions: "not vtt" }).captions, undefined);
 });
+
+test("chart elements: no data labels, the legend below / at the right / none, no gridlines", async () => {
+  const E = await loadEngine();
+  const two = { labels: ["A", "B", "C"], series: [{ name: "今年", values: [3, 5, 4] }, { name: "前年", values: [2, 4, 3] }] };
+  const kept = E.normalizeObject({ id: "c", kind: "chart", x: 0, y: 0, w: 900, h: 500, chart: { type: "clustered-bar", ...two, opts: { labels: false, legend: "right", grid: false, junk: 1 } } }).chart.opts;
+  assert.deepEqual({ ...kept }, { labels: false, legend: "right", grid: false });
+  let { el } = draw(E, { type: "clustered-bar", ...two });
+  assert.ok(el.querySelectorAll(".hs-chart .hs-val").length > 0, "values by default");
+  assert.ok(el.querySelector(".hs-chart-wrap > .hs-legend:first-child"), "the legend on top by default");
+  ({ el } = draw(E, { type: "clustered-bar", ...two, opts: { labels: false, legend: "bottom" } }));
+  assert.equal(el.querySelectorAll(".hs-chart .hs-val").length, 0, "no data labels");
+  assert.ok(el.querySelector(".hs-chart-wrap > .hs-legend:last-child.at-bottom"), "the legend below");
+  ({ el } = draw(E, { type: "area", ...two, opts: { legend: "none", grid: false } }));
+  assert.equal(el.querySelectorAll(".hs-legend").length, 0, "no legend");
+  assert.equal(el.querySelectorAll(".hs-chart line.hs-grid").length, 0, "no gridlines");
+  assert.ok(el.querySelector(".hs-chart line.hs-axisline"), "the axis stays");
+});

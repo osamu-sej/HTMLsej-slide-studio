@@ -14,6 +14,7 @@ import { MERGE_HINTS, MERGE_MODES, canMerge, clippingLib, mergeObjects } from ".
 import { createSmartArt } from "./smartart.mjs";
 import { createInk } from "./ink.mjs";
 import { createExtras } from "./extras.mjs";
+import { createPictureTools } from "./picture.mjs";
 
 const SIZES_PT = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const LINE_WIDTHS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 8, 12];
@@ -49,6 +50,7 @@ export function createEditorUi(editor, app) {
   let ribbonMode = (() => { try { const m = localStorage.getItem("hsej-ribbon-mode"); return RIBBON_MODES[m] ? m : "full"; } catch { return "full"; } })();
   let floating = false;
   let grayView = false; // 表示 → グレースケール (only how the slide is shown here)
+  let hideInk = false; // 校閲 → インクの非表示 (only while editing)
   let built = "";
   let updaters = [];
   let pop = null;
@@ -466,7 +468,7 @@ export function createEditorUi(editor, app) {
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
   const GROUP_ICONS = { グラフィックの作成: "smartart", "SmartArt のスタイル": "fill", 文字: "font", リセット: "reset", プレビュー: "play", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
     図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane",
-    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review", 描画ツール: "pen", 変換: "inkShape", 再生: "play", 音声: "mic", ズームのオプション: "zoomSlide", ズームのスタイル: "outline", 数式と記号: "equation", モニター: "presenter", キャプションと字幕: "subtitles", 文章校正: "spell", キャプション: "caption", 言語: "textCase" };
+    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review", 描画ツール: "pen", 変換: "inkShape", 再生: "play", 音声: "mic", ズームのオプション: "zoomSlide", ズームのスタイル: "outline", 数式と記号: "equation", モニター: "presenter", キャプションと字幕: "subtitles", 文章校正: "spell", キャプション: "caption", 言語: "textCase", アクセシビリティ: "accessibility", 比較: "thumbs", インク: "pen" };
   function fold(g) {
     const items = g.querySelector(":scope > .rb-items");
     const label = g.querySelector(":scope > .rb-label")?.textContent || "";
@@ -688,6 +690,10 @@ export function createEditorUi(editor, app) {
       group("検索", btn("find", "検索・|置換", "資料全体の文字を検索・置換（⌘F）", () => app.openReplace(), { big: true })),
       group("ノート", btn("notes", "ノートを|作成", "スピーカーノートをまとめて作る（簡易・AI）", () => app.openNotes(), { big: true })),
       group("AI", btn("magic", "AIで全体を|見直す", "指示を出して資料全体をAIに見直してもらう（Codexに接続しているとき）", () => app.reviseDeck(), { big: true, enabled: () => app.canAi() })),
+      group("比較",
+        btn("thumbs", "比較", "この資料を、保存した版・保存庫の資料・ファイルと比べ、違うスライドを1枚ずつ採用する", () => app.openCompare(), { big: true })),
+      group("インク",
+        btn("pen", "インクの|非表示", "スライドに書いたインクを編集中だけ隠す（もう一度で表示）", () => { hideInk = !hideInk; document.getElementById("stageBody")?.classList.toggle("hide-ink", hideInk); refresh(); }, { big: true, pressed: () => hideInk })),
       group("レビュー",
         btn("review", "レビュー用|ファイル", "相手はブラウザで開いてスライドごとにコメントを書き、結果のファイルを返送します", () => app.exportReview(), { big: true }),
         btn("comment", "レビューを|取り込む", "コメント付きのPowerPoint、またはレビュー結果（.json）からコメントを読み込み、AIで反映します", () => app.importReview(), { big: true })),
@@ -858,6 +864,7 @@ export function createEditorUi(editor, app) {
       group("ワードアートのスタイル",
         col(drop("fontColor", "文字の塗りつぶし", "文字の色（黒・濃紺・グレー）", () => colors(E.PALETTE.text, textColorOf(), (c) => editor.textFormat("color", c), { custom: false, note: "白抜き文字は使いません（SEJテンプレート）" }), { enabled: hasText, swatch: textColorOf, keep: true }),
           drop("textbox", "文字の配置", "文字の配置と余白", () => menu([["top", "上揃え", "valignTop"], ["middle", "上下中央揃え", "valignMiddle"], ["bottom", "下揃え", "valignBottom"]].map(([v, label, icon]) => ({ label, icon, on: editor.textState()?.valign === v, run: () => editor.textFormat("valign", v) }))), { enabled: hasText }))),
+      group("アクセシビリティ", btn("textbox", "代替|テキスト", "画面読み上げが読む図形の説明（装飾用にもできます）", () => { const o = one(); if (o) app.editAlt(o.id); }, { big: true, enabled: () => Boolean(one()) })),
       arrangeGroup(),
       group("サイズ", sizeFields()),
     ];
@@ -922,14 +929,18 @@ export function createEditorUi(editor, app) {
     const img = () => selected().find((o) => o.kind === "image");
     return [
       group("調整",
+        btn("eraser", "背景の|削除", "写真・ロゴの一色に近い背景を透明にする（周りから背景を見つけます）", () => pictureTools.background(), { big: true, enabled: hasImage }),
         drop("bright", "修整", "明るさ・コントラスト", () => menu([
           { head: "明るさ / コントラスト" },
           ...[[-0.4, 0], [-0.2, 0], [0, 0], [0.2, 0], [0.4, 0], [0, 0.2], [0, 0.4], [0.2, 0.2], [-0.2, 0.2]].map(([b, c]) => ({ label: `明るさ ${b > 0 ? "+" : ""}${Math.round(b * 100)}% / コントラスト ${c > 0 ? "+" : ""}${Math.round(c * 100)}%`, run: () => editor.apply((o) => (o.kind === "image" ? { bright: b || undefined, contrast: c || undefined } : null)) })),
         ]), { big: true, enabled: hasImage }),
         col(btn("gray", "グレースケール", "白黒にする（もう一度で戻す）", () => editor.apply((o) => (o.kind === "image" ? { gray: !o.gray || undefined } : null)), { enabled: hasImage, pressed: () => img()?.gray }),
           drop("transparency", "透明度", "図の透明度", () => menu([0, 0.15, 0.3, 0.5, 0.7].map((t) => ({ label: `${Math.round(t * 100)}%`, run: () => editor.apply({ opacity: t ? Math.round((1 - t) * 100) / 100 : undefined }) }))), { enabled: hasImage })),
+        col(btn("transparency", "透明色を指定", "図の上でクリックした色を透明にする", () => pictureTools.transparentColor(), { enabled: hasImage }),
+          btn("down", "図の圧縮", "画像を小さくして資料を軽くする（トリミング部分の削除も）", () => pictureTools.compressDialog())),
         col(btn("change", "図の変更", "画像を差し替える（大きさ・位置はそのまま）", async () => { const o = img(); if (!o) return; const [file] = await app.pickFiles("image/*", false); if (file) await app.replaceImage(o.id, file); }, { enabled: hasImage }),
           btn("reset", "リセット", "トリミング・修整・枠線を元に戻す", () => editor.apply((o) => (o.kind === "image" ? { crop: undefined, mask: undefined, adj: undefined, bright: undefined, contrast: undefined, sat: undefined, gray: undefined, opacity: undefined, stroke: undefined, strokeW: undefined } : null)), { enabled: hasImage }))),
+      group("アクセシビリティ", btn("textbox", "代替|テキスト", "画面読み上げが読む図の説明（装飾用にもできます）", () => { const o = one(); if (o) app.editAlt(o.id); }, { big: true, enabled: () => Boolean(one()) })),
       group("図のスタイル",
         drop("outline", "図の枠線", "枠線の色・太さ", () => outlineMenu(), { enabled: hasImage, swatch: strokeOf }),
         drop("mask", "図形に合わせて|切り抜き", "画像を図形の形に切り抜く", () => (close) => h("div", { class: "rb-gallery" }, h("div", { class: "rb-gallery-grid" }, MASKS.map((key) => h("button", { type: "button", title: E.SHAPES[key].label, onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? { mask: key === "rect" ? undefined : key, adj: undefined } : null)); } }, shapeThumb(key))))), { big: true, enabled: hasImage })),
@@ -1269,6 +1280,8 @@ export function createEditorUi(editor, app) {
   const ink = createInk(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), refreshRibbon: () => refresh() });
   // ズーム・カメオ・スクリーンショット・数式・ワードアート・フィールド・段組み・文字種・音声入力 (extras.mjs).
   const extras = createExtras(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), refreshRibbon: () => refresh() });
+  // 図の形式 → 背景の削除・透明色・図の圧縮 (picture.mjs).
+  const pictureTools = createPictureTools(editor, app);
 
   editor.subscribe(() => { renderRibbon(); renderPane(); });
 

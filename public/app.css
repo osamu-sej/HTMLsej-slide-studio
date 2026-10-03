@@ -1493,3 +1493,22 @@ audio.trim-media { background: transparent; }
 @media (max-width: 760px) { .st-reuse { grid-template-columns: 1fr; } .st-grid { grid-template-columns: repeat(2, 1fr); } }
 .video-dialog { width: min(600px, calc(100vw - 32px)); }
 .video-dialog .dialog-body { display: flex; flex-direction: column; gap: 10px; }
+
+/* ------------------------------------------------------------------ 比較・インクの非表示・図の圧縮 (editor/compare.mjs, picture.mjs) */
+.compare-dialog { width: min(1040px, calc(100vw - 32px)); }
+.cmp-list { display: flex; flex-direction: column; gap: 10px; max-height: 62vh; overflow-y: auto; padding-right: 4px; }
+.cmp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cmp-item { display: grid; grid-template-columns: 54px 1fr auto; grid-template-rows: auto auto; gap: 6px 12px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.cmp-tag { grid-row: 1 / 3; align-self: start; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 800; text-align: center; background: var(--canvas); }
+.cmp-item.added .cmp-tag { background: #dcfce7; color: #166534; }
+.cmp-item.removed .cmp-tag { background: #fee2e2; color: #991b1b; }
+.cmp-item.changed .cmp-tag { background: #fef3c7; color: #92400e; }
+.cmp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cmp-pair small { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.cmp-thumb { aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px; box-shadow: 0 0 0 1px var(--line); pointer-events: none; }
+.cmp-none { display: grid; place-items: center; aspect-ratio: 16 / 9; border: 1px dashed var(--line); border-radius: 6px; font-size: 12px; color: var(--muted); }
+.cmp-what { grid-column: 2; font-size: 12px; color: var(--ink-2); }
+.cmp-take { grid-column: 3; grid-row: 1 / 3; }
+.hide-ink .hs-obj-ink { visibility: hidden; }
+.compress-dialog { width: min(480px, calc(100vw - 32px)); }
+.compress-dialog .dialog-body { display: flex; flex-direction: column; gap: 10px; }
