@@ -1,0 +1,245 @@
+// 印刷 (PowerPoint's File → Print): which slides (all, this one, a range like "1,3,5-8", with or without hidden
+// slides), the layout (full-page slides, notes pages, the outline, handouts with 1/2/3/4/6/9 slides a page, in rows
+// or columns), colour or grayscale, frames, and the header and footer of notes and handouts — with a preview of the
+// pages. Printing (or saving as PDF) goes through the browser's print dialog.
+
+export const LAYOUTS = {
+  full: "フル ページ サイズのスライド",
+  notes: "ノート",
+  outline: "アウトライン",
+  h1: "配布資料（1スライド）",
+  h2: "配布資料（2スライド）",
+  h3: "配布資料（3スライド・メモ欄付き）",
+  h4: "配布資料（4スライド）",
+  h6: "配布資料（6スライド）",
+  h9: "配布資料（9スライド）",
+};
+// A4 portrait at 96 dpi, in CSS pixels.
+export const PAGE = { w: 794, h: 1123, margin: 48 };
+const GRID = { h1: [1, 1], h2: [1, 2], h3: [1, 3], h4: [2, 2], h6: [2, 3], h9: [3, 3] };
+
+/** "1,3,5-8" → [0, 2, 4, 5, 6, 7] (places in the deck); null when the text cannot be read. */
+export function parseRange(text, total) {
+  const out = [];
+  for (const part of String(text || "").replace(/[，、]/g, ",").replace(/[－―ー〜~]/g, "-").split(",").map((p) => p.trim()).filter(Boolean)) {
+    const m = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+    if (!m) return null;
+    const a = Number(m[1]);
+    const b = m[2] ? Number(m[2]) : a;
+    if (a < 1 || b < a || b > total) return null;
+    for (let i = a; i <= b; i += 1) if (!out.includes(i - 1)) out.push(i - 1);
+  }
+  return out.length ? out : null;
+}
+
+/** Which slides are printed: [index] in deck order. */
+export function printedSlides(deck, { range = "all", current = 0, custom = "", hidden = false } = {}) {
+  const total = deck?.slides?.length || 0;
+  let list = range === "current" ? [current] : range === "custom" ? parseRange(custom, total) || [] : deck.slides.map((_, i) => i);
+  if (!hidden && range !== "current") list = list.filter((i) => !deck.slides[i]?.hidden);
+  return list;
+}
+
+/** Slides on pages for a layout: [[index, …], …] (full and notes pages hold one; outline pages are made later). */
+export function paginate(list, layout) {
+  const per = layout in GRID ? GRID[layout][0] * GRID[layout][1] : 1;
+  const pages = [];
+  for (let i = 0; i < list.length; i += per) pages.push(list.slice(i, i + per));
+  return pages;
+}
+
+/** Where each slide goes on a handout page (CSS px from the page's corner) — in rows, or down the columns. */
+export function handoutBoxes(layout, count, { order = "rows" } = {}) {
+  const [cols, rows] = GRID[layout];
+  const top = PAGE.margin + 36;
+  const bottom = PAGE.h - PAGE.margin - 30;
+  const left = PAGE.margin;
+  const width = PAGE.w - PAGE.margin * 2;
+  const gap = 24;
+  if (layout === "h3") {
+    const w = Math.round(width * 0.46);
+    const hh = Math.round((w * 9) / 16);
+    const step = (bottom - top - hh) / 2;
+    return Array.from({ length: count }, (_, k) => ({ x: left, y: Math.round(top + step * k), w, h: hh, lines: { x: left + w + gap, w: width - w - gap } }));
+  }
+  const cellW = (width - gap * (cols - 1)) / cols;
+  const cellH = (bottom - top - gap * (rows - 1)) / rows;
+  const w = Math.floor(Math.min(cellW, (cellH * 16) / 9));
+  const hh = Math.floor((w * 9) / 16);
+  return Array.from({ length: count }, (_, k) => {
+    const c = order === "columns" ? Math.floor(k / rows) : k % cols;
+    const r = order === "columns" ? k % rows : Math.floor(k / cols);
+    return { x: Math.round(left + c * (cellW + gap) + (cellW - w) / 2), y: Math.round(top + r * (cellH + gap) + (cellH - hh) / 2), w, h: hh };
+  });
+}
+
+export function createPrinter(app) {
+  const { h, E } = app;
+  const strip = (t) => E.strip(String(t ?? ""));
+  const SETTINGS_KEY = "hsej-print";
+  const load = () => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch { return {}; } };
+  const save = (o) => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(o)); } catch { /* private window */ } };
+
+  /** A slide drawn at `w` CSS px wide (the engine draws it at 1920 × 1080 and it is scaled down). */
+  function thumb(i, w, frame) {
+    const el = app.renderSlide(i);
+    const k = w / E.W;
+    el.style.transform = `scale(${k})`;
+    el.style.transformOrigin = "0 0";
+    return h("div", { class: ["pr-slide", frame ? "framed" : ""], style: { width: `${w}px`, height: `${Math.round(w * 9 / 16)}px` } }, el);
+  }
+  function chrome(page, n, opts) {
+    const deck = app.deck();
+    const today = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
+    if (opts.header || opts.date) page.append(h("div", { class: "pr-head" }, h("span", {}, opts.header ? opts.headerText || deck.title : ""), h("span", {}, opts.date ? today : "")));
+    if (opts.pageNo || opts.footer) page.append(h("div", { class: "pr-foot" }, h("span", {}, opts.footer ? opts.footerText || "" : ""), h("span", {}, opts.pageNo ? String(n) : "")));
+  }
+  /** The outline of a slide: its title, then its words (key message, points, text of its parts). */
+  function outlineOf(slide) {
+    const lines = [];
+    for (const key of ["subtitle", "subhead", "takeaway", "message", "text"]) if (strip(slide[key])) lines.push(strip(slide[key]));
+    for (const key of ["points", "steps", "leftItems", "rightItems"]) for (const item of Array.isArray(slide[key]) ? slide[key] : []) if (strip(typeof item === "string" ? item : item?.title || item?.label)) lines.push(strip(typeof item === "string" ? item : item.title || item.label));
+    for (const item of Array.isArray(slide.items) ? slide.items : []) { const t = strip(typeof item === "string" ? item : [item?.title || item?.label, item?.desc].filter(Boolean).join("：")); if (t) lines.push(t); }
+    for (const o of slide.elements || []) { if (o.hidden) continue; const t = strip(E.objectText ? E.objectText(o) : o.text); if (t && t !== strip(slide.title)) lines.push(t.slice(0, 200)); }
+    return [...new Set(lines)].slice(0, 30);
+  }
+
+  /** The pages for the settings (each an element of PAGE size, or a slide-size page for full slides). */
+  function pages(opts) {
+    const deck = app.deck();
+    const list = printedSlides(deck, { range: opts.range, current: app.index(), custom: opts.custom, hidden: opts.hidden });
+    const out = [];
+    if (opts.layout === "full") {
+      for (const i of list) {
+        const el = app.renderSlide(i);
+        out.push(h("div", { class: ["pr-full", opts.frame ? "framed" : ""] }, el));
+      }
+      return out;
+    }
+    if (opts.layout === "outline") {
+      let page = null;
+      let used = 0;
+      const start = () => { page = h("div", { class: "pr-page pr-outline" }); out.push(page); chrome(page, out.length, opts); used = 0; };
+      start();
+      for (const i of list) {
+        const slide = deck.slides[i];
+        const lines = outlineOf(slide);
+        const need = 1 + lines.length;
+        if (used && used + need > 34) start();
+        page.append(h("div", { class: "pr-ol" }, h("div", { class: "pr-ol-title" }, h("b", {}, `${i + 1}`), strip(slide.title) || "（タイトルなし）"), lines.length ? h("ul", {}, lines.map((t) => h("li", {}, t))) : null));
+        used += need;
+      }
+      return out;
+    }
+    if (opts.layout === "notes") {
+      for (const i of list) {
+        const page = h("div", { class: "pr-page pr-notes" });
+        chrome(page, out.length + 1, opts);
+        const w = PAGE.w - PAGE.margin * 2 - 60;
+        const box = thumb(i, w, opts.frame);
+        box.classList.add("pr-notes-slide");
+        page.append(box, h("div", { class: "pr-notes-text" }, String(deck.slides[i].notes || "").split(/\n/).map((line) => h("p", {}, line || " "))));
+        out.push(page);
+      }
+      return out;
+    }
+    for (const group of paginate(list, opts.layout)) {
+      const page = h("div", { class: ["pr-page", "pr-handout", opts.layout] });
+      chrome(page, out.length + 1, opts);
+      handoutBoxes(opts.layout, group.length, { order: opts.order }).forEach((b, k) => {
+        const box = thumb(group[k], b.w, opts.frame);
+        Object.assign(box.style, { position: "absolute", left: `${b.x}px`, top: `${b.y}px` });
+        page.append(box);
+        if (b.lines) page.append(h("div", { class: "pr-lines", style: { left: `${b.lines.x}px`, top: `${b.y}px`, width: `${b.lines.w}px`, height: `${b.h}px` } }));
+      });
+      out.push(page);
+    }
+    return out;
+  }
+
+  /** Into the print root, then the browser's print dialog (A4 portrait, or slide-size pages). */
+  async function print(opts) {
+    await app.beforePrint?.();
+    const root = document.getElementById("printRoot");
+    const list = pages(opts);
+    if (!list.length) { app.toast("印刷するスライドがありません（範囲を確かめてください）"); return; }
+    root.replaceChildren(...list);
+    root.className = ["print-root", opts.layout === "full" ? "pr-mode-full" : "pr-mode-page", opts.color === "gray" ? "pr-gray" : "", opts.color === "bw" ? "pr-bw" : ""].filter(Boolean).join(" ");
+    const style = h("style", { id: "printPageStyle" }, opts.layout === "full" ? "@media print { @page { size: 1920px 1080px; margin: 0; } }" : "@media print { @page { size: A4 portrait; margin: 0; } }");
+    document.getElementById("printPageStyle")?.remove();
+    document.head.append(style);
+    await Promise.all([...root.querySelectorAll("img")].map((img) => img.decode?.().catch(() => {})));
+    await E.mountLottie?.(root, { play: false, frame: 0.5 });
+    await document.fonts?.ready;
+    const cleanup = () => { E.stopLottie?.(root); root.replaceChildren(); root.className = "print-root"; style.remove(); window.removeEventListener("afterprint", cleanup); };
+    window.addEventListener("afterprint", cleanup);
+    app.toast(opts.layout === "full" ? "印刷画面で「PDFとして保存」を選び、余白を「なし」にしてください" : "印刷画面で用紙をA4・縦、余白を「なし」にしてください（PDFとして保存もできます）");
+    setTimeout(() => window.print(), 80);
+  }
+
+  function openDialog() {
+    const deck = app.deck();
+    if (!deck) return;
+    const saved = load();
+    const opts = { range: "all", custom: "", hidden: false, layout: "full", order: "rows", frame: false, color: "color", header: true, date: true, pageNo: true, footer: false, headerText: "", footerText: "", ...saved, ...(saved.range === "custom" ? {} : { custom: "" }) };
+    const preview = h("div", { class: "pr-preview", "aria-label": "印刷プレビュー" });
+    const count = h("span", { class: "hint pr-count" });
+    const sel = (name, entries, value) => h("select", { name }, entries.map(([v, label]) => h("option", { value: v, selected: v === value || null }, label)));
+    const form = h("form", { class: "pr-form", onsubmit: (e) => e.preventDefault(), oninput: () => refresh(), onchange: () => refresh() },
+      h("label", {}, "印刷範囲", sel("range", [["all", "すべてのスライドを印刷"], ["current", "現在のスライドを印刷"], ["custom", "ユーザー設定の範囲"]], opts.range)),
+      h("label", {}, "スライド指定", h("input", { name: "custom", type: "text", value: opts.custom, placeholder: "例：1,3,5-8" })),
+      h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "hidden", checked: opts.hidden || null }), h("span", {}, "非表示スライドを印刷する")),
+      h("label", {}, "印刷レイアウト", sel("layout", Object.entries(LAYOUTS), opts.layout)),
+      h("label", {}, "順序（配布資料）", sel("order", [["rows", "横（左から右へ）"], ["columns", "縦（上から下へ）"]], opts.order)),
+      h("label", {}, "色", sel("color", [["color", "カラー"], ["gray", "グレースケール"], ["bw", "単純白黒"]], opts.color)),
+      h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "frame", checked: opts.frame || null }), h("span", {}, "スライドに枠を付ける")),
+      h("fieldset", { class: "pr-hf" }, h("legend", {}, "ヘッダーとフッター（ノート・配布資料・アウトライン）"),
+        h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "header", checked: opts.header || null }), h("span", {}, "ヘッダー"), h("input", { type: "text", name: "headerText", value: opts.headerText, placeholder: deck.title })),
+        h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "date", checked: opts.date || null }), h("span", {}, "日付")),
+        h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "pageNo", checked: opts.pageNo || null }), h("span", {}, "ページ番号")),
+        h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "footer", checked: opts.footer || null }), h("span", {}, "フッター"), h("input", { type: "text", name: "footerText", value: opts.footerText, placeholder: "例：社内限り" }))));
+    const read = () => {
+      const f = new FormData(form);
+      return { range: f.get("range"), custom: String(f.get("custom") || ""), hidden: f.has("hidden"), layout: f.get("layout"), order: f.get("order"), color: f.get("color"), frame: f.has("frame"), header: f.has("header"), date: f.has("date"), pageNo: f.has("pageNo"), footer: f.has("footer"), headerText: String(f.get("headerText") || ""), footerText: String(f.get("footerText") || "") };
+    };
+    let timer = null;
+    function refresh() {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const o = read();
+        form.querySelector('[name="custom"]').disabled = o.range !== "custom";
+        form.querySelector('[name="order"]').disabled = !["h4", "h6", "h9"].includes(o.layout);
+        form.querySelector(".pr-hf").disabled = o.layout === "full";
+        if (o.range === "custom" && !parseRange(o.custom, deck.slides.length)) { preview.replaceChildren(h("p", { class: "hint" }, `スライド番号を「1,3,5-8」の形で（1〜${deck.slides.length}）`)); count.textContent = ""; return; }
+        const list = pages(o);
+        count.textContent = `${printedSlides(deck, { ...o, current: app.index() }).length}枚のスライド・${list.length}ページ`;
+        const k = o.layout === "full" ? 300 / E.W : 300 / PAGE.w;
+        preview.className = ["pr-preview", o.color === "gray" ? "pr-gray" : "", o.color === "bw" ? "pr-bw" : ""].filter(Boolean).join(" ");
+        preview.replaceChildren(...list.slice(0, 12).map((p) => {
+          const w = o.layout === "full" ? E.W : PAGE.w;
+          const hh = o.layout === "full" ? E.H : PAGE.h;
+          p.style.transform = `scale(${k})`;
+          p.style.transformOrigin = "0 0";
+          return h("div", { class: "pr-sheet", style: { width: `${Math.round(w * k)}px`, height: `${Math.round(hh * k)}px` } }, p);
+        }), list.length > 12 ? h("p", { class: "hint" }, `ほか ${list.length - 12} ページ`) : "");
+      }, 120);
+    }
+    const dialog = h("dialog", { class: "print-dialog", "aria-label": "印刷" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "印刷"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body pr-body" }, form, h("div", { class: "pr-side" }, count, preview)),
+      h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"),
+        h("button", { type: "button", class: "btn btn-primary pr-go", onclick: () => {
+          const o = read();
+          if (o.range === "custom" && !parseRange(o.custom, deck.slides.length)) { app.toast("スライド指定を確かめてください（例：1,3,5-8）"); return; }
+          save(o);
+          dialog.close();
+          print(o);
+        } }, "印刷（PDFに保存）")));
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => { clearTimeout(timer); dialog.remove(); });
+    dialog.showModal();
+    refresh();
+  }
+
+  return { openDialog, print, pages };
+}
