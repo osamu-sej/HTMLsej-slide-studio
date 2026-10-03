@@ -1712,6 +1712,12 @@
     if (!labels.length || !series.length) return null;
     const out = { type: CHART_KINDS[raw.type] ? raw.type : "bar", labels, series };
     for (const key of ["title", "unit"]) if (typeof raw[key] === "string" && raw[key].trim()) out[key] = raw[key].trim().slice(0, key === "unit" ? 10 : 80);
+    // グラフ要素を追加: data labels off, the legend's place (or none), gridlines off.
+    const opts = {};
+    if (raw.opts?.labels === false) opts.labels = false;
+    if (["bottom", "right", "none"].includes(raw.opts?.legend)) opts.legend = raw.opts.legend;
+    if (raw.opts?.grid === false) opts.grid = false;
+    if (Object.keys(opts).length) out.opts = opts;
     const style = normalizeChartStyle(raw.style, labels.length);
     if (style) out.style = style;
     return out;
@@ -2307,7 +2313,7 @@
       data.items = c.labels.map((label, i) => ({ label, barValue: first[i] ?? 0, value: line[i] ?? 0 }));
       data.legendLabels = [c.series[0]?.name, c.series[1]?.name || c.series[0]?.name].filter(Boolean);
     } else data.items = c.labels.map((label, i) => ({ label, value: first[i] ?? 0 }));
-    return { chartType: c.type, data };
+    return { chartType: c.type, data, ...(c.opts ? { opts: c.opts } : {}) };
   }
 
   /** A slide's objects: the usable ones, ids made unique. */

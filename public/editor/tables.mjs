@@ -214,6 +214,37 @@ export function createTableUi(editor, app, kit) {
         row(btn("valignTop", "", "上揃え", () => editor.textFormat("valign", "top"), { enabled: isTable, keep: true }), btn("valignMiddle", "", "上下中央揃え", () => editor.textFormat("valign", "middle"), { enabled: isTable, keep: true }), btn("valignBottom", "", "下揃え", () => editor.textFormat("valign", "bottom"), { enabled: isTable, keep: true }))),
     ];
   }
+  /** グラフ要素を追加: data labels, the legend, gridlines (chart.opts). */
+  function setOpts(patch) {
+    const o = chart();
+    if (!o) return;
+    const opts = { ...(o.chart.opts || {}), ...patch };
+    for (const [k, v] of Object.entries(opts)) if (v == null || (k === "labels" && v === true) || (k === "grid" && v === true) || (k === "legend" && v === "top")) delete opts[k];
+    editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: { ...x.chart, opts: Object.keys(opts).length ? opts : undefined } } : x)), { select: [o.id] });
+  }
+  function elementsMenu() {
+    const opts = chart()?.chart.opts || {};
+    return menu([
+      { head: "データ ラベル" },
+      { label: "表示する", on: opts.labels !== false, run: () => setOpts({ labels: true }) },
+      { label: "なし", on: opts.labels === false, run: () => setOpts({ labels: false }) },
+      "-", { head: "凡例（系列が2つ以上のとき）" },
+      ...[["top", "上"], ["bottom", "下"], ["right", "右"], ["none", "なし"]].map(([v, l]) => ({ label: l, on: (opts.legend || "top") === v, run: () => setOpts({ legend: v }) })),
+      "-", { head: "目盛線" },
+      { label: "表示する", on: opts.grid !== false, run: () => setOpts({ grid: true }) },
+      { label: "なし", on: opts.grid === false, run: () => setOpts({ grid: false }) },
+    ]);
+  }
+  /** 行/列の切り替え: the labels become the series and the series the labels. */
+  function transpose() {
+    const o = chart();
+    if (!o) return;
+    const c = o.chart;
+    const labels = c.series.map((s) => s.name);
+    const series = c.labels.map((label, i) => ({ name: label, values: c.series.map((s) => s.values[i] ?? 0) }));
+    if (series.length > E.CHART_MAX_SERIES) { app.toast(`系列は${E.CHART_MAX_SERIES}個までです（項目を減らしてから入れ替えてください）`); return; }
+    editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: { ...x.chart, labels, series } } : x)), { select: [o.id] });
+  }
   function chartTab() {
     const resetStyle = () => { const o = chart(); if (o?.chart.style) editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: { ...x.chart, style: undefined } } : x)), { select: [o.id] }); };
     const setKind = (type) => { const o = chart(); if (o) editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: { ...x.chart, type } } : x)), { select: [o.id] }); };
@@ -229,7 +260,10 @@ export function createTableUi(editor, app, kit) {
       group("データ", btn("table", "データの|編集", "項目と値を表で直す（Excelから貼り付けもできます）", () => { const o = chart(); if (o) editChart(o.id); }, { big: true, enabled: isChart }),
         // A chart brought over from PowerPoint keeps its formatting until it is reset to the studio's look.
         btn("reset", "書式を|リセット", "PowerPointから取り込んだグラフの書式（色・ラベル・軸・凡例）を外し、スタジオのグラフの描き方にします", resetStyle, { big: true, enabled: () => Boolean(chart()?.chart.style) })),
-      group("グラフ要素", col(btn("textbox", "タイトル…", "グラフの上に出す見出し", () => ask("title", "グラフのタイトル", "空にすると消えます"), { enabled: isChart }), btn("font", "単位…", "値の単位（例：億円）", () => ask("unit", "値の単位", "例：億円・%"), { enabled: isChart }))),
+      group("グラフ要素",
+        drop("plus", "グラフ要素|を追加", "データ ラベル・凡例・目盛線", () => elementsMenu(), { big: true, enabled: isChart }),
+        col(btn("textbox", "タイトル…", "グラフの上に出す見出し", () => ask("title", "グラフのタイトル", "空にすると消えます"), { enabled: isChart }), btn("font", "単位…", "値の単位（例：億円）", () => ask("unit", "値の単位", "例：億円・%"), { enabled: isChart }),
+          btn("rotate", "行/列の切り替え", "項目と系列を入れ替える（横軸の項目が凡例に、凡例が横軸に）", () => transpose(), { enabled: () => Boolean(chart()) && !chart().chart.style }))),
     ];
   }
 

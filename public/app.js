@@ -19,6 +19,7 @@ import { createProofing } from "./editor/proof.mjs?v=__APP_VERSION__";
 import { createFileInfo, infoOf, strip as stripDeckData } from "./editor/fileinfo.mjs?v=__APP_VERSION__";
 import { createSlideTools } from "./editor/slidetools.mjs?v=__APP_VERSION__";
 import { createVideoExport } from "./editor/video.mjs?v=__APP_VERSION__";
+import { createCompare } from "./editor/compare.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -1172,6 +1173,21 @@ function insertSlides(raw) {
   const story = storyOf();
   while (story.parent[at] != null) at += 1;
   const slides = raw.map((slide, k) => normalizeSlide(slide, at + k, state.deck.slides.length + raw.length));
+  // Slides taken from another copy of this deck (a saved version, the library) bring the same ids: they get new ones,
+  // and links between the slides brought in follow them.
+  const used = new Set(state.deck.slides.map((slide) => slide.sid).filter(Boolean));
+  const renamed = new Map();
+  for (const slide of slides) {
+    if (!slide.sid) continue;
+    if (used.has(slide.sid)) { const sid = `s${Date.now().toString(36).slice(-6)}${Math.random().toString(36).slice(2, 6)}`; renamed.set(slide.sid, sid); slide.sid = sid; }
+    used.add(slide.sid);
+  }
+  if (renamed.size) {
+    for (const o of slides.flatMap((slide) => slide.elements || [])) {
+      if (o.action?.type === "slide" && renamed.has(o.action.to)) o.action = { ...o.action, to: renamed.get(o.action.to) };
+      if (o.kind === "zoom" && renamed.has(o.target)) o.target = renamed.get(o.target);
+    }
+  }
   pushUndo();
   state.deck.slides.splice(at, 0, ...slides);
   state.selected = at;
@@ -1378,6 +1394,8 @@ function deleteHistory(id) {
 // Versions: a snapshot before every AI change and at quiet moments, restorable from 履歴.
 async function saveVersion(label) {
   if (!state.deck) return;
+  // Slides carry their ids into the version, so 比較 can match them later.
+  state.deck.slides.forEach((_, i) => ensureSid(i));
   const record = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, deck: chatKey(), at: Date.now(), label, title: state.deck.title, count: state.deck.slides.length, data: JSON.stringify(state.deck) };
   state.lastVersionAt = Date.now();
   state.lastVersionJson = record.data;
@@ -1455,6 +1473,7 @@ async function saveToLibrary({ asNew = false } = {}) {
   button.disabled = true;
   newButton.disabled = true;
   try {
+    state.deck.slides.forEach((_, i) => ensureSid(i));
     const deck = JSON.parse(JSON.stringify(state.deck));
     await assertLibraryMedia(deck);
     const existing = !asNew && state.savedDeckId ? await getSavedDeck(state.savedDeckId) : null;
@@ -2405,6 +2424,14 @@ const editorApp = {
   openFileInfo: () => fileInfo.open(),
   // スライドの再利用・アウトラインからスライド・フォト アルバム.
   translate: (to, scope) => translateDeck(to, scope),
+  // 図の形式 → 背景の削除・透明色・図の圧縮 (public/editor/picture.mjs).
+  openCompare: () => compareTool.open(),
+  versions: () => listVersions(),
+  replaceSlides: (slides) => { if (!state.deck || !slides?.length) return; pushUndo(); state.deck.slides = slides.map((slide, i) => normalizeSlide(slide, i, slides.length)); state.selected = Math.min(state.selected, state.deck.slides.length - 1); markChanged({ structural: true }); },
+  imageUrl: (src) => E.resolveSrc(src, renderOptions()),
+  storeBlob: (blob, name) => putMedia(blob, name),
+  allImages: () => (state.deck?.slides || []).flatMap((slide, i) => (slide.elements || []).filter((o) => o.kind === "image").map((o) => ({ slide: i, o }))),
+  patchObjects: (changes) => patchObjects(changes),
   // ビデオの作成: the show played once by itself while the tab is recorded.
   openVideoExport: () => videoExport.openDialog(),
   showOrder: () => showSlides(state.deck, showOf(state.deck?.show) || {}) || E.storyMap(state.deck.slides).order.filter((i) => !state.deck.slides[i].hidden),
@@ -2440,6 +2467,8 @@ const fileInfo = createFileInfo(editorApp);
 const slideTools = createSlideTools(editorApp);
 // ファイル → エクスポート → ビデオの作成 (public/editor/video.mjs).
 const videoExport = createVideoExport(editorApp);
+// 校閲 → 比較 (public/editor/compare.mjs).
+const compareTool = createCompare(editorApp);
 const editor = createCanvas(editorApp);
 const editorUi = createEditorUi(editor, editorApp);
 // The window around the slide: splitters, notes, message bar, status bar (public/editor/window.mjs).
@@ -4067,6 +4096,21 @@ function openDesignDialog() {
   renderMotionGrids();
   syncDesignControls();
   $("designDialog").showModal();
+}
+
+/** Fields of several objects on any slides ([{ slide, id, patch }], undefined removes a field): one undo step. */
+function patchObjects(changes) {
+  if (!state.deck || !changes?.length) return;
+  pushUndo();
+  for (const { slide: i, id, patch } of changes) {
+    const slide = state.deck.slides[i];
+    const at = slide?.elements?.findIndex((o) => o.id === id) ?? -1;
+    if (at < 0) continue;
+    const next = { ...slide.elements[at] };
+    for (const [key, value] of Object.entries(patch)) { if (value === undefined) delete next[key]; else next[key] = value; }
+    slide.elements[at] = E.normalizeObject(next) || slide.elements[at];
+  }
+  markChanged({ structural: true });
 }
 
 /** One object's fields on any slide (undefined removes a field): one undo step. */

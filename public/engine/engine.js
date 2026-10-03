@@ -371,18 +371,25 @@
     if (spec?.chartType === "rank") { wrap.append(rankChart(spec, key)); return wrap; }
     if (spec?.chartType === "shift") { wrap.append(shiftChart(spec, key)); return wrap; }
     const model = chartModel(spec);
+    const opts = spec?.opts || {};
     const legendNames = ["donut", "pie", "funnel", "waterfall"].includes(model.type) ? model.labels : model.series.length > 1 ? model.series.map((serie) => serie.name) : [];
-    if (legendNames.length > 1 && !["donut", "pie", "funnel", "waterfall"].includes(model.type)) {
+    let legend = null;
+    if (legendNames.length > 1 && !["donut", "pie", "funnel", "waterfall"].includes(model.type) && opts.legend !== "none") {
       const stacked = model.type === "stacked-bar" || model.type === "100-stacked-bar";
-      wrap.append(h("div", { class: "hs-legend" }, legendNames.map((name, i) => h("span", { style: { "--c": stacked ? stackColor(i) : SERIES[i % SERIES.length] } }, h("i"), name))));
+      legend = h("div", { class: ["hs-legend", opts.legend ? `at-${opts.legend}` : ""] }, legendNames.map((name, i) => h("span", { style: { "--c": stacked ? stackColor(i) : SERIES[i % SERIES.length] } }, h("i"), name)));
+      if (!opts.legend) wrap.append(legend);
     }
     const holder = h("div", { class: "hs-chart", "data-field": key });
     const svg = s("svg", { viewBox: `0 0 ${w} ${ht}`, preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": strip(spec?.data?.title || "グラフ") });
     const draw = { bar: barChart, combo: barChart, "clustered-bar": clusteredChart, line: lineChart, "multi-line": lineChart, donut: donutChart, pie: donutChart, "stacked-bar": stackedChart, "100-stacked-bar": stackedChart,
       area: areaChart, scatter: scatterChart, radar: radarChart, waterfall: waterfallChart, funnel: funnelChart }[model.type] || barChart;
     draw(svg, model, w, ht);
+    // グラフ要素: no data labels (the values on the marks), no gridlines.
+    if (opts.labels === false) svg.querySelectorAll(".hs-val").forEach((el) => el.remove());
+    if (opts.grid === false) svg.querySelectorAll("line.hs-grid, polygon.hs-grid").forEach((el) => el.remove());
     holder.append(svg);
-    wrap.append(holder);
+    if (legend && opts.legend === "right") { wrap.style.flexDirection = "row"; wrap.style.alignItems = "center"; holder.style.flex = "1"; wrap.append(holder, legend); }
+    else { wrap.append(holder); if (legend && opts.legend === "bottom") wrap.append(legend); }
     return wrap;
   }
 
