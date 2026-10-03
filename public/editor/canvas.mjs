@@ -742,6 +742,12 @@ export function createCanvas(app) {
       startTyping(hit.id, { cell: td ? [Number(td.dataset.r), Number(td.dataset.c)] : [0, 0], at: [event.clientX, event.clientY] });
     } else if (hit.kind === "image") app.showTab?.("picture");
     else if (hit.kind === "chart") app.editChart?.(hit.id);
+    else if (hit.kind === "smartart" && !hit.locked) {
+      // The item under the pointer opens in the SmartArt's テキスト ウィンドウ.
+      const node = document.elementsFromPoint(event.clientX, event.clientY).map((el) => el.closest?.("[data-item]")).find((el) => el?.closest?.(`[data-el="${hit.id}"]`));
+      const item = Number(node?.dataset.item);
+      app.editSmartart?.(hit.id, Number.isFinite(item) ? item : null);
+    }
   }
 
   /** A block of cells picked while typing in a table (rows r0…r1, columns c0…c1), shown tinted on the stage. */
@@ -1443,6 +1449,8 @@ export function createCanvas(app) {
       one?.kind === "shape" && one.shape === "custom" && !one.locked && { label: "頂点の編集", run: () => app.editPoints?.(one.id) },
       one?.kind === "image" && !one.locked && { label: "トリミング", run: () => app.startCrop?.(one.id) },
       one?.kind === "chart" && { label: "データの編集…", run: () => app.editChart?.(one.id) },
+      one?.kind === "smartart" && !one.locked && { label: "テキスト ウィンドウ", run: () => app.editSmartart?.(one.id, null) },
+      one?.kind === "smartart" && !one.locked && { label: "図形に変換", run: () => app.smartartToShapes?.(one.id) },
       !any && { label: "すべて選択", keys: "⌘A", run: () => { ed.sel = visible().map((o) => o.id); draw(); emit(); } },
       !any && { label: "図形を描く…", run: () => app.showTab?.("insert") },
       !any && app.canConvert?.() && "-",

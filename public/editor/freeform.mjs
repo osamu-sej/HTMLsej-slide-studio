@@ -130,16 +130,24 @@ export function createFreeform(editor, app) {
     editor.state.wrap?.removeEventListener("dblclick", onAddPoint, true);
     editor.draw();
   }
+  // A merged shape (図形の結合) has more rings than its first: every ring's points can be edited (picks are [ring, i]).
   function onEditKey(event) {
     if (event.key === "Escape" || event.key === "Enter") { event.preventDefault(); event.stopPropagation(); endEdit(); return; }
-    if ((event.key === "Delete" || event.key === "Backspace") && editing?.pick != null) {
+    if ((event.key === "Delete" || event.key === "Backspace") && editing?.pick) {
       event.preventDefault();
       event.stopPropagation();
       const o = editor.objects().find((x) => x.id === editing.id);
-      const abs = absolute(o).filter((_, i) => i !== editing.pick);
-      if (abs.length < (o.path.closed ? 3 : 2)) { app.toast("これ以上は消せません"); return; }
+      const [r, i] = editing.pick;
+      const rings = absolute(o);
+      rings[r] = rings[r].filter((_, j) => j !== i);
+      const min = o.path.closed || r > 0 ? 3 : 2;
+      if (rings[r].length < min) {
+        // A part of a merged shape goes when too few points are left; the first ring always stays.
+        if (r === 0 || rings.length < 2) { app.toast("これ以上は消せません"); return; }
+        rings.splice(r, 1);
+      }
       editing.pick = null;
-      save(o, abs);
+      save(o, rings);
     }
   }
   function onEditOutside(event) {
@@ -156,23 +164,30 @@ export function createFreeform(editor, app) {
     event.preventDefault();
     event.stopPropagation();
     const p = editor.toSlide(event);
-    const abs = absolute(o);
-    const segs = abs.length - (o.path.closed ? 0 : 1);
-    let best = 0;
+    const rings = absolute(o);
+    let best = [0, 0];
     let dist = Infinity;
-    for (let i = 0; i < segs; i += 1) { const d = ops.distToSegment(p, abs[i], abs[(i + 1) % abs.length]); if (d < dist) { dist = d; best = i; } }
-    abs.splice(best + 1, 0, p);
-    save(o, abs);
+    rings.forEach((abs, r) => {
+      const closed = o.path.closed || r > 0;
+      const segs = abs.length - (closed ? 0 : 1);
+      for (let i = 0; i < segs; i += 1) { const d = ops.distToSegment(p, abs[i], abs[(i + 1) % abs.length]); if (d < dist) { dist = d; best = [r, i]; } }
+    });
+    rings[best[0]].splice(best[1] + 1, 0, p);
+    save(o, rings);
   }
-  const absolute = (o) => o.path.pts.map(([fx, fy]) => [o.x + fx * o.w, o.y + fy * o.h]);
-  function save(o, abs) {
-    const xs = abs.map((p) => p[0]);
-    const ys = abs.map((p) => p[1]);
+  const absolute = (o) => [o.path.pts, ...(o.path.parts || [])].map((ring) => ring.map(([fx, fy]) => [o.x + fx * o.w, o.y + fy * o.h]));
+  function save(o, rings) {
+    const all = rings.flat();
+    const xs = all.map((p) => p[0]);
+    const ys = all.map((p) => p[1]);
     const x = Math.min(...xs);
     const y = Math.min(...ys);
     const w = Math.max(4, Math.max(...xs) - x);
     const hh = Math.max(4, Math.max(...ys) - y);
-    const path = { ...o.path, pts: abs.map(([px, py]) => [round4((px - x) / w), round4((py - y) / hh)]) };
+    const frac = (ring) => ring.map(([px, py]) => [round4((px - x) / w), round4((py - y) / hh)]);
+    const [first, ...parts] = rings.map(frac);
+    const path = { ...o.path, pts: first };
+    if (parts.length) path.parts = parts; else delete path.parts;
     editor.commit(editor.objects().map((item) => (item.id === o.id ? { ...item, x, y, w, h: hh, rot: undefined, path } : item)), { select: [o.id] });
   }
 
@@ -180,33 +195,40 @@ export function createFreeform(editor, app) {
     if (!editing) return [];
     const o = list.find((x) => x.id === editing.id);
     if (!o?.path) return [];
-    const pts = editing.preview || absolute(o);
+    const rings = editing.preview || absolute(o);
     // While a point moves, the shape's new outline follows it.
-    const ghost = editing.preview ? [(() => { const svg = E.s("svg", { class: "ed-anim-path", width: E.W * k, height: E.H * k, viewBox: `0 0 ${E.W} ${E.H}`, "aria-hidden": "true" }); svg.append(E.s("path", { d: E.freeformD({ ...o.path, pts }, 1, 1), fill: "none", stroke: "#2b6be0", "stroke-width": 2 / k, "stroke-dasharray": `${6 / k} ${4 / k}` })); return svg; })()] : [];
-    return [...ghost, ...pts.map(([x, y], i) => h("span", { class: ["ed-handle", "ed-vertex", editing.pick === i ? "on" : ""], "data-handle": `vtx:${i}`, title: "ドラッグで動かす・選んでDeleteで消す", style: { left: `${x * k}px`, top: `${y * k}px` } }))];
+    const ghost = editing.preview ? [(() => {
+      const svg = E.s("svg", { class: "ed-anim-path", width: E.W * k, height: E.H * k, viewBox: `0 0 ${E.W} ${E.H}`, "aria-hidden": "true" });
+      for (const [r, pts] of rings.entries()) svg.append(E.s("path", { d: E.freeformD({ ...o.path, pts, ...(r > 0 ? { closed: true, curve: false } : {}) }, 1, 1), fill: "none", stroke: "#2b6be0", "stroke-width": 2 / k, "stroke-dasharray": `${6 / k} ${4 / k}` }));
+      return svg;
+    })()] : [];
+    const on = (r, i) => editing.pick && editing.pick[0] === r && editing.pick[1] === i;
+    return [...ghost, ...rings.flatMap((pts, r) => pts.map(([x, y], i) => h("span", { class: ["ed-handle", "ed-vertex", on(r, i) ? "on" : ""], "data-handle": `vtx:${r}:${i}`, title: "ドラッグで動かす・選んでDeleteで消す", style: { left: `${x * k}px`, top: `${y * k}px` } })))];
   }
   editor.overlay(overlay);
   editor.handle("vtx:", (event, handle) => {
     if (!editing) return;
-    const i = Number(handle.slice(4));
+    const [, rs, is] = handle.split(":");
+    const r = Number(rs);
+    const i = Number(is);
     const o = editor.objects().find((x) => x.id === editing.id);
     if (!o) return;
-    editing.pick = i;
+    editing.pick = [r, i];
     const start = absolute(o);
     const [sx, sy] = editor.toSlide(event);
     let moved = false;
     const move = (ev) => {
       const [x, y] = editor.toSlide(ev);
       moved = true;
-      editing.preview = start.map((p, j) => (j === i ? [p[0] + x - sx, p[1] + y - sy] : p));
+      editing.preview = start.map((ring, rr) => (rr === r ? ring.map((p, j) => (j === i ? [p[0] + x - sx, p[1] + y - sy] : p)) : ring));
       editor.draw();
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      const pts = editing?.preview;
+      const rings = editing?.preview;
       if (editing) editing.preview = null;
-      if (moved && pts) save(o, pts); else editor.draw();
+      if (moved && rings) save(o, rings); else editor.draw();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);

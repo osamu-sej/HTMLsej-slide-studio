@@ -25,6 +25,8 @@
   const STARTS = { click: "クリック時", with: "直前の動作と同時", after: "直前の動作の後" };
   const EASES = { auto: "効果の既定", smooth: "滑らかに開始と終了", out: "滑らかに終了", in: "滑らかに開始", linear: "一定の速さ", bounce: "バウンド終了" };
   const BY = { all: "すべて同時", para: "段落ごと", word: "単語ごと", char: "文字ごと" };
+  // A SmartArt's items one after another (PowerPoint's 効果のオプション → 個別).
+  const BY_SMARTART = { all: "1つのオブジェクトとして", item: "1つずつ" };
   const REPEATS = { 1: "なし", 2: "2回", 3: "3回", 4: "4回", 5: "5回", 10: "10回", click: "次のクリックまで", slide: "スライドの最後まで" };
   const SPEEDS = [[5000, "さらに遅く（5秒）"], [3000, "遅く（3秒）"], [2000, "普通（2秒）"], [1000, "速く（1秒）"], [500, "さらに速く（0.5秒）"]];
 
@@ -183,6 +185,7 @@
       if (raw.autoReverse === true && cls !== "media") entry.autoReverse = true;
       if (EASES[raw.ease] && raw.ease !== "auto") entry.ease = raw.ease;
       if (BY[raw.by] && raw.by !== "all" && ["in", "out", "em"].includes(cls) && !def.custom && !def.html && (objectIds.has(el) ? ["shape", "text"].includes(kinds.get(el)) : LAYOUT_TARGET.test(el))) entry.by = raw.by;
+      if (raw.by === "item" && ["in", "out", "em"].includes(cls) && !def.custom && !def.html && kinds.get(el) === "smartart") entry.by = "item";
       if (typeof raw.trigger === "string" && objectIds.has(raw.trigger)) entry.trigger = raw.trigger;
       if (cls === "path") {
         const pts = (Array.isArray(raw.path?.pts) ? raw.path.pts : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 2000).map(([x, y]) => [Math.round(num(x, -6000, 6000, 0) * 10) / 10, Math.round(num(y, -6000, 6000, 0) * 10) / 10]);
@@ -486,6 +489,7 @@
 
   /** Text pieces of a part for "by word / character / paragraph" (split once, kept for later animations). */
   function units(part, by) {
+    if (by === "item") return [...part.node.querySelectorAll(".hs-sa-step:not(.hs-sa-fixed)")];
     const host = part.object ? part.node.querySelector(".hs-obj-tx") : part.node;
     if (!host) return [];
     if (by === "para") {
@@ -1184,7 +1188,7 @@
   }
 
   Object.assign(E, {
-    ANIM_CLASSES: CLASSES, ANIM_STARTS: STARTS, ANIM_EASES: EASES, ANIM_BY: BY, ANIM_REPEATS: REPEATS, ANIM_SPEEDS: SPEEDS,
+    ANIM_CLASSES: CLASSES, ANIM_STARTS: STARTS, ANIM_EASES: EASES, ANIM_BY: BY, ANIM_BY_SMARTART: BY_SMARTART, ANIM_REPEATS: REPEATS, ANIM_SPEEDS: SPEEDS,
     ANIM_IN: IN, ANIM_EM: EM, ANIM_PATHS: PATHS, ANIM_MEDIA: MEDIA, animLabel: fxLabel, animDirs: dirsOf, animDefaultDur: defaultDur, animIsHtml: (cls, fx) => Boolean((cls === "out" ? IN[fx] : FX[cls]?.[fx])?.html),
     normalizeTimeline, timelinePlan, timelineTakesLayout, timelineMount, layoutTargets,
     animStart, animStep, animSeek, animStop, animBusy, animFinish,

@@ -280,6 +280,10 @@ export function createAnimations(editor, app, kit) {
         items.push("-", { head: "テキストの動作" });
         for (const [k, l] of Object.entries(E.ANIM_BY)) items.push({ label: l, on: (e.by || "all") === k, run: () => setOption({ by: k === "all" ? undefined : k }) });
       }
+      if (["in", "out", "em"].includes(e.cls) && list.every((x) => byId(x.el)?.kind === "smartart") && !defOf(e)?.html && !defOf(e)?.custom) {
+        items.push("-", { head: "グラフィックの動作（SmartArt）" });
+        for (const [k, l] of Object.entries(E.ANIM_BY_SMARTART)) items.push({ label: l, on: (e.by || "all") === k, run: () => setOption({ by: k === "all" ? undefined : k }) });
+      }
       if (e.cls === "path") {
         items.push("-", { head: "パス" });
         items.push({ label: "パスの反転（逆にたどる）", icon: "reset", run: () => setOption({ path: reversePath(e.path) }) });
@@ -584,6 +588,7 @@ export function createAnimations(editor, app, kit) {
       same && def?.amounts ? line(e.fx === "spin" ? "回転" : e.fx === "transparency" ? "透明度" : "大きさ", choice(def.amounts, e.amount ?? def.amount, (v) => setOption({ amount: Number(v) }), "量")) : null,
       same && def?.color ? line("色", h("span", { class: "fp-swatches" }, (e.fx === "fontColor" ? E.PALETTE.text : e.fx === "lineColor" ? E.PALETTE.line.filter(([c]) => c !== "#ffffff") : E.PALETTE.fill.filter(([c]) => c !== "#ffffff")).map(([c, l]) => h("button", { type: "button", class: ["fp-sw", (e.color || def.color) === c ? "on" : ""], title: l, "aria-label": l, style: { "--c": c }, onclick: () => setOption({ color: c }) })))) : null,
       ["in", "out", "em"].includes(e.cls) && chosen.every((x) => textual(x.el)) ? line("テキスト", choice(Object.entries(E.ANIM_BY), e.by || "all", (v) => setOption({ by: v === "all" ? undefined : v }), "テキストの動作")) : null,
+      ["in", "out", "em"].includes(e.cls) && chosen.every((x) => byId(x.el)?.kind === "smartart") ? line("SmartArt", choice(Object.entries(E.ANIM_BY_SMARTART), e.by || "all", (v) => setOption({ by: v === "all" ? undefined : v }), "グラフィックの動作")) : null,
       line("開始", choice(Object.entries(E.ANIM_STARTS), e.start, (v) => setOption({ start: v }), "開始")),
       line("継続時間", sec("dur", "継続時間（秒）", { min: 0.01 }), h("small", {}, "秒"), choice([["", "速さ…"], ...E.ANIM_SPEEDS.map(([ms, l]) => [ms, l])], "", (v) => v && setOption({ dur: Number(v) }), "速さ")),
       line("遅延", sec("delay", "遅延（秒）"), h("small", {}, "秒")),

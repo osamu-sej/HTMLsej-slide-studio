@@ -10,6 +10,8 @@ import { createTableUi } from "./tables.mjs";
 import { createCrop } from "./crop.mjs";
 import { createFreeform } from "./freeform.mjs";
 import { createMedia } from "./media.mjs";
+import { MERGE_HINTS, MERGE_MODES, canMerge, clippingLib, mergeObjects } from "./merge.mjs";
+import { createSmartArt } from "./smartart.mjs";
 
 const SIZES_PT = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const LINE_WIDTHS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 8, 12];
@@ -128,7 +130,8 @@ export function createEditorUi(editor, app) {
   }
   const menu = (items) => (close) => h("div", { class: "rb-menu" }, items.filter(Boolean).map((item) => (item === "-" ? h("div", { class: "rb-sep" })
     : item.head ? h("div", { class: "rb-menu-head" }, item.head)
-      : h("button", { type: "button", class: item.on ? "on" : "", disabled: item.disabled || null, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); item.run(); } }, item.icon ? ico(item.icon) : h("span", { class: "rb-noicon" }), h("span", {}, item.label), item.keys ? h("kbd", {}, item.keys) : null))));
+      : h("button", { type: "button", class: item.on ? "on" : "", title: item.title || null, disabled: item.disabled || null, onmousedown: (e) => e.preventDefault(), onclick: () => { item.hover?.(false); close(); item.run(); },
+        onmouseenter: item.hover ? () => item.hover(true) : null, onmouseleave: item.hover ? () => item.hover(false) : null }, item.icon ? ico(item.icon) : h("span", { class: "rb-noicon" }), h("span", {}, item.label), item.keys ? h("kbd", {}, item.keys) : null))));
 
   /** Colour swatches of the SEJ palette (plus none and, for fills and lines, any colour with a warning). */
   function colors(list, current, pick, { none = null, custom = true, note = "" } = {}) {
@@ -344,6 +347,7 @@ export function createEditorUi(editor, app) {
     { id: "tableLayout", label: "レイアウト", contextual: () => tables.isTable() },
     { id: "chartDesign", label: "グラフのデザイン", contextual: () => tables.isChart() },
     { id: "playback", label: "再生", contextual: () => media.has() },
+    { id: "smartartDesign", label: "SmartArt のデザイン", contextual: () => smart.isSmartArt() },
   ];
 
   function signature() {
@@ -453,7 +457,7 @@ export function createEditorUi(editor, app) {
   // A narrow window squeezes the ribbon as PowerPoint does, from the right-hand groups first: small buttons
   // lose their words (the tooltip keeps them), then whole groups fold into one button that opens them;
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
-  const GROUP_ICONS = { プレビュー: "play", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
+  const GROUP_ICONS = { グラフィックの作成: "smartart", "SmartArt のスタイル": "fill", 文字: "font", リセット: "reset", プレビュー: "play", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
     図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane",
     プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review" };
   function fold(g) {
@@ -551,7 +555,8 @@ export function createEditorUi(editor, app) {
           btn("textRight", "", "右揃え（⌘R）", () => editor.textFormat("align", "right"), { enabled: hasText, pressed: () => editor.textState()?.align === "right", keep: true }),
           btn("textJustify", "", "両端揃え（⌘J）", () => editor.textFormat("align", "justify"), { enabled: hasText, pressed: () => editor.textState()?.align === "justify", keep: true }),
           btn("vtext", "", "縦書き", () => editor.textFormat("vertical"), { enabled: hasText, pressed: tState("vertical") }),
-          drop("valignMiddle", "", "文字の配置（上下）", () => menu([["top", "上揃え", "valignTop"], ["middle", "上下中央揃え", "valignMiddle"], ["bottom", "下揃え", "valignBottom"]].map(([v, label, icon]) => ({ label, icon, on: editor.textState()?.valign === v, run: () => editor.textFormat("valign", v) }))), { enabled: hasText }))),
+          drop("valignMiddle", "", "文字の配置（上下）", () => menu([["top", "上揃え", "valignTop"], ["middle", "上下中央揃え", "valignMiddle"], ["bottom", "下揃え", "valignBottom"]].map(([v, label, icon]) => ({ label, icon, on: editor.textState()?.valign === v, run: () => editor.textFormat("valign", v) }))), { enabled: hasText }),
+          drop("smartart", "", "SmartArt に変換：選んだテキストの段落（箇条書きのレベル）を図に", () => smart.convertGallery(), { enabled: () => selected().some((o) => ["shape", "text"].includes(o.kind) && o.text) }))),
       group("図形描画",
         drop("shapes", "図形", "図形を描く", () => shapeGallery(pickTool), { big: true }),
         col(drop("front", "配置", "前面・背面・整列・グループ・回転", () => arrangeMenu(), { enabled: any }),
@@ -651,7 +656,8 @@ export function createEditorUi(editor, app) {
       group("図",
         drop("shapes", "図形", "図形を描く", () => shapeGallery(pickTool), { big: true }),
         drop("icon", "アイコン", "アイコンを入れる", () => iconGallery(insertIcon), { big: true }),
-        drop("chartBar", "グラフ", "グラフを入れる（データは表で入力）", () => tables.chartPicker(), { big: true })),
+        drop("chartBar", "グラフ", "グラフを入れる（データは表で入力）", () => tables.chartPicker(), { big: true }),
+        drop("smartart", "SmartArt", "SmartArt グラフィック：リスト・手順・循環・階層構造・集合関係・マトリックス・ピラミッド", () => smart.insertGallery(), { big: true })),
       group("テキスト",
         drop("textbox", "テキスト ボックス", "テキストボックスを描く", menu([
           { label: "横書きテキスト ボックス", icon: "textbox", run: () => pickTool({ kind: "text" }) },
@@ -768,7 +774,8 @@ export function createEditorUi(editor, app) {
       group("図形の挿入",
         drop("shapes", "図形", "図形を描く", () => shapeGallery(pickTool), { big: true }),
         col(drop("change", "図形の変更", "選んだ図形の形を変える", () => shapeGallery((tool) => { if (tool.kind === "shape") editor.apply((o) => (["shape", "text"].includes(o.kind) ? { kind: "shape", shape: tool.shape, adj: undefined } : null)); }, { lines: false }), { enabled: hasText }),
-          btn("textbox", "テキスト ボックス", "テキストボックスを描く", () => pickTool({ kind: "text" })))),
+          btn("textbox", "テキスト ボックス", "テキストボックスを描く", () => pickTool({ kind: "text" })),
+          drop("union", "図形の結合", "選んだ2つ以上の図形を1つにする：接合・型抜き/合成・切り出し・重なり抽出・単純型抜き（最初に選んだ図形の書式になります）", () => mergeMenu(), { enabled: () => canMerge(selected()) }))),
       group("図形のスタイル",
         drop("style", "クイック|スタイル", "SEJの色の組み合わせ", () => styleMenu(), { big: true, enabled: hasText }),
         col(drop("fill", "塗りつぶし", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし" }), { enabled: hasText, swatch: fillOf }),
@@ -782,6 +789,55 @@ export function createEditorUi(editor, app) {
       arrangeGroup(),
       group("サイズ", sizeFields()),
     ];
+  }
+  /** 図形の結合: the five ways, in PowerPoint's order (the order of selection decides the first shape). */
+  function mergeMenu() {
+    return menu([
+      { head: "図形の結合" },
+      ...Object.entries(MERGE_MODES).map(([mode, label]) => ({ label, icon: mode, title: MERGE_HINTS[mode], run: () => mergeSelection(mode), hover: (on) => mergePreview(on ? mode : null) })),
+    ]);
+  }
+  /** Live preview, as PowerPoint shows it while the pointer is on a choice: the result's outline over the slide. */
+  let previewFor = null;
+  async function mergePreview(mode) {
+    previewFor = mode;
+    if (!mode) { editor.draw(); return; }
+    const chosen = editor.selection.map((id) => editor.objects().find((o) => o.id === id)).filter(Boolean);
+    if (!canMerge(chosen)) return;
+    let pc;
+    try { pc = await clippingLib(); } catch { return; }
+    if (previewFor !== mode) return;
+    const made = mergeObjects(chosen, mode, E, pc, () => "preview") || [];
+    const k = editor.scale();
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "ed-merge-preview");
+    svg.setAttribute("width", String(E.W * k));
+    svg.setAttribute("height", String(E.H * k));
+    for (const o of made) {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      const d = E.geometry("custom", o.w, o.h, null, o.path).paths[0];
+      path.setAttribute("d", d);
+      path.setAttribute("fill-rule", "evenodd");
+      path.setAttribute("transform", `translate(${o.x * k} ${o.y * k}) scale(${k})`);
+      svg.append(path);
+    }
+    editor.draw(null, [svg]);
+  }
+  async function mergeSelection(mode) {
+    const order = editor.selection;
+    const chosen = order.map((id) => editor.objects().find((o) => o.id === id)).filter(Boolean);
+    if (!canMerge(chosen)) { app.toast("図形を2つ以上選んでください（Shift＋クリック）"); return; }
+    let pc;
+    try { pc = await clippingLib(); } catch (error) { app.toast(error.message); return; }
+    const made = mergeObjects(chosen, mode, E, pc, () => E.newObjectId());
+    if (!made?.length) { app.toast(mode === "intersect" ? "重なっている部分がありません" : "結合すると何も残りません"); return; }
+    const gone = new Set(chosen.filter((o) => ["shape", "text"].includes(o.kind) && !o.locked).map((o) => o.id));
+    const list = editor.objects();
+    // The result takes the first shape's place in the stacking order.
+    const at = list.findIndex((o) => o.id === chosen[0].id);
+    const next = [...list.slice(0, at).filter((o) => !gone.has(o.id)), ...made, ...list.slice(at).filter((o) => !gone.has(o.id))];
+    editor.commit(next, { select: made.map((o) => o.id) });
+    app.toast(`図形を${MERGE_MODES[mode]}しました${made.length > 1 ? `（${made.length}個の図形）` : ""}。頂点の編集で形を直せます`);
   }
   function arrangeGroup() {
     return group("配置",
@@ -869,7 +925,7 @@ export function createEditorUi(editor, app) {
   }
 
   function buildTab(id) {
-    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, developer: developerTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab, playback: media.playbackTab }[id]();
+    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, developer: developerTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab, playback: media.playbackTab, smartartDesign: smart.designTab }[id]();
   }
 
   /**
@@ -1047,6 +1103,17 @@ export function createEditorUi(editor, app) {
         line("", toggle("繰り返す", Boolean(sound.loop), (on) => editor.apply((x) => (x.kind === "audio" ? { loop: on } : null)))),
         line("", h("button", { type: "button", class: "btn btn-sm", onclick: () => showTab("playback", { open: true }) }, "再生タブ（トリミング・フェード・音量）"))));
     }
+    if (single && chosen[0].kind === "smartart") {
+      const sa = chosen[0].smartart;
+      const setSa = (patch) => editor.apply((x) => (x.kind === "smartart" ? { smartart: { ...x.smartart, ...patch } } : null));
+      out.push(section("smartart", "SmartArt", true,
+        line("レイアウト", choice(Object.entries(E.SMARTART_LAYOUTS).map(([k, v]) => [k, `${v.group}：${v.label}`]), sa.layout, (v) => setSa({ layout: v }))),
+        line("色", choice(Object.entries(E.SMARTART_COLORS), sa.color || "blue", (v) => setSa({ color: v }))),
+        line("角", choice(Object.entries(E.SMARTART_STYLES), sa.style || "round", (v) => setSa({ style: v }))),
+        line("項目", h("span", { class: "fp-file" }, `${sa.items.length}項目（${sa.items.filter((it) => it.level === 0).length}つの大項目）`)),
+        line("", h("button", { type: "button", class: "btn btn-sm", onclick: () => smart.openPane(chosen[0].id) }, "テキスト ウィンドウ"),
+          h("button", { type: "button", class: "btn btn-sm", onclick: () => smart.toShapes(chosen[0].id) }, "図形に変換"))));
+    }
     // Size and position (cm, degrees), as PowerPoint's 配置とサイズ.
     if (single) out.push(sizeSection(chosen[0], list));
     out.push(section("opacity", "透明度", false, line("透明度", slider((1 - (o.opacity ?? 1)) * 100, (v) => editor.apply({ opacity: v ? Math.round((1 - v / 100) * 100) / 100 : undefined })))));
@@ -1121,6 +1188,8 @@ export function createEditorUi(editor, app) {
   const ix = createInteractions(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), tabNow: () => tab, editLink: () => editLink() });
   const crop = createCrop(editor, app);
   const freeform = createFreeform(editor, app);
+  // SmartArt (smartart.mjs): the gallery, the text pane and the SmartArt のデザイン tab.
+  const smart = createSmartArt(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), showTab: (id) => showTab(id) });
   // 挿入 → オーディオ・画面録画 and the 再生 tab of a video or a sound (media.mjs).
   const media = createMedia(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), refreshRibbon: () => refresh() });
   const tables = createTableUi(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), colors, showTab: (id) => showTab(id) });
@@ -1128,7 +1197,8 @@ export function createEditorUi(editor, app) {
   editor.subscribe(() => { renderRibbon(); renderPane(); });
 
   return {
-    renderRibbon, renderPane, renderAnimPane: () => anim.renderPane(), editChart: (id) => tables.editChart(id), startCrop: (id) => crop.start(id), editPoints: (id) => freeform.editPoints(id),
+    renderRibbon, renderPane, renderAnimPane: () => anim.renderPane(), editChart: (id) => tables.editChart(id),
+    editSmartart: (id, item) => { editor.select([id]); showTab("smartartDesign"); smart.openPane(id, item); }, smartartToShapes: (id) => smart.toShapes(id), startCrop: (id) => crop.start(id), editPoints: (id) => freeform.editPoints(id),
     showTab, closePop, openPop, shapeGallery, iconGallery, photoGallery, toggleRibbon, setRibbonMode, zoomMenu,
     get tab() { return tab; }, get ribbonMode() { return ribbonMode; }, get floating() { return floating; },
   };

@@ -928,8 +928,11 @@
     }
     return path.closed ? `${d} Z` : d;
   }
+  /** A hand-drawn shape; merged shapes (図形の結合) add more closed rings (holes and separate parts), drawn even-odd. */
   function customGeometry(path, w, hh) {
-    return { key: "custom", paths: [freeformD(path, w, hh)], extras: [], text: [0, 0, w, hh], open: !path.closed, rule: "nonzero", adj: [] };
+    const parts = Array.isArray(path.parts) ? path.parts.filter((ring) => Array.isArray(ring) && ring.length > 2) : [];
+    const d = [freeformD(path, w, hh), ...parts.map((pts) => freeformD({ pts, closed: true }, w, hh))].join(" ");
+    return { key: "custom", paths: [d], extras: [], text: [0, 0, w, hh], open: !path.closed && !parts.length, rule: parts.length ? "evenodd" : "nonzero", adj: [] };
   }
 
   // ---------------------------------------------------------------- rich text (what people type into shapes and text boxes)
@@ -1167,8 +1170,8 @@
 
   // ---------------------------------------------------------------- objects: kinds, defaults, normalization
 
-  const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart"];
-  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ" };
+  const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart"];
+  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt" };
   // Media playback (PowerPoint's 再生 tab): how loud, and where the sound sits on the slides.
   const VOLUMES = { 0: "ミュート", 0.33: "小", 0.66: "中", 1: "大" };
   // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
@@ -1196,6 +1199,7 @@
     icon: { color: "#1f3864", strokeW: 1.75 },
     video: { fit: "cover", autoplay: false, loop: false, muted: false },
     audio: { autoplay: false, loop: false, color: "#1f3864" },
+    smartart: {},
     lottie: { fit: "contain", autoplay: true, loop: true },
     table: { style: "sej", header: true, banded: true, firstCol: false, lastRow: false, fs: 28, color: "#1a1a1a", lh: 1.35 },
     chart: {},
@@ -1287,6 +1291,10 @@
       if (raw.shape === "custom" && o.kind === "shape") {
         const pts = (Array.isArray(raw.path?.pts) ? raw.path.pts : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 5000).map(([x, y]) => [Math.round(clamp(Number(x), -1, 2) * 10000) / 10000, Math.round(clamp(Number(y), -1, 2) * 10000) / 10000]);
         if (pts.length > 1) { o.shape = "custom"; o.path = { pts, ...(raw.path.closed ? { closed: true } : {}), ...(raw.path.curve ? { curve: true } : {}) }; }
+        // More rings of a merged shape (図形の結合): closed, straight-edged, fractions of the box like the points.
+        const ring = (list) => (Array.isArray(list) ? list : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 5000).map(([x, y]) => [Math.round(clamp(Number(x), -1, 2) * 10000) / 10000, Math.round(clamp(Number(y), -1, 2) * 10000) / 10000]);
+        const parts = (Array.isArray(raw.path?.parts) ? raw.path.parts : []).slice(0, 400).map(ring).filter((r) => r.length > 2);
+        if (o.path && parts.length) { o.path.parts = parts; o.path.closed = true; delete o.path.curve; }
       }
       if (Array.isArray(raw.adj) && SHAPES[o.shape]?.adj) o.adj = adjOf(SHAPES[o.shape], raw.adj).map((v) => Math.round(v * 10000) / 10000);
       const fill = colorOrNone(raw.fill);
@@ -1348,6 +1356,11 @@
         for (const key of ["autoplay", "loop", "muted"]) if (typeof raw[key] === "boolean") o[key] = raw[key];
       }
       if (o.kind === "video" || o.kind === "audio") Object.assign(o, normalizePlayback(raw, o.kind));
+    }
+    if (o.kind === "smartart") {
+      o.smartart = normalizeSmartart(raw.smartart);
+      const fs = num(raw.fs, 8, 200);
+      if (fs != null) o.fs = fs;
     }
     if (o.kind === "table") {
       const table = normalizeTable(raw);
@@ -2349,6 +2362,442 @@
     rotEl.append(box);
   }
 
+  // ---------------------------------------------------------------- SmartArt (挿入 → SmartArt)
+  // A diagram drawn from a list of items with levels (PowerPoint's テキスト ウィンドウ): the layout places boxes,
+  // arrows and lines in SEJ colours (light fills, black text, no shadows). The parts are ordinary shapes and lines,
+  // so 図形に変換 hands them over as objects, and an animation can bring the items in one by one.
+
+  const SMARTART_LAYOUTS = {
+    blocks: { label: "基本ブロック リスト", group: "リスト" },
+    vlist: { label: "縦方向箇条書きリスト", group: "リスト" },
+    process: { label: "基本ステップ", group: "手順" },
+    chevron: { label: "矢印型ステップ", group: "手順" },
+    vprocess: { label: "縦方向ステップ", group: "手順" },
+    steps: { label: "上向きステップ", group: "手順" },
+    timeline: { label: "基本タイムライン", group: "手順" },
+    cycle: { label: "基本の循環", group: "循環" },
+    radial: { label: "基本の放射", group: "循環" },
+    hierarchy: { label: "組織図", group: "階層構造" },
+    venn: { label: "基本ベン図", group: "集合関係" },
+    target: { label: "ターゲット", group: "集合関係" },
+    matrix: { label: "基本マトリックス", group: "マトリックス" },
+    pyramid: { label: "基本ピラミッド", group: "ピラミッド" },
+  };
+  const SMARTART_GROUPS = ["リスト", "手順", "循環", "階層構造", "集合関係", "マトリックス", "ピラミッド"];
+  const SMARTART_COLORS = { blue: "淡青", brown: "淡茶", gray: "グレー", mix: "淡青・淡茶・グレー", outline: "線だけ（白地に濃紺の線）" };
+  const SMARTART_STYLES = { round: "角丸", square: "四角", soft: "丸みを強く" };
+  const SA_SCHEMES = {
+    blue: { main: ["#dce4f2"], sub: ["#f1f5fb"], arrow: "#b7c3da", line: "#1f3864" },
+    brown: { main: ["#d6c9b8"], sub: ["#f5f0ea"], arrow: "#d6c9b8", line: "#808080" },
+    gray: { main: ["#d9d9d9"], sub: ["#f2f2f2"], arrow: "#d9d9d9", line: "#808080" },
+    mix: { main: ["#dce4f2", "#d6c9b8", "#d9d9d9"], sub: ["#f1f5fb", "#f5f0ea", "#f2f2f2"], arrow: "#b7c3da", line: "#1f3864" },
+    outline: { main: ["#ffffff"], sub: ["#ffffff"], arrow: "#b7c3da", line: "#1f3864", stroke: "#1f3864", subStroke: "#b7c3da" },
+  };
+  const SA_SAMPLE = {
+    hierarchy: [["社長", 0], ["営業本部", 1], ["第1営業部", 2], ["第2営業部", 2], ["管理本部", 1], ["総務部", 2]],
+    radial: [["お客様", 0], ["品ぞろえ", 0], ["価格", 0], ["接客", 0], ["売場", 0]],
+    venn: [["品質", 0], ["価格", 0], ["利便性", 0]],
+    matrix: [["強み×機会", 0], ["強み×脅威", 0], ["弱み×機会", 0], ["弱み×脅威", 0]],
+  };
+  /** Items to start a new SmartArt with (PowerPoint shows [テキスト]; the studio gives words to replace). */
+  function smartartSample(layout) {
+    const list = SA_SAMPLE[layout] || [["計画", 0], ["目標と期限を決める", 1], ["実行", 0], ["店舗で試す", 1], ["評価", 0], ["数字で振り返る", 1]];
+    return list.map(([text, level]) => ({ text, level }));
+  }
+
+  function normalizeSmartart(raw) {
+    const sa = raw && typeof raw === "object" ? raw : {};
+    const items = (Array.isArray(sa.items) ? sa.items : []).slice(0, 60)
+      .map((it) => ({ text: String(it?.text ?? "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").replace(/\r?\n/g, " ").slice(0, 300), level: Math.round(clamp(Number(it?.level) || 0, 0, 4)) }));
+    if (!items.length) items.push({ text: "", level: 0 });
+    items[0].level = 0;
+    for (let i = 1; i < items.length; i += 1) items[i].level = Math.min(items[i].level, items[i - 1].level + 1);
+    const out = { layout: SMARTART_LAYOUTS[sa.layout] ? sa.layout : "blocks", items };
+    if (SMARTART_COLORS[sa.color] && sa.color !== "blue") out.color = sa.color;
+    if (SMARTART_STYLES[sa.style] && sa.style !== "round") out.style = sa.style;
+    const fsScale = num(sa.fsScale, 0.5, 2);
+    if (fsScale && fsScale !== 1) out.fsScale = fsScale;
+    if (sa.rtl === true) out.rtl = true;
+    return out;
+  }
+
+  /** Top-level items, each with the items under it (a deeper level belongs to the item above it). */
+  function saTree(items) {
+    const tops = [];
+    items.forEach((it, index) => {
+      if (it.level === 0 || !tops.length) tops.push({ ...it, index, kids: [] });
+      else tops[tops.length - 1].kids.push({ ...it, index });
+    });
+    return tops;
+  }
+  const emWidth = (text) => [...String(text)].reduce((sum, ch) => sum + (/[\u0000-ÿ｡-ﾟ]/.test(ch) ? 0.56 : 1), 0);
+  /** The biggest size (px) at which the lines fit the box, wrapping as they would (a rough measure, no layout). */
+  function fitFs(lines, w, hh, { max = 44, min = 12, lh = 1.3, padX = 24, padY = 14 } = {}) {
+    const innerW = Math.max(8, w - padX);
+    const innerH = Math.max(8, hh - padY);
+    const list = lines.filter((line) => line !== undefined).map((line) => String(line || " "));
+    for (let fs = max; fs > min; fs -= 1) {
+      const rows = list.reduce((n, line) => n + Math.max(1, Math.ceil((emWidth(line) * fs) / innerW - 0.02)), 0);
+      if (rows * fs * lh <= innerH && list.every((line) => Math.min(emWidth(line), 4) * fs <= innerW)) return fs;
+    }
+    return min;
+  }
+
+  /**
+   * The parts of a SmartArt in its own box (0…w, 0…h): shapes ({ kind: "shape", … }) and arrows/lines
+   * ({ kind: "line", … }), each with `step` (the top-level item it belongs to, -1 for what is always there) and
+   * `item` (the item whose words it shows).
+   */
+  function smartartParts(o) {
+    const sa = o.smartart || normalizeSmartart(null);
+    const w = Math.max(40, o.w);
+    const hh = Math.max(40, o.h);
+    const scheme = SA_SCHEMES[sa.color || "blue"];
+    const tops = saTree(sa.items);
+    const n = Math.max(1, tops.length);
+    const k = sa.fsScale || 1;
+    const corner = sa.style === "square" ? "rect" : "roundRect";
+    const cornerAdj = sa.style === "soft" ? [0.35] : undefined;
+    const mainFill = (i) => scheme.main[i % scheme.main.length];
+    const subFill = (i) => scheme.sub[i % scheme.sub.length];
+    const outline = scheme.stroke ? { stroke: scheme.stroke, strokeW: 3 } : { stroke: "none" };
+    const subOutline = scheme.subStroke ? { stroke: scheme.subStroke, strokeW: 2 } : { stroke: "none" };
+    const parts = [];
+    const node = (x, y, nw, nh, text, extra = {}) => parts.push({ kind: "shape", shape: corner, adj: corner === "roundRect" ? cornerAdj : undefined, x, y, w: nw, h: nh, fill: mainFill(extra.step ?? 0), ...outline, text, color: "#1a1a1a", align: "center", valign: "middle", pad: [8, 12, 8, 12], lh: 1.3, autofit: "none", role: "node", ...extra });
+    const arrow = (x1, y1, x2, y2, extra = {}) => parts.push({ kind: "line", x1, y1, x2, y2, stroke: scheme.line, strokeW: 4, tail: "triangle", tailSize: 2, role: "connector", ...extra });
+    const rich = (text) => (text ? textToRich(text) : "");
+    const list = (kids, centered = false) => (!kids.length ? "" : centered ? kids.map((kid) => `<p>${escapeHtml(kid.text) || "<br>"}</p>`).join("")
+      : `<ul>${kids.map((kid) => `<li>${escapeHtml(kid.text) || "<br>"}</li>`).join("")}</ul>`);
+    const uniform = (boxes, opts) => Math.round(Math.min(...boxes.map(([lines, bw, bh]) => fitFs(lines, bw, bh, opts))) * k);
+    const rtl = (x, bw) => (sa.rtl ? w - x - bw : x);
+    const layout = sa.layout;
+
+    if (layout === "blocks") {
+      // As many columns as make the boxes closest to 16:10.
+      let cols = 1;
+      let best = Infinity;
+      for (let c = 1; c <= n; c += 1) {
+        const rows = Math.ceil(n / c);
+        const ratio = (w / c) / (hh / rows);
+        const score = Math.abs(Math.log(ratio / 1.6));
+        if (score < best) { best = score; cols = c; }
+      }
+      const rows = Math.ceil(n / cols);
+      const gap = Math.min(w, hh) * 0.04;
+      const bw = (w - gap * (cols - 1)) / cols;
+      const bh = (hh - gap * (rows - 1)) / rows;
+      const fs = uniform(tops.map((t) => [[t.text, ...t.kids.map((kid) => kid.text)], bw, bh]));
+      // The last row, when it is not full, sits in the middle (as PowerPoint's 基本ブロック リスト).
+      const lastRow = rows - 1;
+      const inLast = n - lastRow * cols;
+      const shift = inLast < cols ? ((cols - inLast) * (bw + gap)) / 2 : 0;
+      tops.forEach((t, i) => node(rtl((i % cols) * (bw + gap) + (Math.floor(i / cols) === lastRow ? shift : 0), bw), Math.floor(i / cols) * (bh + gap), bw, bh, rich(t.text) + list(t.kids), { step: i, item: t.index, fs, align: t.kids.length ? "left" : "center", fill: mainFill(i) }));
+    } else if (layout === "vlist") {
+      const gap = hh * 0.03;
+      const rowH = (hh - gap * (n - 1)) / n;
+      const headW = w * 0.3;
+      const fs = uniform(tops.map((t) => [[t.text], headW, rowH]));
+      const subFs = uniform(tops.map((t) => [t.kids.map((kid) => kid.text).concat(t.kids.length ? [] : [""]), w - headW, rowH]), { max: Math.max(12, fs - 4) });
+      tops.forEach((t, i) => {
+        const y = i * (rowH + gap);
+        parts.push({ kind: "shape", shape: "rect", x: rtl(headW * 0.5, w - headW * 0.5), y, w: w - headW * 0.5, h: rowH, fill: subFill(i), ...subOutline, text: list(t.kids), color: "#1a1a1a", align: "left", valign: "middle", pad: [8, 16, 8, headW * 0.5 + 20], lh: 1.3, autofit: "none", fs: subFs, role: "sub", step: i, item: t.kids[0]?.index ?? t.index });
+        node(rtl(0, headW), y, headW, rowH, rich(t.text), { step: i, item: t.index, fs, fill: mainFill(i) });
+      });
+    } else if (layout === "process" || layout === "chevron") {
+      const chevron = layout === "chevron";
+      const gap = chevron ? -w * 0.012 : w * 0.06;
+      const bw = (w - gap * (n - 1)) / n;
+      const hasKids = tops.some((t) => t.kids.length);
+      const bh = chevron ? Math.min(hh * (hasKids ? 0.36 : 0.7), bw * 0.55) : Math.min(hh * (hasKids ? 0.5 : 0.8), bw * 0.8);
+      const y = hasKids ? hh * 0.05 : (hh - bh) / 2;
+      const fs = uniform(tops.map((t) => [[t.text], chevron ? bw * 0.7 : bw, bh]));
+      const subFs = uniform(tops.map((t) => [t.kids.map((kid) => kid.text).concat([""]), bw, hh - bh - y - hh * 0.06]), { max: Math.max(12, fs - 4) });
+      tops.forEach((t, i) => {
+        const x = rtl(i * (bw + gap), bw);
+        if (chevron) parts.push({ kind: "shape", shape: i === 0 && !sa.rtl ? "homePlate" : "chevron", flipH: sa.rtl || undefined, adj: [0.32], x, y, w: bw, h: bh, fill: mainFill(i), ...outline, text: rich(t.text), color: "#1a1a1a", align: "center", valign: "middle", pad: [6, bh * 0.36, 6, bh * 0.36], lh: 1.25, autofit: "none", fs, role: "node", step: i, item: t.index });
+        else node(x, y, bw, bh, rich(t.text), { step: i, item: t.index, fs, fill: mainFill(i) });
+        if (t.kids.length) parts.push({ kind: "shape", shape: "rect", x, y: y + bh + hh * 0.04, w: bw, h: hh - bh - y - hh * 0.06, fill: "none", stroke: "none", text: list(t.kids), color: "#1a1a1a", align: "left", valign: "top", pad: [6, 10, 6, 10], lh: 1.35, autofit: "none", fs: subFs, role: "sub", step: i, item: t.kids[0].index });
+        if (!chevron && i > 0) {
+          const ax = sa.rtl ? x + bw + gap * 0.82 : x - gap * 0.82;
+          const bx = sa.rtl ? x + bw + gap * 0.18 : x - gap * 0.18;
+          parts.push({ kind: "shape", shape: sa.rtl ? "leftArrow" : "rightArrow", x: Math.min(ax, bx), y: y + bh / 2 - Math.min(bh * 0.18, gap * 0.4), w: Math.abs(bx - ax), h: Math.min(bh * 0.36, gap * 0.8), fill: scheme.arrow, stroke: "none", text: "", color: "#1a1a1a", align: "center", valign: "middle", pad: [0, 0, 0, 0], lh: 1.2, autofit: "none", role: "connector", step: i });
+        }
+      });
+    } else if (layout === "vprocess") {
+      const gap = hh * 0.08;
+      const bh = (hh - gap * (n - 1)) / n;
+      const hasKids = tops.some((t) => t.kids.length);
+      const bw = hasKids ? w * 0.36 : Math.min(w, Math.max(w * 0.5, bh * 4));
+      const x0 = hasKids ? 0 : (w - bw) / 2;
+      const fs = uniform(tops.map((t) => [[t.text], bw, bh]));
+      const subFs = uniform(tops.map((t) => [t.kids.map((kid) => kid.text).concat([""]), w - bw - w * 0.04, bh]), { max: Math.max(12, fs - 4) });
+      tops.forEach((t, i) => {
+        const y = i * (bh + gap);
+        node(rtl(x0, bw), y, bw, bh, rich(t.text), { step: i, item: t.index, fs, fill: mainFill(i) });
+        if (t.kids.length) parts.push({ kind: "shape", shape: "rect", x: rtl(bw + w * 0.04, w - bw - w * 0.04), y, w: w - bw - w * 0.04, h: bh, fill: subFill(i), ...subOutline, text: list(t.kids), color: "#1a1a1a", align: "left", valign: "middle", pad: [6, 14, 6, 14], lh: 1.3, autofit: "none", fs: subFs, role: "sub", step: i, item: t.kids[0].index });
+        if (i > 0) parts.push({ kind: "shape", shape: "downArrow", x: rtl(x0 + bw / 2 - gap * 0.45, gap * 0.9), y: y - gap * 0.85, w: gap * 0.9, h: gap * 0.7, fill: scheme.arrow, stroke: "none", text: "", color: "#1a1a1a", align: "center", valign: "middle", pad: [0, 0, 0, 0], lh: 1.2, autofit: "none", role: "connector", step: i });
+      });
+    } else if (layout === "steps") {
+      const gap = w * 0.015;
+      const bw = (w - gap * (n - 1)) / n;
+      const fs = uniform(tops.map((t) => [[t.text, ...t.kids.map((kid) => kid.text)], bw, hh / Math.max(2, n) * 1.4]));
+      // The boxes rise from left to right; an arrow runs just above their top-left corners.
+      const heightOf = (i) => hh * (0.3 + (0.58 * (i + 1)) / n);
+      tops.forEach((t, i) => {
+        const bh = heightOf(i);
+        node(rtl(i * (bw + gap), bw), hh - bh, bw, bh, rich(t.text) + list(t.kids), { step: i, item: t.index, fs, valign: "top", align: t.kids.length ? "left" : "center", fill: mainFill(i), shape: "rect" });
+      });
+      const lift = hh * 0.05;
+      const slope = (heightOf(1) - heightOf(0)) / (bw + gap);
+      const y0 = hh - heightOf(0) - lift;
+      // It stops at the top of the box (keeping its slope, so it never cuts into the tall boxes).
+      const reach = Math.min(w, slope > 0 ? (y0 - 6) / slope : w);
+      parts.push({ kind: "line", x1: rtl(0, 0), y1: y0, x2: rtl(reach, 0), y2: y0 - slope * reach, stroke: scheme.line, strokeW: 4, tail: "triangle", tailSize: 3, role: "deco", step: -1 });
+    } else if (layout === "timeline") {
+      const y = hh / 2;
+      parts.push({ kind: "line", x1: 0, y1: y, x2: w, y2: y, stroke: scheme.line, strokeW: 6, tail: "triangle", tailSize: 3, role: "deco", step: -1 });
+      const slot = w / n;
+      const bh = hh * 0.36;
+      const fs = uniform(tops.map((t) => [[t.text, ...t.kids.map((kid) => kid.text)], slot * 0.92, bh]));
+      tops.forEach((t, i) => {
+        const cx = rtl(slot * i + slot / 2, 0);
+        const up = i % 2 === 0;
+        const dot = Math.min(hh * 0.07, slot * 0.18);
+        parts.push({ kind: "shape", shape: "ellipse", x: cx - dot / 2, y: y - dot / 2, w: dot, h: dot, fill: scheme.line, stroke: "none", text: "", color: "#1a1a1a", align: "center", valign: "middle", pad: [0, 0, 0, 0], lh: 1.2, autofit: "none", role: "connector", step: i });
+        node(cx - slot * 0.46, up ? y - dot - bh - hh * 0.04 : y + dot + hh * 0.04, slot * 0.92, bh, rich(t.text) + list(t.kids, true), { step: i, item: t.index, fs, fill: mainFill(i), valign: up ? "bottom" : "top" });
+      });
+    } else if (layout === "cycle" || layout === "radial") {
+      const radial = layout === "radial";
+      const ring = radial ? tops.slice(1) : tops;
+      const m = Math.max(1, ring.length);
+      const cx = w / 2;
+      const cy = hh / 2;
+      const size = Math.min(w, hh);
+      // As big as the circle allows without the items touching (and, radial, without touching the centre).
+      const sinA = Math.sin(Math.PI / Math.max(2, m));
+      const nodeR = Math.min(size * (radial ? 0.155 : 0.2), (0.4 * sinA * size) / (1 + 0.8 * sinA));
+      const R = size / 2 - nodeR - 4;
+      // A circle's words sit in the square inside it (about 1.4 × the radius wide).
+      const linesOf = (t) => [t.text, ...t.kids.map((kid) => kid.text)];
+      const fs = uniform([...ring.map((t) => [linesOf(t), nodeR * 1.42, nodeR * 1.42]), ...(radial && tops[0] ? [[linesOf(tops[0]), size * 0.24, size * 0.24]] : [])], { padX: 16, padY: 12 });
+      if (radial && tops[0]) parts.push({ kind: "shape", shape: "ellipse", x: cx - size * 0.17, y: cy - size * 0.17, w: size * 0.34, h: size * 0.34, fill: mainFill(0), ...outline, text: rich(tops[0].text) + list(tops[0].kids, true), color: "#1a1a1a", align: "center", valign: "middle", pad: [8, 12, 8, 12], lh: 1.25, autofit: "none", fs: Math.round(fs * 1.15), role: "node", step: 0, item: tops[0].index });
+      const at = (i) => { const a = -Math.PI / 2 + (sa.rtl ? -1 : 1) * ((2 * Math.PI * i) / m); return [cx + R * Math.cos(a), cy + R * Math.sin(a), a]; };
+      ring.forEach((t, i) => {
+        const [x, y] = at(i);
+        const step = radial ? i + 1 : i;
+        parts.push({ kind: "shape", shape: "ellipse", x: x - nodeR, y: y - nodeR, w: nodeR * 2, h: nodeR * 2, fill: mainFill(step), ...outline, text: rich(t.text) + list(t.kids, true), color: "#1a1a1a", align: "center", valign: "middle", pad: [6, 8, 6, 8], lh: 1.25, autofit: "none", fs, role: "node", step, item: t.index });
+        if (radial) {
+          const len = Math.hypot(x - cx, y - cy) || 1;
+          const ux = (x - cx) / len;
+          const uy = (y - cy) / len;
+          parts.push({ kind: "line", x1: cx + ux * size * 0.17, y1: cy + uy * size * 0.17, x2: x - ux * nodeR, y2: y - uy * nodeR, stroke: scheme.line, strokeW: 4, role: "connector", step });
+        } else if (m > 1) {
+          // An arrow along the circle from the item before to this one.
+          const [px, py, pa] = at((i - 1 + m) % m);
+          const [, , a] = at(i);
+          const da = (Math.asin(Math.min(1, (nodeR * 1.15) / R)));
+          const dir = sa.rtl ? -1 : 1;
+          const a0 = pa + dir * da;
+          let a1 = a - dir * da;
+          if (!sa.rtl && a1 < a0) a1 += 2 * Math.PI;
+          if (sa.rtl && a1 > a0) a1 -= 2 * Math.PI;
+          const am = (a0 + a1) / 2;
+          parts.push({ kind: "line", x1: cx + R * Math.cos(a0), y1: cy + R * Math.sin(a0), x2: cx + R * Math.cos(a1), y2: cy + R * Math.sin(a1), via: [cx + R * 1.0 * Math.cos(am) * 1.0, cy + R * Math.sin(am)], stroke: scheme.arrow === "#d9d9d9" ? "#808080" : scheme.line, strokeW: 4, tail: "triangle", tailSize: 2, role: "connector", step, curve: true });
+          void px; void py;
+        }
+      });
+    } else if (layout === "hierarchy") {
+      // A tree by level: each item hangs under the nearest item above it with a smaller level.
+      const nodes = sa.items.map((it, index) => ({ ...it, index, kids: [], parent: null }));
+      const stack = [];
+      const roots = [];
+      for (const nd of nodes) {
+        while (stack.length && stack[stack.length - 1].level >= nd.level) stack.pop();
+        if (stack.length) { nd.parent = stack[stack.length - 1]; nd.parent.kids.push(nd); } else roots.push(nd);
+        stack.push(nd);
+      }
+      const depth = Math.max(...nodes.map((nd) => nd.level)) + 1;
+      const leaves = (nd) => (nd.kids.length ? nd.kids.reduce((sum, kid) => sum + leaves(kid), 0) : 1);
+      const total = roots.reduce((sum, r) => sum + leaves(r), 0);
+      const colW = w / total;
+      const rowGap = hh * 0.12;
+      const rowH = (hh - rowGap * (depth - 1)) / depth;
+      const bw = Math.min(colW * 0.86, w * 0.3);
+      const fs = uniform(nodes.map((nd) => [[nd.text], bw, rowH]));
+      let col = 0;
+      const place = (nd) => {
+        if (!nd.kids.length) { nd.cx = colW * (col + 0.5); col += 1; } else { nd.kids.forEach(place); nd.cx = (nd.kids[0].cx + nd.kids[nd.kids.length - 1].cx) / 2; }
+        nd.cy = nd.level * (rowH + rowGap);
+      };
+      roots.forEach(place);
+      // Steps follow the outline order, so "one by one" comes in from the top as the text pane lists them.
+      nodes.forEach((nd, i) => {
+        const x = rtl(nd.cx - bw / 2, bw);
+        node(x, nd.cy, bw, rowH, rich(nd.text), { step: i, item: nd.index, fs, fill: nd.level === 0 ? mainFill(0) : nd.level === 1 ? (scheme.main[1] || subFill(0)) : subFill(i) });
+        if (nd.parent) {
+          const px = rtl(nd.parent.cx, 0);
+          const cxs = rtl(nd.cx, 0);
+          const midY = nd.cy - rowGap / 2;
+          parts.push({ kind: "line", x1: px, y1: nd.parent.cy + rowH, x2: cxs, y2: nd.cy, elbow: midY, stroke: scheme.line, strokeW: 3, role: "connector", step: i });
+        }
+      });
+    } else if (layout === "venn") {
+      const m = Math.min(n, 6);
+      const size = Math.min(w, hh);
+      const r = m === 1 ? size * 0.45 : size * (m <= 3 ? 0.3 : 0.26);
+      const R = m === 1 ? 0 : m === 2 ? r * 0.62 : r * 0.72;
+      const fs = uniform(tops.slice(0, m).map((t) => [[t.text, ...t.kids.map((kid) => kid.text)], r * 1.1, r * 0.8]));
+      // The circles' centres, then the whole set moved to the middle of the box.
+      const angle = (i) => (m === 2 ? Math.PI * i + Math.PI : -Math.PI / 2 + (2 * Math.PI * i) / m);
+      const ys = tops.slice(0, m).map((_, i) => R * Math.sin(angle(i)) * (m === 2 ? 0 : 1));
+      const dy = -(Math.min(...ys) + Math.max(...ys)) / 2;
+      tops.slice(0, m).forEach((t, i) => {
+        const a = angle(i);
+        const cx = w / 2 + R * Math.cos(a);
+        const cy = hh / 2 + ys[i] + dy;
+        // The words sit in the part of the circle away from the others.
+        const tx = cx + Math.cos(a) * r * 0.32;
+        const ty = cy + Math.sin(a) * r * 0.32 * (m === 2 ? 0 : 1);
+        parts.push({ kind: "shape", shape: "ellipse", x: cx - r, y: cy - r, w: r * 2, h: r * 2, fill: mainFill(i), fillOpacity: scheme.stroke ? undefined : 0.75, ...(scheme.stroke ? { fill: "none", stroke: scheme.stroke, strokeW: 3 } : { stroke: "none" }), text: "", color: "#1a1a1a", align: "center", valign: "middle", pad: [0, 0, 0, 0], lh: 1.25, autofit: "none", role: "node", step: i, item: t.index });
+        parts.push({ kind: "shape", shape: "rect", x: tx - r * 0.55, y: ty - r * 0.4, w: r * 1.1, h: r * 0.8, fill: "none", stroke: "none", text: rich(t.text) + list(t.kids, true), color: "#1a1a1a", align: "center", valign: "middle", pad: [0, 0, 0, 0], lh: 1.25, autofit: "none", fs, role: "label", step: i, item: t.index });
+      });
+    } else if (layout === "target") {
+      const size = Math.min(hh, w * 0.55);
+      const m = n;
+      const cx = sa.rtl ? w - size / 2 : size / 2;
+      const cy = hh / 2;
+      const fs = uniform(tops.map((t) => [[t.text, ...t.kids.map((kid) => kid.text)], w - size * 1.05, hh / m]));
+      tops.forEach((t, i) => {
+        const r = (size / 2) * (1 - i / m);
+        parts.push({ kind: "shape", shape: "ellipse", x: cx - r, y: cy - r, w: r * 2, h: r * 2, fill: mainFill(i), ...(scheme.stroke ? { fill: "#ffffff", stroke: scheme.stroke, strokeW: 3 } : { stroke: "#ffffff", strokeW: 3 }), text: "", color: "#1a1a1a", align: "center", valign: "middle", pad: [0, 0, 0, 0], lh: 1.25, autofit: "none", role: "node", step: i, item: t.index });
+        // Labels in rows beside the rings; each line starts in the middle of its own ring, pointing at its label.
+        const labelH = hh / m;
+        const labelY = i * labelH;
+        const rMid = (r + (size / 2) * (1 - (i + 1) / m)) / 2;
+        const lx1 = sa.rtl ? w - size * 1.08 : size * 1.08;
+        const ly1 = labelY + labelH / 2;
+        const level = ly1 - cy;
+        const flat = Math.abs(level) < rMid;
+        const toward = Math.atan2(level, lx1 - cx);
+        const lx0 = flat ? cx + (sa.rtl ? -1 : 1) * Math.sqrt(rMid * rMid - level * level) : cx + rMid * Math.cos(toward);
+        const ly0 = flat ? ly1 : cy + rMid * Math.sin(toward);
+        parts.push({ kind: "line", x1: lx0, y1: ly0, x2: lx1, y2: ly1, stroke: scheme.line, strokeW: 2, head: "oval", headSize: 1, role: "connector", step: i });
+        parts.push({ kind: "shape", shape: "rect", x: sa.rtl ? 0 : size * 1.1, y: labelY, w: w - size * 1.1, h: labelH, fill: "none", stroke: "none", text: rich(t.text) + list(t.kids), color: "#1a1a1a", align: sa.rtl ? "right" : "left", valign: "middle", pad: [0, 8, 0, 8], lh: 1.25, autofit: "none", fs, role: "label", step: i, item: t.index });
+      });
+    } else if (layout === "matrix") {
+      const gap = Math.min(w, hh) * 0.03;
+      const bw = (w - gap) / 2;
+      const bh = (hh - gap) / 2;
+      const four = tops.slice(0, 4);
+      const fs = uniform(four.map((t) => [[t.text, ...t.kids.map((kid) => kid.text)], bw, bh]));
+      four.forEach((t, i) => node(rtl((i % 2) * (bw + gap), bw), Math.floor(i / 2) * (bh + gap), bw, bh, rich(t.text) + list(t.kids), { step: i, item: t.index, fs, fill: mainFill(i), align: t.kids.length ? "left" : "center" }));
+    } else if (layout === "pyramid") {
+      const bandH = hh / n;
+      // The words fit where the band is wide enough: the lower half of the top triangle, the middle of the others.
+      const roomOf = (i) => (i === 0 ? (w / n) * 0.6 : ((w * i) / n + (w * (i + 1)) / n) / 2 * 0.8);
+      const fitBand = (t, i) => [[t.text, ...t.kids.map((kid) => kid.text)], roomOf(i), i === 0 ? bandH * 0.55 : bandH];
+      // The bands share one size; the narrow top may need a smaller one of its own.
+      const lower = tops.length > 1 ? uniform(tops.slice(1).map((t, i) => fitBand(t, i + 1))) : Infinity;
+      const fsOf = (t, i) => Math.min(lower, Math.round(fitFs(...fitBand(t, i)) * k));
+      tops.forEach((t, i) => {
+        const y = i * bandH;
+        const topW = (w * i) / n;
+        const botW = (w * (i + 1)) / n;
+        // A band: a triangle at the top, trapezoids below (the top width as the trapezoid's adjustment).
+        const shape = i === 0 ? "triangle" : "trapezoid";
+        const adj = i === 0 ? [0.5] : [Math.min(0.5, ((botW - topW) / 2) / bandH)];
+        parts.push({ kind: "shape", shape, adj, x: (w - botW) / 2, y, w: botW, h: bandH - 3, fill: mainFill(i), ...(scheme.stroke ? outline : { stroke: "#ffffff", strokeW: 3 }), text: rich(t.text) + list(t.kids, true), color: "#1a1a1a", align: "center", valign: i === 0 ? "bottom" : "middle", pad: [6, 10, 6, 10], lh: 1.25, autofit: "none", fs: fsOf(t, i), role: "node", step: i, item: t.index });
+      });
+    }
+    return parts.map((part) => (part.kind === "shape" ? { ...part, fs: part.fs || Math.round(24 * k) } : part));
+  }
+
+  /** The polyline a connector of a SmartArt follows (straight, an elbow, or along a circle). */
+  function saLinePoints(part) {
+    if (part.elbow != null) return [[part.x1, part.y1], [part.x1, part.elbow], [part.x2, part.elbow], [part.x2, part.y2]];
+    if (part.curve && part.via) {
+      // A quadratic through `via`, flattened.
+      const [vx, vy] = part.via;
+      const cx = 2 * vx - (part.x1 + part.x2) / 2;
+      const cy = 2 * vy - (part.y1 + part.y2) / 2;
+      const pts = [];
+      for (let i = 0; i <= 16; i += 1) { const t = i / 16; const u = 1 - t; pts.push([u * u * part.x1 + 2 * u * t * cx + t * t * part.x2, u * u * part.y1 + 2 * u * t * cy + t * t * part.y2]); }
+      return pts;
+    }
+    return [[part.x1, part.y1], [part.x2, part.y2]];
+  }
+
+  /** A SmartArt drawn: one box per top-level item (its shapes and the connector into it), for "one by one". */
+  function smartartBody(o, rotEl, scale) {
+    const parts = smartartParts(o);
+    const root = h("div", { class: "hs-smartart", "data-layout": o.smartart?.layout || "blocks" });
+    const steps = new Map();
+    for (const part of parts) { if (!steps.has(part.step)) steps.set(part.step, []); steps.get(part.step).push(part); }
+    const order = [...steps.keys()].sort((a, b) => a - b);
+    for (const step of order) {
+      const group = steps.get(step);
+      const boxes = group.flatMap((part) => (part.kind === "line" ? saLinePoints(part) : [[part.x, part.y], [part.x + part.w, part.y + part.h]]));
+      const minX = Math.min(...boxes.map((p) => p[0])) - 8;
+      const minY = Math.min(...boxes.map((p) => p[1])) - 8;
+      const maxX = Math.max(...boxes.map((p) => p[0])) + 8;
+      const maxY = Math.max(...boxes.map((p) => p[1])) + 8;
+      const wrap = h("div", { class: ["hs-sa-step", step < 0 ? "hs-sa-fixed" : ""], "data-step": String(step), style: { left: `${r2(minX)}px`, top: `${r2(minY)}px`, width: `${r2(maxX - minX)}px`, height: `${r2(maxY - minY)}px` } });
+      const lines = group.filter((part) => part.kind === "line");
+      if (lines.length) {
+        const svg = s("svg", { class: "hs-sa-lines", width: r2(maxX - minX), height: r2(maxY - minY), viewBox: `${r2(minX)} ${r2(minY)} ${r2(maxX - minX)} ${r2(maxY - minY)}`, overflow: "visible", "aria-hidden": "true" });
+        for (const part of lines) {
+          const pts = saLinePoints(part);
+          let draw = pts;
+          const heads = [];
+          if (part.tail) {
+            const head = arrowhead(part.tail, pts[pts.length - 1], pts[pts.length - 2], part.strokeW, part.tailSize ?? 2);
+            if (head) { heads.push(head); const [tip, from] = [pts[pts.length - 1], pts[pts.length - 2]]; const len = Math.hypot(tip[0] - from[0], tip[1] - from[1]) || 1; const back = Math.min(head.back, len * 0.9); draw = [...pts.slice(0, -1), [tip[0] - ((tip[0] - from[0]) / len) * back, tip[1] - ((tip[1] - from[1]) / len) * back]]; }
+          }
+          if (part.head) { const head = arrowhead(part.head, pts[0], pts[1], part.strokeW, part.headSize ?? 2); if (head) heads.push(head); }
+          svg.append(s("path", { d: `M${draw.map(([x, y]) => `${r2(x)} ${r2(y)}`).join(" L")}`, fill: "none", stroke: part.stroke, "stroke-width": part.strokeW, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+          for (const head of heads) svg.append(s("path", { d: head.d, fill: head.fill ? part.stroke : "none", stroke: part.stroke, "stroke-width": head.fill ? Math.max(1, part.strokeW * 0.4) : part.strokeW }));
+        }
+        wrap.append(svg);
+      }
+      for (const part of group.filter((p) => p.kind === "shape")) {
+        const shape = withDefaults({ ...part, kind: "shape", pad: part.pad || [8, 12, 8, 12] });
+        const el = h("div", { class: ["hs-sa-node", `hs-sa-${part.role || "node"}`], "data-item": part.item != null ? String(part.item) : null, style: { left: `${r2(part.x - minX)}px`, top: `${r2(part.y - minY)}px`, width: `${r2(part.w)}px`, height: `${r2(part.h)}px` } });
+        const body = h("div", { class: "hs-obj-rot" });
+        if (part.flipH) body.style.transform = "scale(-1, 1)";
+        shapeBody(shape, body, scale);
+        if (part.flipH) { const text = body.querySelector(".hs-obj-text"); if (text) text.style.transform = "scale(-1, 1)"; }
+        el.append(body);
+        wrap.append(el);
+      }
+      root.append(wrap);
+    }
+    rotEl.append(root);
+  }
+
+  /** 図形に変換: the SmartArt's parts as objects on the slide (grouped), in slide coordinates. */
+  function smartartObjects(o) {
+    const group = newId();
+    const a = rad(o.rot || 0);
+    const [cos, sin] = [Math.cos(a), Math.sin(a)];
+    const cx = o.x + o.w / 2;
+    const cy = o.y + o.h / 2;
+    const place = (x, y) => { const dx = o.x + x - cx; const dy = o.y + y - cy; return [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos]; };
+    return smartartParts(o).map((part) => {
+      if (part.kind === "line") {
+        const pts = saLinePoints(part).map(([x, y]) => place(x, y));
+        const [p1, p2] = [pts[0], pts[pts.length - 1]];
+        const line = { id: newId(), kind: "line", x1: r2(p1[0]), y1: r2(p1[1]), x2: r2(p2[0]), y2: r2(p2[1]), stroke: part.stroke, strokeW: part.strokeW, group, ...(part.tail ? { tail: part.tail, tailSize: part.tailSize ?? 2 } : {}), ...(part.head ? { head: part.head, headSize: part.headSize ?? 2 } : {}) };
+        if (part.elbow != null) line.route = "elbow";
+        if (part.curve) line.route = "curve";
+        return line;
+      }
+      const [nx, ny] = place(part.x + part.w / 2, part.y + part.h / 2);
+      const { role, step, item, via, elbow, curve, ...rest } = part;
+      void role; void step; void item; void via; void elbow; void curve;
+      return { ...rest, id: newId(), kind: "shape", x: r2(nx - part.w / 2), y: r2(ny - part.h / 2), w: r2(part.w), h: r2(part.h), rot: o.rot || undefined, group };
+    }).map((x) => normalizeObject(x)).filter(Boolean);
+  }
+
   // ---------------------------------------------------------------- playing media (video and sound)
 
   const mediaNum = (el, key) => { const v = Number(el.getAttribute(`data-${key}`)); return el.hasAttribute(`data-${key}`) && Number.isFinite(v) ? v : null; };
@@ -2519,6 +2968,7 @@
       if (text && (o.flipH || o.flipV)) text.style.transform = `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1})`;
     } else if (o.kind === "image") imageBody(o, rot, ctx);
     else if (o.kind === "table") tableBody(o, rot);
+    else if (o.kind === "smartart") smartartBody(o, rot, scale);
     else if (o.kind === "chart") chartBody(o, rot);
     else if (o.kind === "icon") {
       const icon = E.icon(o.icon, "hs-obj-icon");
@@ -2638,5 +3088,6 @@
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, mediaPlay, mediaPause, mediaToggle, mediaSpan,
+    SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,
   });
 })(typeof window !== "undefined" ? window : globalThis);
