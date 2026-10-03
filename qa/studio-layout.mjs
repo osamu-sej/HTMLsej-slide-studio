@@ -306,7 +306,8 @@ await step("デザイン: the deck's transition from the ribbon; スライド �
 
 await step("表示: notes, thumbnails, task pane and zoom from the ribbon", async () => {
   await tab("表示");
-  await ribbonBtn("ノート");
+  // (The 表示 tab has two ノート buttons, as in PowerPoint: the notes pane and the ノート表示 page.)
+  await page.locator('.rb-body .rb-btn[title="スライドの下にスピーカーノートを表示"]').click();
   await page.waitForTimeout(250);
   assert(await page.isHidden("#notesPane"), "notes off");
   await ribbonBtn("ズーム");

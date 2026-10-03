@@ -1512,3 +1512,30 @@ audio.trim-media { background: transparent; }
 .hide-ink .hs-obj-ink { visibility: hidden; }
 .compress-dialog { width: min(480px, calc(100vw - 32px)); }
 .compress-dialog .dialog-body { display: flex; flex-direction: column; gap: 10px; }
+.font-dialog { width: min(460px, calc(100vw - 32px)); }
+.fr-body { display: flex; flex-direction: column; gap: 10px; }
+.fr-body label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
+.fr-body select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-weight: 400; }
+.notes-view { width: min(820px, calc(100vw - 32px)); }
+.notes-view .dialog-head { gap: 12px; }
+.nv-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 8px; }
+.nv-count { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.nv-body { background: var(--canvas); }
+.nv-sheet { display: flex; flex-direction: column; align-items: center; gap: 16px; width: min(720px, 100%); margin: 0 auto; padding: 28px 40px; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .15); }
+.nv-page { width: 640px; max-width: 100%; }
+.nv-notes { width: 100%; min-height: 240px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; font: 14px/1.7 inherit; resize: vertical; box-sizing: border-box; }
+/* オンライン プレゼンテーション (public/editor/online.mjs) */
+.online-dialog { width: min(660px, calc(100vw - 32px)); }
+.op-body { display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.6; }
+.op-body p { margin: 0; }
+.op-points { margin: 0; padding-left: 20px; color: var(--ink-2); font-size: 12.5px; }
+.op-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.op-link { flex: 1 1 240px; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: 12.5px/1.4 ui-monospace, monospace; }
+.op-status { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.op-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.op-dot.on { background: #e5484d; }
+.online-dialog .dialog-foot { flex-wrap: wrap; }
+.op-spacer { flex: 1; }
+.op-banner { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); z-index: 6; max-width: calc(100% - 32px); padding: 8px 16px; border-radius: 8px; background: rgba(7, 8, 12, .78); color: #e8ecf4; font-size: 13px; pointer-events: none; }
+.op-banner[hidden] { display: none; }
+.op-message { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; height: 100%; padding: 16px; color: #e8ecf4; text-align: center; font-size: 15px; }

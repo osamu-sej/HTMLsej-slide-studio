@@ -241,5 +241,37 @@ export function createPrinter(app) {
     refresh();
   }
 
-  return { openDialog, print, pages };
+  /** 表示 → ノート (the notes page view): the slide above its speaker notes, page by page; the notes can be typed in. */
+  function notesView() {
+    const deck = app.deck();
+    if (!deck) return;
+    let i = app.index();
+    const pageBox = h("div", { class: "nv-page" });
+    const count = h("span", { class: "nv-count" });
+    const text = h("textarea", { class: "nv-notes", "aria-label": "ノート", placeholder: "ここにノート（話す内容）を入力" });
+    text.addEventListener("input", () => app.setNotes(text.value));
+    const show = () => {
+      app.select(i);
+      const slide = app.deck().slides[i];
+      const box = thumb(i, 640, true);
+      pageBox.replaceChildren(box);
+      text.value = slide.notes || "";
+      count.textContent = `${i + 1} / ${app.deck().slides.length}`;
+    };
+    const go = (d) => { const n = Math.max(0, Math.min(app.deck().slides.length - 1, i + d)); if (n !== i) { i = n; show(); } };
+    const dialog = h("dialog", { class: "notes-view", "aria-label": "ノート表示" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "ノート表示"), h("div", { class: "nv-nav" },
+        h("button", { type: "button", class: "btn btn-sm", "aria-label": "前のスライド", onclick: () => go(-1) }, "◀"), count,
+        h("button", { type: "button", class: "btn btn-sm", "aria-label": "次のスライド", onclick: () => go(1) }, "▶")),
+      h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body nv-body" }, h("div", { class: "nv-sheet" }, pageBox, text)));
+    dialog.addEventListener("keydown", (e) => { if (e.target === text) return; if (e.key === "ArrowRight" || e.key === "PageDown") go(1); if (e.key === "ArrowLeft" || e.key === "PageUp") go(-1); });
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => dialog.remove());
+    dialog.showModal();
+    show();
+    text.focus();
+  }
+
+  return { openDialog, print, pages, notesView };
 }

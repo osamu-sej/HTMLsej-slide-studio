@@ -163,6 +163,25 @@ class ChartNumberTest(unittest.TestCase):
         self.assertEqual(pptx_exact.number_text(45566, 'm"月"'), "10月")
 
 
+class TransitionSoundTest(unittest.TestCase):
+    """A slide's built-in transition sound comes over as one of the studio's synthesised sounds."""
+
+    @staticmethod
+    def _slide(sound_xml):
+        ns = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+        return etree.fromstring(f'<p:sld {ns}><p:transition spd="fast"><p:fade/>{sound_xml}</p:transition></p:sld>')
+
+    def test_built_in_sounds_by_their_file_name(self):
+        for name, kind in [("chime.wav", "chime"), ("applause.wav", "applause"), ("drumroll.wav", "drum"), ("breeze.wav", "whoosh"), ("cashreg.wav", "coin"), ("other.wav", "chime")]:
+            out = pptx_exact.transition_of(self._slide(f'<p:sndAc><p:stSnd><p:snd r:embed="rId9" name="{name}"/></p:stSnd></p:sndAc>'))
+            self.assertEqual(out["transitionSound"], kind, name)
+            self.assertEqual(out["transition"], "fade")
+
+    def test_stop_previous_sound_and_no_sound(self):
+        self.assertEqual(pptx_exact.transition_of(self._slide("<p:sndAc><p:endSnd/></p:sndAc>"))["transitionSound"], "stop")
+        self.assertNotIn("transitionSound", pptx_exact.transition_of(self._slide("")))
+
+
 class SourceEffectsTest(unittest.TestCase):
     def test_every_slide_beyond_the_old_fifty_slide_limit_survives(self):
         prs = Presentation()

@@ -1891,7 +1891,34 @@ def transition_of(slide_el) -> dict[str, Any]:
         out["transitionDur"] = {"slow": 1000, "med": 750, "fast": 500}.get(tr.get("spd"), 700)
     if tr.get("advTm", "").isdigit():
         out["advance"] = round(int(tr.get("advTm")) / 1000, 1)
+    sound = transition_sound(tr)
+    if sound:
+        out["transitionSound"] = sound
     return out
+
+
+# PowerPoint's built-in transition sounds, matched to the studio's synthesised ones by their file name.
+TRANSITION_SOUNDS = {
+    "chime": "chime", "click": "click", "camera": "camera", "whoosh": "whoosh", "breeze": "whoosh", "wind": "whoosh",
+    "arrow": "whoosh", "push": "whoosh", "suction": "whoosh", "drumroll": "drum", "hammer": "drum", "bomb": "drum",
+    "explode": "drum", "applause": "applause", "coin": "coin", "cashreg": "coin", "laser": "bell", "voltage": "bell",
+    "typewriter": "click",
+}
+
+
+def transition_sound(tr) -> str | None:
+    """The slide's 画面切り替え sound: one of the studio's (by the built-in file's name), "stop", or none."""
+    snd = tr.find(P + "sndAc")
+    if snd is None:
+        return None
+    if snd.find(P + "endSnd") is not None:
+        return "stop"
+    st = snd.find(P + "stSnd")
+    el = st.find(P + "snd") if st is not None else None
+    if el is None:
+        return None
+    name = re.sub(r"\.[a-z0-9]+$", "", (el.get("name") or "").strip().lower())
+    return TRANSITION_SOUNDS.get(name, "chime")
 
 
 # ---------------------------------------------------------------- the whole deck

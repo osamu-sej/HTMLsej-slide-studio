@@ -106,6 +106,8 @@
     wipe: "ワイプ（色の帯が横切る）", circle: "サークル（クリックした所から広がる）", push: "押し上げ（下から押し出す）",
     flip: "めくる（カードのように裏返る）", dive: "奥へ（飛び込むように進む）", blinds: "ブラインド（縞が開く）", curtain: "幕（中央から左右に開く）", none: "なし",
   };
+  // 画面切り替えのサウンド: short sounds synthesised in the browser (no files), played as a slide arrives.
+  const TRANSITION_SOUNDS = { chime: "チャイム", click: "クリック", camera: "カメラ", whoosh: "風切り音", drum: "ドラムロール", applause: "拍手", coin: "コイン", bell: "ベル", stop: "前のサウンドを停止" };
   const PHOTO_MOTIONS = { zoom: "ゆっくりズーム", pan: "ゆっくり横に流す", float: "ふわふわ浮かぶ", parallax: "マウスに合わせて奥行き", reveal: "幕が開くように現れる", drift: "斜めにゆっくり流れる", tilt: "ゆっくり傾く（3D）" };
 
   const pick = (catalog, ...values) => values.find((value) => value === "none" || Object.hasOwn(catalog, value));
@@ -2411,7 +2413,7 @@
 
   const Engine = root.SlideEngine || {};
   Object.assign(Engine, {
-    W, H, THEMES, PHOTOS, TYPE_LABELS, BUILDS, KINETIC, BACKDROPS, ENTRANCES, HOVERS, EMPHASES, TRANSITIONS, PHOTO_MOTIONS, LAYOUT_TYPES: [...Object.keys(FULL), "hero", ...Object.keys(LAYOUTS)].filter((v, i, a) => a.indexOf(v) === i),
+    W, H, THEMES, PHOTOS, TYPE_LABELS, BUILDS, KINETIC, BACKDROPS, ENTRANCES, HOVERS, EMPHASES, TRANSITIONS, TRANSITION_SOUNDS, PHOTO_MOTIONS, LAYOUT_TYPES: [...Object.keys(FULL), "hero", ...Object.keys(LAYOUTS)].filter((v, i, a) => a.indexOf(v) === i),
     DEFAULT_THEME, SEJ_MASTER, SEJ_BOX,
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },

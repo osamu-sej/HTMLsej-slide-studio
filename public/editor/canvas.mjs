@@ -1022,6 +1022,8 @@ export function createCanvas(app) {
   // ---------------------------------------------------------------- keyboard
 
   function keydown(event) {
+    // ⇧⌘V pastes the words only (the paste event that follows reads this).
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") ed.plainPaste = event.shiftKey;
     if (!app.canEdit()) return false;
     const meta = event.ctrlKey || event.metaKey;
     const key = event.key;
@@ -1153,7 +1155,10 @@ export function createCanvas(app) {
     const data = event.clipboardData;
     const files = [...(data?.files || [])].filter((file) => /^(image|video)\//.test(file.type));
     const own = data?.getData(CLIP_TYPE);
-    if (own) { event.preventDefault(); pasteObjects(JSON.parse(own)); return true; }
+    // ⇧⌘V: テキストのみ保持 (the words of copied objects as a plain text box).
+    const plain = ed.plainPaste;
+    ed.plainPaste = false;
+    if (own) { event.preventDefault(); pasteObjects(JSON.parse(own), { mode: plain ? "text" : "keep" }); return true; }
     if (files.length) { event.preventDefault(); await app.insertFiles(files); return true; }
     const text = data?.getData("text/plain");
     if (text && text.trim()) {
@@ -1166,9 +1171,22 @@ export function createCanvas(app) {
     }
     return false;
   }
-  function pasteObjects(payload, { at = null } = {}) {
-    const pasted = payloadObjects(payload);
+  /**
+   * 貼り付けオプション: "keep" (元の書式を保持), "theme" (貼り付け先のスタイルを使用: the colours moved to the SEJ
+   * palette) or "text" (テキストのみ保持: the words only, in a new text box).
+   */
+  function pasteObjects(payload, { at = null, mode = "keep" } = {}) {
+    let pasted = payloadObjects(payload);
     if (!pasted.length) return;
+    if (mode === "text") {
+      const words = pasted.map((o) => E.objectText(o)).filter(Boolean).join("\n").trim();
+      if (!words) { app.toast("貼り付ける文字がありません"); return; }
+      const o = ops.makeObject("text", { x: 200, y: 260, w: 900, h: 70 }, { text: E.textToRich(words.split("\n").slice(0, 60).join("\n")) });
+      commit([...objects(), o], { select: [o.id] });
+      app.toast("テキストのみ貼り付けました");
+      return;
+    }
+    if (mode === "theme") pasted = pasted.map((o) => ops.snapToPalette(o, E.PALETTE));
     ed.pasteCount += 1;
     let offset = ed.pasteCount * 20;
     const list = objects();
@@ -1183,10 +1201,10 @@ export function createCanvas(app) {
     const anims = copiedAnims(payload?.anims, idMap, groupMap);
     commit(out, { select: ids, ...(anims.length ? { timeline: [...timeline(), ...anims] } : {}) });
   }
-  function pasteFromMemory() {
+  function pasteFromMemory(mode = "keep") {
     let payload = ed.clipboard;
     if (!payload) { try { payload = JSON.parse(localStorage.getItem("hsej-editor-clipboard") || "null"); } catch { payload = null; } }
-    if (payload) pasteObjects(payload);
+    if (payload) pasteObjects(payload, { mode });
     else app.toast("貼り付けるオブジェクトがありません（⌘V で画像や文字も貼り付けられます）");
   }
 

@@ -756,6 +756,92 @@
   // These clip the incoming slide itself, so edges and click points share the slide's own coordinates.
   const CLIPPED = new Set(["wipe", "circle", "blinds", "curtain"]);
 
+  // ---------------------------------------------------------------- transition sounds
+
+  // 画面切り替え → サウンド: each sound is made with Web Audio (oscillators and filtered noise), so a deck and its
+  // exported HTML need no sound files. "stop" stops the sounds still ringing from earlier slides.
+  let soundCtx = null;
+  const ringing = new Set();
+  function audio() {
+    const AC = typeof window !== "undefined" && (window.AudioContext || window.webkitAudioContext);
+    if (!AC) return null;
+    if (!soundCtx || soundCtx.state === "closed") soundCtx = new AC();
+    if (soundCtx.state === "suspended") soundCtx.resume().catch(() => {});
+    return soundCtx;
+  }
+  function stopSounds() {
+    for (const node of ringing) { try { node.stop(); } catch { /* already stopped */ } }
+    ringing.clear();
+  }
+  /** Play a transition sound (a key of E.TRANSITION_SOUNDS). Returns how long it rings (s), or 0. */
+  function playSound(kind, { volume = 0.6 } = {}) {
+    if (kind === "stop") { stopSounds(); return 0; }
+    if (!E.TRANSITION_SOUNDS?.[kind]) return 0;
+    const ac = audio();
+    if (!ac) return 0;
+    const t0 = ac.currentTime + 0.02;
+    const out = ac.createGain();
+    out.gain.value = Math.max(0, Math.min(1, volume));
+    out.connect(ac.destination);
+    const keep = (node, start, stop) => { ringing.add(node); node.onended = () => ringing.delete(node); node.start(start); node.stop(stop); };
+    // A tone: frequency (Hz), wave, start, length, peak level, optional slide to another pitch.
+    const tone = (freq, { type = "sine", at = 0, len = 0.6, peak = 0.4, to = null } = {}) => {
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t0 + at);
+      if (to) osc.frequency.exponentialRampToValueAtTime(to, t0 + at + len);
+      g.gain.setValueAtTime(0.0001, t0 + at);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + len);
+      osc.connect(g).connect(out);
+      keep(osc, t0 + at, t0 + at + len + 0.05);
+    };
+    let noiseBuf = null;
+    // A burst of noise through a filter: start, length, peak, filter type and frequency (or a sweep to `to`).
+    const noise = ({ at = 0, len = 0.1, peak = 0.5, filter = "bandpass", freq = 2000, q = 1, to = null, attack = 0.004 } = {}) => {
+      if (!noiseBuf) {
+        noiseBuf = ac.createBuffer(1, Math.round(ac.sampleRate * 2), ac.sampleRate);
+        const d = noiseBuf.getChannelData(0);
+        for (let i = 0; i < d.length; i += 1) d[i] = Math.random() * 2 - 1;
+      }
+      const src = ac.createBufferSource();
+      src.buffer = noiseBuf;
+      src.loop = true;
+      const f = ac.createBiquadFilter();
+      f.type = filter;
+      f.frequency.setValueAtTime(freq, t0 + at);
+      if (to) f.frequency.exponentialRampToValueAtTime(to, t0 + at + len);
+      f.Q.value = q;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0.0001, t0 + at);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + at + Math.max(0.002, attack));
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + len);
+      src.connect(f).connect(g).connect(out);
+      keep(src, t0 + at, t0 + at + len + 0.05);
+    };
+    const SOUNDS = {
+      chime: () => { tone(1046.5, { len: 1.2, peak: 0.32 }); tone(1568, { at: 0.12, len: 1.3, peak: 0.24 }); tone(2093, { at: 0.24, len: 1.4, peak: 0.16 }); return 1.7; },
+      click: () => { noise({ len: 0.035, peak: 0.7, filter: "highpass", freq: 2500 }); tone(1800, { len: 0.03, peak: 0.2, type: "square" }); return 0.1; },
+      camera: () => { noise({ len: 0.05, peak: 0.8, freq: 3200, q: 2 }); noise({ at: 0.09, len: 0.07, peak: 0.6, freq: 1800, q: 2 }); return 0.2; },
+      whoosh: () => { noise({ len: 0.7, peak: 0.45, freq: 280, to: 3600, q: 0.9, attack: 0.3 }); return 0.8; },
+      drum: () => {
+        for (let k = 0; k < 22; k += 1) noise({ at: k * 0.055, len: 0.06, peak: 0.12 + k * 0.012, filter: "lowpass", freq: 900 });
+        noise({ at: 1.25, len: 0.5, peak: 0.8, filter: "lowpass", freq: 600 });
+        tone(110, { at: 1.25, len: 0.5, peak: 0.6, to: 55 });
+        return 1.8;
+      },
+      applause: () => {
+        for (let k = 0; k < 90; k += 1) noise({ at: Math.random() * 1.9, len: 0.03 + Math.random() * 0.03, peak: 0.1 + Math.random() * 0.25, freq: 1400 + Math.random() * 2200, q: 1.5 });
+        noise({ len: 2.2, peak: 0.12, freq: 2000, q: 0.6, attack: 0.25 });
+        return 2.3;
+      },
+      coin: () => { tone(988, { type: "square", len: 0.09, peak: 0.16 }); tone(1319, { type: "square", at: 0.08, len: 0.5, peak: 0.16 }); return 0.65; },
+      bell: () => { for (const [m, p] of [[1, 0.35], [2.76, 0.18], [5.4, 0.1], [8.93, 0.05]]) tone(523.25 * m, { len: 2 / Math.sqrt(m), peak: p }); return 2.1; },
+    };
+    try { return SOUNDS[kind](); } catch { return 0; }
+  }
+
   /**
    * A presentation in `host` (the studio's presenter overlay or an exported file's body).
    * opts: { deck, start, step, fitFor(i), renderOptions, onChange({index, step}), onClose(), closable, keyboard, static }
@@ -794,6 +880,8 @@
     let demoRun = null;
     let autoTimer = null;
     const still = Boolean(opts.static);
+    // オンライン プレゼンテーション: a viewer only watches; the presenter's moves come in through follow().
+    const viewer = Boolean(opts.viewer);
     const started = Date.now();
 
     const stage = h("div", { class: "hs-player-stage" });
@@ -801,7 +889,9 @@
     const counter = h("span", { class: "hs-player-count" });
     const notes = h("div", { class: "hs-player-notes", hidden: true });
     const btn = (label, title, fn, cls = "") => h("button", { class: `hs-player-btn ${cls}`, type: "button", title, "aria-label": title, onclick: (event) => { event.stopPropagation(); fn(); } }, label);
-    const bar = h("div", { class: "hs-player-bar" },
+    const bar = viewer ? h("div", { class: "hs-player-bar" }, counter, h("span", { class: "hs-player-spacer" }),
+      h("span", { class: "hs-player-live" }, opts.viewerLabel || "発表者に合わせて表示しています"),
+      btn("全画面", "全画面（F）", () => toggleFullscreen())) : h("div", { class: "hs-player-bar" },
       btn("‹", "前へ（←）", () => prev()),
       counter,
       btn("›", "次へ（→・クリック）", () => next()),
@@ -995,7 +1085,7 @@
      */
     function scheduleAdvance(slideEl, i) {
       clearTimeout(autoTimer);
-      if (opts.useTimings === false) return;
+      if (opts.useTimings === false || viewer) return;
       // 自動プレゼンテーション (kiosk): a slide without a time of its own stays for a while, then the show moves on.
       // (ビデオの作成 may ignore the slides' own times and give each the same seconds.)
       const own = opts.ignoreTimings ? null : slides[i]?.advance;
@@ -1037,7 +1127,9 @@
         // Animations that start with the slide wait for its way in (as in PowerPoint).
         const wayIn = type === "none" || type === "morph" ? 0 : Math.round((trMs ?? TRANSITION_MS[type] ?? 620) * 0.85);
         play(slide, { step, animate: atStep == null && !still, delay: wayIn });
-        interaction = activate(slide, { details: [...(slides[i]?.details || []), ...(E.objectDetails?.(slides[i]) || [])], elements: slides[i]?.elements || [], onDrill: back ? null : (to, el) => openDrill(to, el) });
+        // 画面切り替えのサウンド rings as the slide arrives going forward (not going back or out of a deep-dive page).
+        if (!still && opts.sounds !== false && slides[i]?.transitionSound && atStep == null && dir >= 0) playSound(slides[i].transitionSound);
+        interaction = activate(slide, { details: [...(slides[i]?.details || []), ...(E.objectDetails?.(slides[i]) || [])], elements: slides[i]?.elements || [], onDrill: back || viewer ? null : (to, el) => openDrill(to, el) });
         playMedia(slide, { sound: gesture, skip: playing, noNarration: opts.narration === false });
         scheduleAdvance(slide, i);
         drawInk();
@@ -1183,6 +1275,27 @@
       const parent = story.parent[target];
       back = parent != null ? { index: parent, step: Infinity, at: null } : null;
       show(target, { dir: place(target) >= place(index) ? 1 : -1 });
+    }
+
+    /**
+     * オンライン プレゼンテーション: a viewer's show follows the presenter to slide `i`, build step `s`. The next step
+     * on the same slide plays as a click would; anything else shows the slide as it is at that step.
+     */
+    async function follow(i, s = 0) {
+      if (!slides[i]) return;
+      if (busy) await busy;
+      zoomBack = null;
+      const want = Math.max(0, Number(s) || 0);
+      if (i === index) {
+        const slide = current?.firstElementChild;
+        if (!slide || want === step) return;
+        if (want === step + 1 && want <= stepsOf(slide)) { if (E.animBusy?.(slide)) E.animFinish(slide); step = want; reveal(slide, step); update(); return; }
+        show(i, { dir: 1, atStep: want });
+        return;
+      }
+      const parent = story.parent[i];
+      back = parent != null ? { index: parent, step: Infinity, at: null } : null;
+      show(i, { dir: place(i) >= place(index) ? 1 : -1, atStep: want ? want : null });
     }
 
     function toggleNotes() { notes.hidden = !notes.hidden; player.classList.toggle("with-notes", !notes.hidden); requestAnimationFrame(() => current && E.scale(current)); }
@@ -1388,6 +1501,7 @@
     let digits = "";
     function onKey(event) {
       if (event.defaultPrevented) return;
+      if (viewer) { if ((event.key === "f" || event.key === "F") && !event.ctrlKey && !event.metaKey) toggleFullscreen(); return; }
       // PowerPoint's pen keys: Ctrl+P ペン, Ctrl+I 蛍光ペン, Ctrl+L レーザー, Ctrl+E 消しゴム, Ctrl+A 矢印.
       if ((event.ctrlKey || event.metaKey) && !event.altKey) {
         const k = event.key.toLowerCase();
@@ -1450,6 +1564,7 @@
       if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes, .hs-control, a[href], .hs-pen-menu")) return;
       // With a pen in hand, a click writes instead of moving on (the laser pointer still clicks through).
       if (penMode && penMode !== "laser") return;
+      if (viewer) return;
       // A kiosk show only answers its buttons and links.
       if (kiosk) { const actor = event.target.closest('.hs-obj[data-action], .hs-obj[data-kind="zoom"]'); if (actor) act(actor); return; }
       gesture = true;
@@ -1459,7 +1574,7 @@
       next();
     };
     let touchX = null;
-    const onTouchStart = (event) => { touchX = event.target.closest?.(".hs-control") ? null : event.touches[0]?.clientX ?? null; };
+    const onTouchStart = (event) => { touchX = viewer || event.target.closest?.(".hs-control") ? null : event.touches[0]?.clientX ?? null; };
     const onTouchEnd = (event) => {
       if (touchX == null) return;
       const dx = (event.changedTouches[0]?.clientX ?? touchX) - touchX;
@@ -1488,6 +1603,7 @@
       interaction?.destroy();
       if (current?.firstElementChild) stopMedia(current.firstElementChild);
       for (const c of carried.splice(0)) E.mediaPause?.(c.audio, { stop: true });
+      stopSounds();
       inkFollow?.disconnect();
       camera?.then((stream) => stream.getTracks().forEach((t) => t.stop())).catch(() => {});
       if (captions) { const rec = captions; captions = null; try { rec.stop(); } catch { /* stopped */ } }
@@ -1504,7 +1620,7 @@
     if (opts.captions) toggleCaptions();
 
     return {
-      el: player, next, prev, go, destroy, close, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill, demo, stopDemo, setPen, toggleCaptions,
+      el: player, next, prev, go, follow, destroy, close, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill, demo, stopDemo, setPen, toggleCaptions,
       get pen() { return penMode; }, get captioning() { return Boolean(captions); }, get order() { return [...order]; },
       get index() { return index; }, get step() { return step; }, get startedAt() { return started; }, get inDrill() { return Boolean(back); },
     };
@@ -1554,5 +1670,5 @@ html,body{margin:0;height:100%;background:#0d1017;color:#e8ecf4;font-family:"Not
   /** How long a transition takes when the slide does not say (ms). */
   const transitionMs = (type) => (type === "none" ? 0 : TRANSITION_MS[type] ?? 620);
 
-  Object.assign(E, { play, reveal, stepsOf, countUp, activate, playMedia, stopMedia, mountLottie, stopLottie, splitKinetic, createPlayer, engineCss, transitionPreview, transitionMs });
+  Object.assign(E, { play, reveal, stepsOf, countUp, activate, playMedia, stopMedia, mountLottie, stopLottie, splitKinetic, createPlayer, engineCss, transitionPreview, transitionMs, playSound, stopSounds });
 })(typeof window !== "undefined" ? window : globalThis);

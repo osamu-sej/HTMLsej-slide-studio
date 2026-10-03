@@ -8,54 +8,15 @@
 // around the objects they have selected. Pictures, videos and sounds kept in a browser go through the room.
 
 import { avatar, cleanName, initials, userId, userName, setUserName } from "./people.mjs";
+import { mergeOrder, mergeSlide, textHash } from "./coedit-merge.mjs";
+
+export { mergeOrder, mergeSlide, textHash };
 
 const SEND_DELAY = 250;
 const PRESENCE_DELAY = 300;
 const json = (value) => JSON.stringify(value ?? null);
 const newClientId = () => `c${(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/[^a-z0-9]/gi, "").slice(0, 20)}`;
 const metaOf = (deck) => { const { slides, ...meta } = deck || {}; void slides; return meta; };
-
-/** Three-way merge of one slide: our changes on top of theirs (objects by id, everything else field by field). */
-export function mergeSlide(base, mine, theirs) {
-  if (json(mine) === json(base)) return theirs;
-  if (json(theirs) === json(base)) return mine;
-  const out = { ...theirs };
-  const keys = new Set([...Object.keys(base || {}), ...Object.keys(mine || {}), ...Object.keys(theirs || {})]);
-  for (const key of keys) {
-    if (key === "elements") continue;
-    if (json(mine?.[key]) !== json(base?.[key])) { if (mine?.[key] === undefined) delete out[key]; else out[key] = mine[key]; }
-  }
-  // Objects: theirs, with the ones changed here put back, the ones added here added, the ones deleted here removed.
-  const b = new Map((base?.elements || []).map((o) => [o.id, o]));
-  const m = new Map((mine?.elements || []).map((o) => [o.id, o]));
-  const t = theirs?.elements || [];
-  const merged = [];
-  for (const o of t) {
-    if (b.has(o.id) && !m.has(o.id)) continue; // deleted here
-    const changedHere = m.has(o.id) && json(m.get(o.id)) !== json(b.get(o.id));
-    merged.push(changedHere ? m.get(o.id) : o);
-  }
-  const theirIds = new Set(t.map((o) => o.id));
-  for (const [id, o] of m) if (!b.has(id) && !theirIds.has(id)) merged.push(o); // added here
-  if (merged.length) out.elements = merged; else delete out.elements;
-  return out;
-}
-
-/** The order of the slides when both sides may have moved, added or removed some. */
-export function mergeOrder(baseSids, mineSids, theirSids) {
-  if (json(mineSids) === json(baseSids)) return theirSids;
-  const base = new Set(baseSids);
-  const mine = new Set(mineSids);
-  const removedHere = new Set(baseSids.filter((sid) => !mine.has(sid)));
-  const out = (json(theirSids) === json(baseSids) ? mineSids : theirSids).filter((sid) => !removedHere.has(sid));
-  // Slides added here go after the slide they follow here.
-  mineSids.forEach((sid, i) => {
-    if (base.has(sid) || out.includes(sid)) return;
-    const before = mineSids.slice(0, i).reverse().find((s) => out.includes(s));
-    out.splice(before ? out.indexOf(before) + 1 : 0, 0, sid);
-  });
-  return out;
-}
 
 export function createCoedit(app) {
   const { h, E } = app;
@@ -232,7 +193,8 @@ export function createCoedit(app) {
       if (!s?.sid) continue;
       theirs.set(s.sid, s);
       const base = room.base.has(s.sid) ? JSON.parse(room.base.get(s.sid)) : null;
-      const mine = local.get(s.sid);
+      // Several changes to one slide in a row (another person's, then the room's merge of ours) build on each other.
+      const mine = merged.get(s.sid);
       merged.set(s.sid, mine && base ? mergeSlide(base, mine, s) : s);
       room.base.set(s.sid, json(s));
     }
@@ -285,15 +247,18 @@ export function createCoedit(app) {
   }
   async function send() {
     if (!room?.joined || room.status !== "connected") { if (room) sendTimer = setTimeout(send, 1000); return; }
+    // Changes from others that arrived meanwhile are merged in first (unless typing holds them; the room merges then).
+    if (queue.length && !app.busy()) flush();
     app.ensureAllSids();
     const deck = app.deck();
     const ops = [];
     const sids = deck.slides.map((s) => s.sid);
     const known = new Set(room.order);
-    if (json(sids) !== json(room.order)) ops.push({ t: "order", sids, add: deck.slides.filter((s) => !known.has(s.sid)) });
+    // Each change names the version it was made on, so the room can merge it with a change that crossed it.
+    if (json(sids) !== json(room.order)) ops.push({ t: "order", sids, add: deck.slides.filter((s) => !known.has(s.sid)), base: textHash(json(room.order)) });
     for (const s of deck.slides) {
       if (!known.has(s.sid)) continue;
-      if (room.base.get(s.sid) !== json(s)) ops.push({ t: "slide", sid: s.sid, slide: s });
+      if (room.base.get(s.sid) !== json(s)) ops.push({ t: "slide", sid: s.sid, slide: s, base: room.base.has(s.sid) ? textHash(room.base.get(s.sid)) : null });
     }
     const meta = metaOf(deck);
     if (json(meta) !== room.meta) {
