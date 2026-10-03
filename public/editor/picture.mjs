@@ -61,6 +61,105 @@ export function compressedSize(w, h, max) {
   return [Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k))];
 }
 
+// ---------------------------------------------------------------- アート効果 and 色の変更 (on the pixels)
+
+/** A box blur of one channel set, radius r, run along rows then columns (running sums: as fast for any radius). */
+function boxBlur(src, w, h, r) {
+  const out = new Float32Array(src.length);
+  const tmp = new Float32Array(src.length);
+  const pass = (from, to, len, count, step, stride) => {
+    for (let line = 0; line < count; line += 1) {
+      for (let ch = 0; ch < 4; ch += 1) {
+        const at = (i) => (line * stride + Math.min(len - 1, Math.max(0, i)) * step) * 4 + ch;
+        let sum = 0;
+        for (let i = -r; i <= r; i += 1) sum += from[at(i)];
+        for (let i = 0; i < len; i += 1) {
+          to[(line * stride + i * step) * 4 + ch] = sum / (2 * r + 1);
+          sum += from[at(i + r + 1)] - from[at(i - r)];
+        }
+      }
+    }
+  };
+  pass(src, tmp, w, h, 1, w);
+  pass(tmp, out, h, w, w, 1);
+  return out;
+}
+const luma = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+const clamp8 = (v) => Math.max(0, Math.min(255, Math.round(v)));
+
+/** 図の形式 → アート効果: what each does to the picture. */
+export const ART_EFFECTS = { blur: "ぼかし", pencil: "鉛筆：スケッチ", lines: "線画", mosaic: "モザイク", sepia: "セピア", poster: "ポスター" };
+
+/** Apply an アート効果 to RGBA pixels in place. */
+export function artEffect(data, w, h, kind) {
+  if (kind === "blur") {
+    const r = Math.max(2, Math.round(Math.min(w, h) / 90));
+    const out = boxBlur(boxBlur(data, w, h, r), w, h, r);
+    for (let i = 0; i < data.length; i += 4) { data[i] = out[i]; data[i + 1] = out[i + 1]; data[i + 2] = out[i + 2]; }
+  } else if (kind === "pencil") {
+    // A pencil sketch: the grey picture "colour-dodged" with a blurred negative of itself.
+    const neg = new Float32Array(data.length);
+    for (let i = 0; i < data.length; i += 4) { const g = 255 - luma(data, i); neg[i] = neg[i + 1] = neg[i + 2] = g; neg[i + 3] = 255; }
+    const soft = boxBlur(neg, w, h, Math.max(2, Math.round(Math.min(w, h) / 120)));
+    for (let i = 0; i < data.length; i += 4) {
+      const g = luma(data, i);
+      const v = clamp8(soft[i] >= 255 ? 255 : (g * 255) / (255 - soft[i]));
+      data[i] = data[i + 1] = data[i + 2] = v;
+    }
+  } else if (kind === "lines") {
+    // 線画: the edges (Sobel), dark on white.
+    const g = new Float32Array(w * h);
+    for (let p = 0; p < w * h; p += 1) g[p] = luma(data, p * 4);
+    const at = (x, y) => g[Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))];
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const gx = at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1) - at(x - 1, y - 1) - 2 * at(x - 1, y) - at(x - 1, y + 1);
+        const gy = at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1) - at(x - 1, y - 1) - 2 * at(x, y - 1) - at(x + 1, y - 1);
+        const v = clamp8(255 - Math.hypot(gx, gy) * 0.9);
+        const i = (y * w + x) * 4;
+        data[i] = data[i + 1] = data[i + 2] = v;
+      }
+    }
+  } else if (kind === "mosaic") {
+    const s = Math.max(6, Math.round(Math.min(w, h) / 40));
+    for (let by = 0; by < h; by += s) {
+      for (let bx = 0; bx < w; bx += s) {
+        const sum = [0, 0, 0];
+        let n = 0;
+        for (let y = by; y < Math.min(h, by + s); y += 1) for (let x = bx; x < Math.min(w, bx + s); x += 1) { const i = (y * w + x) * 4; sum[0] += data[i]; sum[1] += data[i + 1]; sum[2] += data[i + 2]; n += 1; }
+        for (let y = by; y < Math.min(h, by + s); y += 1) for (let x = bx; x < Math.min(w, bx + s); x += 1) { const i = (y * w + x) * 4; data[i] = sum[0] / n; data[i + 1] = sum[1] / n; data[i + 2] = sum[2] / n; }
+      }
+    }
+  } else if (kind === "sepia") recolor(data, "sepia");
+  else if (kind === "poster") {
+    for (let i = 0; i < data.length; i += 4) for (let c = 0; c < 3; c += 1) data[i + c] = Math.round(Math.round((data[i + c] / 255) * 3) * 85);
+  }
+  return data;
+}
+
+/** 図の形式 → 色 → 色の変更 (PowerPoint's recolor), in the SEJ tones. */
+export const RECOLORS = { gray: "グレースケール", sepia: "セピア", wash: "ウォッシュアウト", navy: "濃紺", blue: "淡青", brown: "淡茶" };
+const DUOTONES = { navy: [[31, 56, 100], [255, 255, 255]], blue: [[94, 120, 170], [238, 242, 248]], brown: [[125, 98, 66], [246, 239, 230]] };
+
+/** Recolour RGBA pixels in place. */
+export function recolor(data, kind) {
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const l = luma(data, i);
+    if (kind === "gray") { data[i] = data[i + 1] = data[i + 2] = clamp8(l); }
+    else if (kind === "sepia") { data[i] = clamp8(0.393 * r + 0.769 * g + 0.189 * b); data[i + 1] = clamp8(0.349 * r + 0.686 * g + 0.168 * b); data[i + 2] = clamp8(0.272 * r + 0.534 * g + 0.131 * b); }
+    else if (kind === "wash") { for (let c = 0; c < 3; c += 1) data[i + c] = clamp8(255 - (255 - data[i + c]) * 0.3); }
+    else if (DUOTONES[kind]) {
+      const [dark, light] = DUOTONES[kind];
+      const t = l / 255;
+      for (let c = 0; c < 3; c += 1) data[i + c] = clamp8(dark[c] + (light[c] - dark[c]) * t);
+    }
+  }
+  return data;
+}
+
 export const RESOLUTIONS = [[2400, "高品質（2400 ピクセル）"], [1600, "印刷用（1600 ピクセル）"], [1280, "Web（1280 ピクセル）"], [960, "電子メール（960 ピクセル）"]];
 
 export function createPictureTools(editor, app) {
@@ -109,6 +208,29 @@ export function createPictureTools(editor, app) {
       app.toast(`背景を削除できませんでした（${error.message}。Webの画像はこのデバイスに保存してから使ってください）`);
     }
   }
+
+  /** Change the selected pictures' pixels (a new picture for each; the old ones stay in the undo history). */
+  async function pixels(work, label) {
+    const list = images();
+    if (!list.length) { app.toast("図を選んでください"); return; }
+    try {
+      const done = [];
+      for (const o of list) {
+        const img = await load(o);
+        const { canvas, g } = canvasOf(img);
+        const px = g.getImageData(0, 0, canvas.width, canvas.height);
+        work(px.data, canvas.width, canvas.height);
+        g.putImageData(px, 0, 0);
+        done.push({ id: o.id, src: await app.storeBlob(await toBlob(canvas), `${o.fileName || "図"}（${label}）.png`) });
+      }
+      editor.apply((x) => { const d = done.find((c) => c.id === x.id); return d ? { src: d.src, gray: undefined } : null; }, { ids: done.map((d) => d.id) });
+      app.toast(`${label}を適用しました（⌘Zで戻せます）`);
+    } catch (error) {
+      app.toast(`${label}を適用できませんでした（${error.message}。Webの画像はこのデバイスに保存してから使ってください）`);
+    }
+  }
+  const art = (kind) => pixels((d, w, h) => artEffect(d, w, h, kind), `アート効果「${ART_EFFECTS[kind]}」`);
+  const colorize = (kind) => pixels((d) => recolor(d, kind), `色の変更「${RECOLORS[kind]}」`);
 
   /** 透明色を指定: click the colour on the picture. */
   function transparentColor() {
@@ -199,5 +321,5 @@ export function createPictureTools(editor, app) {
     app.toast(`${changes.length}枚の画像を圧縮しました（${Math.round(before / 1024)}KB → ${Math.round(after / 1024)}KB。⌘Zで戻せます）`);
   }
 
-  return { background, transparentColor, compressDialog, compress };
+  return { background, transparentColor, compressDialog, compress, art, colorize };
 }

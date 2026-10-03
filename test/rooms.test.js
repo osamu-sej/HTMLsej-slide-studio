@@ -151,3 +151,35 @@ test("オンライン プレゼンテーション: only the presenter (with the 
   assert.equal(again.create(deck(), { id: room.id, show: true, key: room.key }).key, room.key);
   assert.throws(() => again.create(deck(), { id: room.id }), /鍵/);
 });
+
+test("PowerPoint Live: reactions float to everyone (a few at a time), one vote per viewer per poll, captions from the presenter", () => {
+  const rooms = createRooms();
+  const pollDeck = { ...deck(), slides: [{ type: "blank", sid: "s1", elements: [{ id: "p1", kind: "poll", question: "どれがよい？", options: ["A案", "B案", "C案"] }] }] };
+  const room = rooms.create(pollDeck, { show: true });
+  const presenter = stream();
+  const v1 = stream();
+  const v2 = stream();
+  rooms.join(room, presenter, { client: "presenter1", name: "発表者" });
+  rooms.join(room, v1, { client: "viewer1", name: "視聴者" });
+  rooms.join(room, v2, { client: "viewer2", name: "視聴者" });
+  assert.equal(rooms.react(room, "viewer1", "👏"), true);
+  assert.deepEqual(presenter.events.at(-1), { event: "react", data: { emoji: "👏", from: "viewer1" } });
+  assert.throws(() => rooms.react(room, "viewer1", "<b>"), /リアクション/);
+  for (let i = 0; i < 10; i += 1) rooms.react(room, "viewer1", "👍");
+  assert.equal(presenter.events.filter((e) => e.event === "react").length, 6, "at most six every few seconds per viewer");
+  // Votes: a viewer's new answer replaces their old one.
+  assert.deepEqual(rooms.vote(room, "viewer1", { poll: "p1", option: 0 }), [1, 0, 0]);
+  assert.deepEqual(rooms.vote(room, "viewer2", { poll: "p1", option: 2 }), [1, 0, 1]);
+  assert.deepEqual(rooms.vote(room, "viewer1", { poll: "p1", option: 2 }), [0, 0, 2]);
+  assert.deepEqual(presenter.events.at(-1), { event: "votes", data: { poll: "p1", counts: [0, 0, 2] } });
+  assert.throws(() => rooms.vote(room, "viewer1", { poll: "p1", option: 5 }), /投票/);
+  assert.throws(() => rooms.vote(room, "viewer1", { poll: "nope", option: 0 }), /投票/);
+  // A viewer who joins later hears the counts so far.
+  const late = stream();
+  rooms.join(room, late, { client: "viewer3", name: "視聴者" });
+  assert.deepEqual(late.events[0].data.votes, { p1: [0, 0, 2] });
+  // Captions only from the presenter (with the key).
+  rooms.caption(room, room.key, "本日は<お集まり>いただき");
+  assert.deepEqual(v2.events.at(-1), { event: "caption", data: { text: "本日はお集まりいただき" } });
+  assert.throws(() => rooms.caption(room, "wrong-key-wrong-key", "x"), /発表者/);
+});

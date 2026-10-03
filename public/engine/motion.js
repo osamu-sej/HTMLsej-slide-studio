@@ -927,8 +927,11 @@
     const counter = h("span", { class: "hs-player-count" });
     const notes = h("div", { class: "hs-player-notes", hidden: true });
     const btn = (label, title, fn, cls = "") => h("button", { class: `hs-player-btn ${cls}`, type: "button", title, "aria-label": title, onclick: (event) => { event.stopPropagation(); fn(); } }, label);
+    // PowerPoint Live: a viewer can send reactions (they float up on every screen).
+    const REACTIONS = ["👍", "❤️", "👏", "😮", "💡", "😂"];
+    const reactBtns = viewer && opts.onReact ? h("span", { class: "hs-react-bar" }, REACTIONS.map((emoji) => h("button", { type: "button", class: "hs-react-btn", title: "リアクションを送る", "aria-label": `リアクション ${emoji}`, onclick: (event) => { event.stopPropagation(); react(emoji); opts.onReact(emoji); } }, emoji))) : null;
     const bar = viewer ? h("div", { class: "hs-player-bar" }, counter, h("span", { class: "hs-player-spacer" }),
-      h("span", { class: "hs-player-live" }, opts.viewerLabel || "発表者に合わせて表示しています"),
+      h("span", { class: "hs-player-live" }, opts.viewerLabel || "発表者に合わせて表示しています"), reactBtns,
       btn("全画面", "全画面（F）", () => toggleFullscreen())) : h("div", { class: "hs-player-bar" },
       btn("‹", "前へ（←）", () => prev()),
       counter,
@@ -941,6 +944,7 @@
       btn("ノート", "ノートを表示（N）", () => toggleNotes()),
       btn("発表者ビュー", "別ウィンドウにノート・次のスライド・経過時間（P）", () => openPresenterView()),
       btn("全画面", "全画面（F）", () => toggleFullscreen()),
+      opts.joinCard ? btn("参加", "参加用の QR コードとリンクを表示（Q）", () => toggleJoin(), "join") : null,
       opts.closable === false ? null : btn("終了", "発表を終了（Esc）", () => close(), "end"));
     const grid = h("div", { class: "hs-player-grid", hidden: true });
     const black = h("div", { class: "hs-player-black", hidden: true, onclick: (event) => { event.stopPropagation(); black.hidden = true; } });
@@ -958,7 +962,64 @@
     let captions = null;
     const carryHost = h("div", { class: "hs-carry", hidden: true });
     const carried = [];
-    const player = h("div", { class: "hs-player", tabindex: "-1" }, stage, progress, notes, backBtn, bar, grid, black, carryHost, inkSvg, laser, penMenu, captionBox);
+    // オンライン プレゼンテーション: the card with the QR code and the link to join (Q).
+    const joinCard = h("div", { class: "hs-join", hidden: true });
+    if (opts.joinCard) {
+      const qr = h("div", { class: "hs-join-qr" });
+      if (opts.joinCard.svg) qr.innerHTML = opts.joinCard.svg;
+      joinCard.append(h("b", {}, "スマートフォン・PCで参加"), qr, h("span", { class: "hs-join-url" }, opts.joinCard.url || ""));
+    }
+    const reactLayer = h("div", { class: "hs-react-layer", "aria-hidden": "true" });
+    const player = h("div", { class: "hs-player", tabindex: "-1" }, stage, progress, notes, backBtn, bar, grid, black, carryHost, inkSvg, laser, penMenu, captionBox, joinCard, reactLayer);
+    function toggleJoin(force = null) { if (opts.joinCard) joinCard.hidden = force == null ? !joinCard.hidden : !force; }
+
+    /** A reaction floats up from the bottom of the screen. */
+    function react(emoji) {
+      if (reactLayer.childElementCount > 40) reactLayer.firstElementChild?.remove();
+      const el = h("span", { class: "hs-react", style: { left: `${8 + Math.random() * 84}%`, "--drift": `${Math.round((Math.random() - 0.5) * 80)}px` } }, emoji);
+      reactLayer.append(el);
+      setTimeout(() => el.remove(), 3200);
+    }
+    /** The presenter's captions on a viewer's screen (they fade after a pause). */
+    let captionTimer = 0;
+    function caption(text) {
+      captionBox.textContent = String(text || "").slice(-120);
+      captionBox.hidden = !text;
+      player.classList.toggle("with-captions", Boolean(text));
+      clearTimeout(captionTimer);
+      captionTimer = setTimeout(() => { captionBox.hidden = true; player.classList.remove("with-captions"); }, 6000);
+    }
+    // アンケート: the answers so far (poll id → counts) and this viewer's own (poll id → choice).
+    const votes = new Map();
+    const mine = new Map();
+    function paintPolls(scope = current?.firstElementChild) {
+      for (const box of scope?.querySelectorAll?.(".hs-poll[data-poll]") || []) {
+        const items = [...box.querySelectorAll(".hs-poll-opt")];
+        const counts = votes.get(box.dataset.poll) || items.map(() => 0);
+        const total = counts.reduce((a, b) => a + b, 0);
+        const top = Math.max(...counts);
+        items.forEach((li, k) => {
+          const n = counts[k] || 0;
+          li.querySelector(".hs-poll-bar i").style.width = `${total ? Math.round((n / total) * 100) : 0}%`;
+          li.querySelector(".hs-poll-count").textContent = String(n);
+          li.classList.toggle("is-top", total > 0 && n === top);
+          li.classList.toggle("is-mine", mine.get(box.dataset.poll) === k);
+        });
+        const foot = box.querySelector(".hs-poll-total");
+        if (foot) foot.textContent = total ? `回答 ${total}人` : viewer ? "選んで回答してください" : "回答をクリック・タップ";
+      }
+    }
+    function setVotes(poll, counts) { votes.set(poll, Array.isArray(counts) ? counts.map((n) => Math.max(0, Number(n) || 0)) : []); paintPolls(); }
+    /** A click on a choice: an answer (sent to the presenter online, or counted here). */
+    function answer(choice) {
+      const poll = choice.closest(".hs-poll")?.dataset.poll;
+      const k = Number(choice.dataset.option);
+      if (!poll || !Number.isInteger(k)) return;
+      if (opts.onVote) { if (opts.onVote(poll, k) !== false) { mine.set(poll, k); paintPolls(); } return; }
+      const counts = [...(votes.get(poll) || [...choice.parentElement.children].map(() => 0))];
+      counts[k] = (counts[k] || 0) + 1;
+      setVotes(poll, counts);
+    }
     host.append(player);
     if (kiosk) player.classList.add("kiosk");
 
@@ -1015,6 +1076,8 @@
           if (event.results[i].isFinal) done = `${done} ${text}`.trim().slice(-160); else interim += text;
         }
         captionBox.textContent = `${done} ${interim}`.trim().slice(-120);
+        // オンライン プレゼンテーション: the words go to the viewers too.
+        opts.onCaption?.(captionBox.textContent);
       };
       rec.onerror = (event) => { if (event.error === "not-allowed" || event.error === "service-not-allowed") { flash("マイクを使えないため字幕を出せません"); captions = null; captionBox.hidden = true; } };
       // Recognition stops by itself after a pause: it starts again while 字幕 is on.
@@ -1165,6 +1228,7 @@
         // Animations that start with the slide wait for its way in (as in PowerPoint).
         const wayIn = type === "none" || type === "morph" ? 0 : Math.round((trMs ?? TRANSITION_MS[type] ?? 620) * 0.85);
         play(slide, { step, animate: atStep == null && !still, delay: wayIn });
+        paintPolls(slide);
         // 画面切り替えのサウンド rings as the slide arrives going forward (not going back or out of a deep-dive page).
         if (!still && opts.sounds !== false && slides[i]?.transitionSound && atStep == null && dir >= 0) playSound(slides[i].transitionSound);
         interaction = activate(slide, { details: [...(slides[i]?.details || []), ...(E.objectDetails?.(slides[i]) || [])], elements: slides[i]?.elements || [], onDrill: back || viewer ? null : (to, el) => openDrill(to, el) });
@@ -1540,6 +1604,9 @@
     let digits = "";
     function onKey(event) {
       if (event.defaultPrevented) return;
+      // アンケート: Enter or Space on a choice (reached with Tab) answers it.
+      const choice = event.target?.closest?.(".hs-poll-opt");
+      if (choice && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); answer(choice); return; }
       if (viewer) { if ((event.key === "f" || event.key === "F") && !event.ctrlKey && !event.metaKey) toggleFullscreen(); return; }
       // PowerPoint's pen keys: Ctrl+P ペン, Ctrl+I 蛍光ペン, Ctrl+L レーザー, Ctrl+E 消しゴム, Ctrl+A 矢印.
       if ((event.ctrlKey || event.metaKey) && !event.altKey) {
@@ -1576,6 +1643,7 @@
         else if (opts.closable !== false) close();
       } else if (key === "f" || key === "F") toggleFullscreen();
       else if (key === "n" || key === "N") toggleNotes();
+      else if ((key === "q" || key === "Q") && opts.joinCard) toggleJoin();
       else if (key === "g" || key === "G" || key === "o" || key === "O") toggleGrid();
       else if (key === "p" || key === "P") openPresenterView();
       else if (key === "b" || key === "B" || key === ".") { black.style.background = "#000"; black.hidden = !black.hidden; }
@@ -1600,7 +1668,10 @@
       return true;
     }
     const onStageClick = (event) => {
-      if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes, .hs-control, a[href], .hs-pen-menu")) return;
+      if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes, .hs-control, a[href], .hs-pen-menu, .hs-join")) return;
+      // アンケート: a click on a choice answers (it does not move the show on).
+      const choice = event.target.closest(".hs-poll-opt");
+      if (choice) { answer(choice); return; }
       // With a pen in hand, a click writes instead of moving on (the laser pointer still clicks through).
       if (penMode && penMode !== "laser") return;
       if (viewer) return;
@@ -1631,6 +1702,8 @@
     stage.addEventListener("touchstart", onTouchStart, { passive: true });
     stage.addEventListener("touchend", onTouchEnd);
     player.addEventListener("pointermove", onMove);
+    // A tap (a phone has no pointer to move) brings the bar back too: a viewer's reactions are on it.
+    player.addEventListener("pointerdown", onMove);
     // The audience's own click stops the automatic demo (the demo's clicks are not "trusted").
     player.addEventListener("pointerdown", (event) => { if (event.isTrusted && demoRun && !event.target.closest?.(".hs-player-btn.demo")) stopDemo(); }, true);
     onMove();
@@ -1659,7 +1732,7 @@
     if (opts.captions) toggleCaptions();
 
     return {
-      el: player, next, prev, go, follow, destroy, close, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill, demo, stopDemo, setPen, toggleCaptions,
+      el: player, next, prev, go, follow, destroy, close, react, caption, setVotes, toggleJoin, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill, demo, stopDemo, setPen, toggleCaptions,
       get pen() { return penMode; }, get captioning() { return Boolean(captions); }, get order() { return [...order]; },
       get index() { return index; }, get step() { return step; }, get startedAt() { return started; }, get inDrill() { return Boolean(back); },
     };

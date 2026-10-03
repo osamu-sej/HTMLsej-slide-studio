@@ -1180,8 +1180,8 @@
 
   // ---------------------------------------------------------------- objects: kinds, defaults, normalization
 
-  const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart", "ink", "zoom", "camera", "equation", "model"];
-  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt", ink: "インク", zoom: "ズーム", camera: "カメオ", equation: "数式", model: "3D モデル" };
+  const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart", "ink", "zoom", "camera", "equation", "model", "poll"];
+  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt", ink: "インク", zoom: "ズーム", camera: "カメオ", equation: "数式", model: "3D モデル", poll: "アンケート" };
   // Media playback (PowerPoint's 再生 tab): how loud, and where the sound sits on the slides.
   const VOLUMES = { 0: "ミュート", 0.33: "小", 0.66: "中", 1: "大" };
   // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
@@ -1418,6 +1418,22 @@
     rotEl.append(box);
   }
 
+  /**
+   * アンケート: the question, then each choice with a bar for its share of the answers (counts come in while
+   * presenting: motion.js fills them). In a show a choice can be clicked to answer.
+   */
+  function pollBody(o, rotEl, ctx) {
+    const fs = o.fs || 30;
+    const box = h("div", { class: "hs-poll", "data-poll": o.id, style: { "--poll-fs": `${fs}px`, "--poll-bar": o.fill || "#c9d6ee" } },
+      h("div", { class: "hs-poll-q" }, o.question),
+      h("ol", { class: "hs-poll-opts" }, o.options.map((label, k) => h("li", { class: "hs-poll-opt", "data-option": String(k), role: ctx.live ? "button" : null, tabindex: ctx.live ? "0" : null },
+        h("span", { class: "hs-poll-label" }, label),
+        h("span", { class: "hs-poll-bar" }, h("i", { style: { width: "0%" } })),
+        h("span", { class: "hs-poll-count" }, "0")))),
+      h("div", { class: "hs-poll-total" }, ctx.live ? "回答をクリック・タップ" : "発表中に回答を集めます"));
+    rotEl.append(box);
+  }
+
   function cameraBody(o, rotEl, ctx) {
     const radius = o.mask === "ellipse" ? "50%" : o.mask === "roundRect" ? "12%" : "0";
     const box = h("div", { class: "hs-camera", style: { "border-radius": radius, "--cb": o.stroke === "none" ? "transparent" : o.stroke, "--cw": `${o.strokeW ?? 3}px` } });
@@ -1584,6 +1600,18 @@
       const view = { yaw: num(v.yaw, -360, 360, 0), pitch: num(v.pitch, -89, 89, 0), roll: num(v.roll, -180, 180, 0), zoom: num(v.zoom, 0.3, 4, 1), panX: num(v.panX, -2, 2, 0), panY: num(v.panY, -2, 2, 0) };
       const kept = Object.fromEntries(Object.entries(view).filter(([k, val]) => (k === "zoom" ? val !== 1 : val !== 0)).map(([k, val]) => [k, Math.round(val * 1000) / 1000]));
       if (Object.keys(kept).length) o.view = kept;
+    }
+    if (o.kind === "poll") {
+      // アンケート (PowerPoint Live's polls): a question and its choices; the answers come in while presenting.
+      const plainLine = (t, max) => String(t ?? "").replace(/<[^>]*>/g, "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max);
+      o.question = plainLine(raw.question, 200) || "質問";
+      const options = (Array.isArray(raw.options) ? raw.options : []).map((t) => plainLine(t, 60)).filter(Boolean).slice(0, 8);
+      if (options.length < 2) return null;
+      o.options = options;
+      const fill = hexColor(raw.fill);
+      if (fill) o.fill = fill;
+      const fs = num(raw.fs, 12, 120);
+      if (fs != null) o.fs = fs;
     }
     if (o.kind === "camera") {
       // カメオ: the presenter's camera, live on the slide (a circle or another shape).
@@ -3227,6 +3255,7 @@
     else if (o.kind === "zoom") zoomBody(o, rot, ctx);
     else if (o.kind === "camera") cameraBody(o, rot, ctx);
     else if (o.kind === "model") modelBody(o, rot, ctx);
+    else if (o.kind === "poll") pollBody(o, rot, ctx);
     else if (o.kind === "equation") equationBody(o, rot);
     else if (o.kind === "chart") chartBody(o, rot);
     else if (o.kind === "icon") {

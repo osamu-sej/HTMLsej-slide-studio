@@ -203,6 +203,90 @@ await step("インクの非表示: ink on the slide is hidden while editing, and
   assert(await page.isVisible('#stageBody .hs-obj[data-el="ink1"]'), "ink back");
 });
 
+/** The colour at (fx, fy) of a picture object's image. */
+const rgb = (id, fx, fy) => page.evaluate(async ([id, fx, fy]) => {
+  const img = document.querySelector(`#stageBody .hs-obj[data-el="${id}"] img`);
+  await img.decode?.().catch(() => {});
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const g = c.getContext("2d");
+  g.drawImage(img, 0, 0);
+  return Array.from(g.getImageData(Math.floor(fx * c.width), Math.floor(fy * c.height), 1, 1).data.slice(0, 3));
+}, [id, fx, fy]);
+
+await step("アート効果「線画」: the square's edge drawn dark on white (one ⌘Z back); 色の変更「濃紺」 tones the picture", async () => {
+  const o = await insertPicture(logo);
+  await tab("図の形式");
+  await ribbonBtn("アート");
+  await menuItem("線画");
+  await page.waitForFunction((src) => window.__hsej.slide().elements.at(-1).src !== src, o.src, { timeout: 15000 });
+  await page.waitForTimeout(400);
+  const n = (await slide()).elements.at(-1);
+  const inside = await rgb(n.id, 0.5, 0.5);
+  const edge = await rgb(n.id, 0.25, 0.5);
+  assert(inside[0] > 200 && edge[0] < 150, `line drawing: inside ${inside}, edge ${edge}`);
+  await shot("art-lines");
+  await undo();
+  assert((await slide()).elements.at(-1).src === o.src, "⌘Z brings the picture back");
+  await tab("図の形式");
+  await page.locator('.rb-body .rb-btn[title^="色の変更"]').first().click();
+  await menuItem("濃紺");
+  await page.waitForFunction((src) => window.__hsej.slide().elements.at(-1).src !== src, o.src, { timeout: 15000 });
+  await page.waitForTimeout(400);
+  const toned = await rgb((await slide()).elements.at(-1).id, 0.5, 0.5);
+  assert(toned[2] >= toned[1] && toned[1] >= toned[0] && toned[2] < 160, `navy tone: ${toned}`);
+});
+
+// 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
+const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
+await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {
+  const cap = await (await capBrowser.newContext({ viewport: { width: 1600, height: 900 }, acceptDownloads: true })).newPage();
+  cap.on("pageerror", (error) => errors.push(`capture pageerror: ${error.message}`));
+  await cap.goto(base);
+  await cap.evaluate(() => localStorage.clear());
+  await cap.goto(base);
+  await cap.click("#sampleDeckBtn");
+  await cap.waitForSelector(".film-item");
+  await cap.locator(".film-item").nth(1).click();
+  const fileMenu = () => cap.click(".rb-file");
+  await fileMenu();
+  await cap.locator('.rb-pop button:has-text("画像として保存")').first().click();
+  await cap.waitForSelector(".imgx-dialog[open]");
+  await cap.check('.imgx-dialog input[value="one"]');
+  const [png] = await Promise.all([cap.waitForEvent("download", { timeout: 60000 }), cap.click(".imgx-dialog .ix-go")]);
+  const pngFile = join(outDir, "format-slide.png");
+  await png.saveAs(pngFile);
+  const facts = JSON.parse(execFileSync("python3", ["-c", `
+from PIL import Image; import json, sys
+im = Image.open(sys.argv[1]).convert("RGB"); w, h = im.size
+colors = len(set(im.resize((64, 36)).getdata()))
+px = im.load()
+green = lambda p: p[1] > 100 and p[0] < 80 and p[2] < 100
+red = lambda p: p[0] > 190 and p[1] < 80 and p[2] < 80
+# The SEJ green line under the title runs across the slide (the whole slide is in the picture, not a part of it).
+line = max(sum(green(px[x, y]) for x in range(0, w, 4)) * 4 / w for y in range(int(h * .08), int(h * .2)))
+# The red 社内限り box at the bottom left.
+box = sum(red(px[x, y]) for x in range(0, int(w * .2), 2) for y in range(int(h * .8), h, 2))
+print(json.dumps({"w": w, "h": h, "colors": colors, "corner": im.getpixel((5, 5)), "line": round(line, 2), "box": box}))`, pngFile]).toString());
+  assert(Math.abs(facts.w / facts.h - 16 / 9) < 0.03 && facts.w >= 640, `a slide-shaped picture: ${facts.w}×${facts.h}`);
+  assert(facts.colors > 12, `the slide drawn (not blank): ${facts.colors} colours`);
+  assert(facts.corner.every((v) => v > 200), `the slide's own white corner, not the dark show around it: ${facts.corner}`);
+  assert(facts.line > 0.85 && facts.box > 50, `the whole slide (the master's green line across ${facts.line}, the 社内限り box ${facts.box})`);
+  assert(facts.w >= 1500, `at the screen's resolution: ${facts.w}px wide`);
+  await fileMenu();
+  await cap.locator('.rb-pop button:has-text("画像として保存")').first().click();
+  await cap.waitForSelector(".imgx-dialog[open]");
+  const total = await cap.evaluate(() => Number(document.querySelector(".imgx-dialog").textContent.match(/（(\d+)枚/)?.[1] || 0));
+  const [zip] = await Promise.all([cap.waitForEvent("download", { timeout: 240000 }), cap.click(".imgx-dialog .ix-go")]);
+  const zipFile = join(outDir, "format-slides.zip");
+  await zip.saveAs(zipFile);
+  const names = execFileSync("python3", ["-c", "import zipfile,sys;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;print('|'.join(z.namelist()))", zipFile]).toString().trim().split("|");
+  assert(names.length === total && names[0] === "スライド01.png", `a picture a slide: ${names.length} of ${total} (${names[0]})`);
+  await cap.close();
+});
+await capBrowser.close();
+
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");
 await browser.close();
 process.exit(errors.length ? 1 : 0);

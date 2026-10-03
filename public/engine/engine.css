@@ -1221,6 +1221,21 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-player-btn.end { color: #ffb0a3; }
 .hs-player-count { min-width: 64px; text-align: center; font: 700 13px/1 inherit; color: #b8c1d3; font-variant-numeric: tabular-nums; }
 .hs-player-spacer { width: 1px; height: 22px; margin: 0 4px; background: rgba(255, 255, 255, .16); }
+/* PowerPoint Live: reactions floating up, the viewer's reaction buttons, the join card with its QR code. */
+.hs-react-layer { position: absolute; inset: 0; z-index: 7; overflow: hidden; pointer-events: none; }
+.hs-react { position: absolute; bottom: 70px; font-size: 44px; line-height: 1; animation: hs-react-up 3.1s cubic-bezier(.22, .61, .36, 1) forwards; }
+@keyframes hs-react-up { 0% { opacity: 0; transform: translate(0, 20px) scale(.6); } 12% { opacity: 1; transform: translate(0, 0) scale(1.1); } 100% { opacity: 0; transform: translate(var(--drift, 0px), -46vh) scale(1); } }
+.hs-react-bar { display: inline-flex; gap: 2px; margin: 0 4px; }
+.hs-react-btn { width: 34px; height: 34px; border: 0; border-radius: 50%; background: transparent; font-size: 20px; cursor: pointer; }
+.hs-react-btn:hover { background: rgba(255, 255, 255, .12); }
+.hs-join { position: absolute; right: 24px; bottom: 84px; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 8px; width: 240px; padding: 14px; border-radius: 12px; background: #ffffff; color: #1a1a1a; font-size: 13px; text-align: center; }
+.hs-join[hidden] { display: none; }
+.hs-join b { color: #1f3864; }
+.hs-join-qr svg { display: block; width: 190px; height: 190px; }
+.hs-join-url { font-size: 11px; color: #808080; word-break: break-all; }
+/* 画像として保存: the show without its bar while each slide is captured. */
+.hs-player.hs-capture .hs-player-bar, .hs-player.hs-capture .hs-player-progress, .hs-player.hs-capture .hs-player-flash, .hs-player.hs-capture .hs-player-back { display: none !important; }
+.hs-player.hs-capture { cursor: none; }
 .hs-player-live { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; font: 600 12px/1 inherit; color: #b8c1d3; white-space: nowrap; }
 .hs-player-live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; animation: hs-live 1.6s ease-in-out infinite; }
 @keyframes hs-live { 50% { opacity: .35; } }
@@ -1540,6 +1555,21 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-camera { position: absolute; inset: 0; overflow: hidden; background: #d9d9d9; box-shadow: inset 0 0 0 var(--cw, 3px) var(--cb, transparent); }
 .hs-camera-feed { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 .hs-camera-placeholder { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 38%, #b7c3da 0 18%, transparent 19%), radial-gradient(ellipse at 50% 100%, #b7c3da 0 42%, transparent 43%), #dce4f2; }
+/* アンケート (poll): the question, then each choice with its bar and count (motion.js fills them while presenting). */
+.hs-poll { position: absolute; inset: 0; display: flex; flex-direction: column; gap: calc(var(--poll-fs) * .5); padding: calc(var(--poll-fs) * .6); box-sizing: border-box; background: #f4f6fa; color: #1a1a1a; font-size: var(--poll-fs); }
+.hs-poll-q { font-weight: 700; font-size: 1.15em; color: #1f3864; line-height: 1.35; }
+.hs-poll-opts { flex: 1; display: flex; flex-direction: column; justify-content: space-around; gap: .3em; margin: 0; padding: 0; list-style: none; }
+.hs-poll-opt { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr) 3.2em; align-items: center; gap: .6em; line-height: 1.3; }
+.hs-poll-label { overflow-wrap: anywhere; }
+.hs-poll-bar { position: relative; height: .9em; background: #e6e9ef; }
+.hs-poll-bar i { position: absolute; inset: 0 auto 0 0; background: var(--poll-bar); transition: width .6s cubic-bezier(.22, .61, .36, 1); }
+.hs-poll-opt.is-top .hs-poll-bar i { background: #1f3864; }
+.hs-poll-count { text-align: right; font-variant-numeric: tabular-nums; color: #1f3864; font-weight: 700; }
+.hs-poll-total { font-size: .7em; color: #808080; }
+.hs-slide.hs-live .hs-obj-poll { pointer-events: auto; }
+.hs-live .hs-poll-opt { cursor: pointer; }
+.hs-live .hs-poll-opt:focus-visible { outline: 3px solid #1f3864; outline-offset: 2px; }
+.hs-poll-opt.is-mine .hs-poll-label { font-weight: 700; text-decoration: underline; text-decoration-color: #1f3864; text-underline-offset: .2em; }
 /* 3D モデル (models.js): the still picture until the live drawing is ready, then the canvas over it. */
 .hs-model { position: absolute; inset: 0; }
 .hs-model-poster, .hs-model-canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }

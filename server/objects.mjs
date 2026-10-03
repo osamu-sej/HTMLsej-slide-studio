@@ -15,12 +15,13 @@ export function plainText(html) {
     .trim();
 }
 
-const KIND_NAMES = { shape: "図形", text: "テキスト", image: "画像", line: "線", icon: "アイコン", video: "動画", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt", ink: "インク", zoom: "ズーム", camera: "カメオ", equation: "数式", model: "3D モデル" };
+const KIND_NAMES = { shape: "図形", text: "テキスト", image: "画像", line: "線", icon: "アイコン", video: "動画", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt", ink: "インク", zoom: "ズーム", camera: "カメオ", equation: "数式", model: "3D モデル", poll: "アンケート" };
 
 /** The words an object holds: its text, a table's cells, a chart's title and labels. */
 function wordsOf(o) {
   if (o?.kind === "table" && Array.isArray(o.cells)) return o.cells.flat().map((cell) => plainText(cell?.text)).filter(Boolean).join(" ");
   if (o?.kind === "chart" && o.chart) return [o.chart.title, ...(Array.isArray(o.chart.labels) ? o.chart.labels : [])].filter(Boolean).join(" ");
+  if (o?.kind === "poll") return [o.question, ...(Array.isArray(o.options) ? o.options : [])].filter(Boolean).join(" ");
   if (o?.kind === "smartart" && Array.isArray(o.smartart?.items)) return o.smartart.items.map((item) => plainText(item?.text)).filter(Boolean).join(" ");
   return plainText(o?.text);
 }
