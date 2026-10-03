@@ -1539,3 +1539,20 @@ audio.trim-media { background: transparent; }
 .op-banner { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); z-index: 6; max-width: calc(100% - 32px); padding: 8px 16px; border-radius: 8px; background: rgba(7, 8, 12, .78); color: #e8ecf4; font-size: 13px; pointer-events: none; }
 .op-banner[hidden] { display: none; }
 .op-message { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; height: 100%; padding: 16px; color: #e8ecf4; text-align: center; font-size: 15px; }
+/* コーチによるリハーサル (public/editor/coach.mjs) */
+.coach-meter { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 14px; max-width: calc(100% - 32px); padding: 8px 16px; border-radius: 10px; background: rgba(7, 8, 12, .8); color: #e8ecf4; font-size: 13px; }
+.coach-heard { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b8c1d3; }
+.coach-pace.good { color: #7ad08a; }
+.coach-pace.fast, .coach-pace.slow { color: #f0b36b; }
+.coach-dialog { width: min(640px, calc(100vw - 32px)); }
+.coach-body { display: flex; flex-direction: column; gap: 14px; font-size: 13px; }
+.coach-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.coach-row { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.coach-row span { color: var(--ink-2); font-size: 12px; }
+.coach-row b { font-size: 20px; }
+.coach-row small { color: var(--ink-2); }
+.coach-row small.coach-pace.good { color: #1f7a3a; }
+.coach-row small.coach-pace.fast, .coach-row small.coach-pace.slow { color: #a35a00; }
+.coach-tips { margin: 0; padding-left: 20px; line-height: 1.7; }
+.coach-slides { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.coach-slides th, .coach-slides td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; }

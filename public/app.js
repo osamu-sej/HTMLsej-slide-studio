@@ -21,6 +21,7 @@ import { createSlideTools } from "./editor/slidetools.mjs?v=__APP_VERSION__";
 import { createVideoExport } from "./editor/video.mjs?v=__APP_VERSION__";
 import { createCompare } from "./editor/compare.mjs?v=__APP_VERSION__";
 import { createOnline } from "./editor/online.mjs?v=__APP_VERSION__";
+import { createCoach } from "./editor/coach.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -549,6 +550,7 @@ function normalizeSlide(raw, index, total) {
   // 画面切り替え: how long the way in takes (ms) and moving on by itself after some seconds.
   if (Number(slide.transitionDur) >= 100 && Number(slide.transitionDur) <= 10000) slide.transitionDur = Math.round(Number(slide.transitionDur)); else delete slide.transitionDur;
   if (!Object.hasOwn(E.TRANSITION_SOUNDS, slide.transitionSound)) delete slide.transitionSound;
+  if (!Object.values(E.TRANSITION_OPTIONS).some((list) => list.some(([key]) => key === slide.transitionDir))) delete slide.transitionDir;
   if (slide.advance != null && Number.isFinite(Number(slide.advance)) && Number(slide.advance) >= 0) slide.advance = Math.min(600, Math.round(Number(slide.advance) * 10) / 10); else delete slide.advance;
   if (!(typeof slide.sid === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(slide.sid))) delete slide.sid;
   // A page brought over from PowerPoint as it looked keeps its title as an object and may use the cover's master.
@@ -792,7 +794,7 @@ function extractUnits(slide) {
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "transitionSound", "advance", "hidden", "section", "comments"]) {
+  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "hidden", "section", "comments"]) {
     if (slide[key] != null && slide[key] !== "" && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
@@ -1598,7 +1600,7 @@ const PLACEHOLDERS = new Set([
   "工程", "項目", "補足", "説明", "伝えたいひと言", "写真に重ねて見せる補足の一文", "ポイント", "いちばん伝えたい**ひと言**を大きく",
 ]);
 const FULLWIDTH_NUMBER = /[０-９％．，]/;
-const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula", "elements", "timeline", "sid", "transitionDur", "transitionSound", "advance"]);
+const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance"]);
 
 function textEntries(value, path = [], out = []) {
   if (typeof value === "string") out.push([path, value]);
@@ -2443,6 +2445,9 @@ const editorApp = {
   // オンライン プレゼンテーション (public/editor/online.mjs).
   openPresenter: (start, options) => openPresenter(start, options),
   openOnline: () => online.open(),
+  // コーチによるリハーサル (public/editor/coach.mjs).
+  rehearseWithCoach: () => coach.start(),
+  presenterHost: () => $("presenter"),
   onlineActive: () => online.active,
   fitsForShow: async () => { await measureAll(); return state.deck.slides.map((_, i) => { const fit = fitFor(i); return fit ? { fs: fit.fs, ts: fit.ts, ...(fit.objs ? { objs: fit.objs } : {}) } : null; }); },
   setMediaUrl: (src, url) => { mediaUrls[src] = url; },
@@ -2486,6 +2491,8 @@ const videoExport = createVideoExport(editorApp);
 const compareTool = createCompare(editorApp);
 // スライド ショー → オンライン プレゼンテーション (public/editor/online.mjs).
 const online = createOnline(editorApp);
+// スライド ショー → コーチによるリハーサル (public/editor/coach.mjs).
+const coach = createCoach(editorApp);
 const editor = createCanvas(editorApp);
 const editorUi = createEditorUi(editor, editorApp);
 // The window around the slide: splitters, notes, message bar, status bar (public/editor/window.mjs).
@@ -3082,7 +3089,7 @@ async function previewTransition() {
   const host = h("div", { class: "hs-player-stage transition-preview" });
   wrap.replaceChildren(host);
   state.motionPreview = { el: to, act: null, advance: () => 0, transition: true };
-  await E.transitionPreview(host, from, to, type, { dur: slide.transitionDur });
+  await E.transitionPreview(host, from, to, type, { dur: slide.transitionDur, dir: slide.transitionDir });
   if (state.motionPreview?.el !== to) return;
   E.play(to, { step: 0 });
   state.motionPreview.timer = setTimeout(() => { if (state.motionPreview?.el === to) stopMotionPreview(); }, 1600);
@@ -4551,7 +4558,7 @@ function restoreImages(slides, previous) {
     if (source?.imagePlacement && slide.customImage === source.customImage && !slide.imagePlacement) slide.imagePlacement = source.imagePlacement;
     // What people placed by hand stays: a 白紙 page comes back as it was, objects stay with their slide.
     if (source?.type === "blank") { slides[index] = clone(source); return; }
-    for (const key of ["elements", "timeline", "sid", "transitionDur", "transitionSound", "advance"]) if (source?.[key] != null && slide[key] == null) slide[key] = clone(source[key]);
+    for (const key of ["elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance"]) if (source?.[key] != null && slide[key] == null) slide[key] = clone(source[key]);
   });
   // A slide with objects that found no place in the new deck is kept (before the close), so no work is lost.
   const placed = new Set(slides.flatMap((slide) => (slide.elements || []).map((o) => o.id)));
@@ -5197,7 +5204,7 @@ function chooseVariant(id, variant) {
   saveVersion("別案を採用する前");
   const original = state.deck.slides[set.index];
   const chosen = clone(variant.slide);
-  for (const key of ["elements", "timeline", "sid", "transitionDur", "transitionSound", "advance"]) if (original?.[key] != null && chosen[key] == null) chosen[key] = clone(original[key]);
+  for (const key of ["elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance"]) if (original?.[key] != null && chosen[key] == null) chosen[key] = clone(original[key]);
   replaceSlide(set.index, chosen);
   message.variants.status = "chosen";
   message.variants.chosen = variant.label;

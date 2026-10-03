@@ -177,6 +177,21 @@ class TransitionSoundTest(unittest.TestCase):
             self.assertEqual(out["transitionSound"], kind, name)
             self.assertEqual(out["transition"], "fade")
 
+    def test_transition_directions(self):
+        def tr(effect):
+            ns = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main"'
+            return pptx_exact.transition_of(etree.fromstring(f'<p:sld {ns}><p:transition>{effect}</p:transition></p:sld>'))
+        self.assertEqual(tr('<p:push dir="u"/>'), {"transition": "push"}, "from below is the default")
+        self.assertEqual(tr('<p:push dir="d"/>')["transitionDir"], "up")
+        self.assertEqual(tr('<p:push/>')["transitionDir"], "right", "PowerPoint's default push comes from the right")
+        self.assertEqual(tr('<p:wipe dir="r"/>')["transitionDir"], "left")
+        self.assertNotIn("transitionDir", tr('<p:wipe/>'))
+        self.assertEqual(tr('<p:cover dir="u"/>'), {"transition": "slide", "transitionDir": "down"})
+        self.assertEqual(tr('<p:blinds dir="vert"/>')["transitionDir"], "vertical")
+        self.assertEqual(tr('<p:split orient="horz"/>')["transitionDir"], "horizontal")
+        self.assertNotIn("transitionDir", tr('<p:split orient="vert"/>'))
+        self.assertNotIn("transitionDir", tr('<p:fade/>'))
+
     def test_stop_previous_sound_and_no_sound(self):
         self.assertEqual(pptx_exact.transition_of(self._slide("<p:sndAc><p:endSnd/></p:sndAc>"))["transitionSound"], "stop")
         self.assertNotIn("transitionSound", pptx_exact.transition_of(self._slide("")))

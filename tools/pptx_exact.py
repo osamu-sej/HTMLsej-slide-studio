@@ -1881,9 +1881,13 @@ def transition_of(slide_el) -> dict[str, Any]:
     if tr is None:
         return {}
     out: dict[str, Any] = {}
-    kind = next((local(c) for c in tr if local(c) not in ("sndAc", "extLst")), None)
+    effect = next((c for c in tr if local(c) not in ("sndAc", "extLst")), None)
+    kind = local(effect) if effect is not None else None
     if kind and TRANSITIONS.get(kind):
         out["transition"] = TRANSITIONS[kind]
+        direction = transition_direction(out["transition"], effect)
+        if direction:
+            out["transitionDir"] = direction
     dur = tr.get(f"{{{NS['p14']}}}dur") or tr.get("dur")
     if dur and dur.isdigit():
         out["transitionDur"] = clamp(int(dur), 100, 10000)
@@ -1895,6 +1899,29 @@ def transition_of(slide_el) -> dict[str, Any]:
     if sound:
         out["transitionSound"] = sound
     return out
+
+
+# 効果のオプション: PowerPoint names the way a slide moves (l = to the left, so it comes from the right); the studio
+# names where it comes from. Only the studio's other-than-default options are kept.
+FROM_SIDE = {"l": "right", "r": "left", "u": "down", "d": "up"}
+DEFAULT_DIR = {"slide": "right", "push": "down", "wipe": "right", "flip": "left", "blinds": "horizontal", "curtain": "vertical"}
+
+
+def transition_direction(studio_kind: str, effect) -> str | None:
+    """The studio's transitionDir for a PowerPoint transition element, or None for the default (or none)."""
+    if studio_kind not in DEFAULT_DIR:
+        return None
+    if studio_kind in ("slide", "push", "wipe"):
+        # Push and cover default to "l"; wipe to "l" as well (it sweeps in from the right).
+        way = FROM_SIDE.get(effect.get("dir", "l"))
+    elif studio_kind == "flip":
+        way = "right" if effect.get("dir") == "r" else "left"
+    elif studio_kind == "blinds":
+        way = "vertical" if effect.get("dir") == "vert" else "horizontal"
+    else:
+        # Split: orient="vert" opens to the left and right (the studio's default curtain), "horz" up and down.
+        way = "vertical" if effect.get("orient", "horz") == "vert" else "horizontal"
+    return way if way and way != DEFAULT_DIR[studio_kind] else None
 
 
 # PowerPoint's built-in transition sounds, matched to the studio's synthesised ones by their file name.

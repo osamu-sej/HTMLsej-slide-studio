@@ -200,7 +200,8 @@ export function createInk(editor, app, kit) {
   }
   const near = (o, pts) => pts.some(([x, y]) => x > o.x - 240 && x < o.x + o.w + 240 && y > o.y - 240 && y < o.y + o.h + 240);
   // The stage redraws after a change: the pen layer goes back on top of the new slide.
-  function remount() { if (!tool) return; requestAnimationFrame(() => { unmount(); mount(); }); }
+  // At once, not on the next frame: until the layer is back, a stroke would land on the slide as a selection.
+  function remount() { if (!tool) return; unmount(); mount(); }
 
   // ---------------------------------------------------------------- 消しゴム・投げ縄
 
