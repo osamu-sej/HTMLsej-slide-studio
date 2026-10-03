@@ -1180,8 +1180,8 @@
 
   // ---------------------------------------------------------------- objects: kinds, defaults, normalization
 
-  const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart", "ink", "zoom", "camera", "equation"];
-  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt", ink: "インク", zoom: "ズーム", camera: "カメオ", equation: "数式" };
+  const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart", "ink", "zoom", "camera", "equation", "model"];
+  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt", ink: "インク", zoom: "ズーム", camera: "カメオ", equation: "数式", model: "3D モデル" };
   // Media playback (PowerPoint's 再生 tab): how loud, and where the sound sits on the slides.
   const VOLUMES = { 0: "ミュート", 0.33: "小", 0.66: "中", 1: "大" };
   // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
@@ -1406,6 +1406,18 @@
     rotEl.append(box);
   }
   /** カメオ: a placeholder while editing; while presenting, the camera (the player starts it). */
+  /**
+   * 3D モデル: its still picture (or a placeholder); models.js draws it live on the stage and in a slide show. The
+   * box carries what the live drawing needs: where the file is and the view.
+   */
+  function modelBody(o, rotEl, ctx) {
+    const url = o.src.startsWith("builtin:") ? o.src : E.resolveSrc(o.src, ctx);
+    const box = h("div", { class: "hs-model", "data-src": url || "", "data-view": JSON.stringify(o.view || {}) });
+    if (o.poster) box.append(h("img", { class: "hs-model-poster", src: o.poster, alt: o.decorative ? "" : o.alt || "", draggable: "false" }));
+    else box.append(h("div", { class: "hs-model-placeholder" }, E.icon("box", "hs-model-icon") || "", h("span", {}, "3D モデル")));
+    rotEl.append(box);
+  }
+
   function cameraBody(o, rotEl, ctx) {
     const radius = o.mask === "ellipse" ? "50%" : o.mask === "roundRect" ? "12%" : "0";
     const box = h("div", { class: "hs-camera", style: { "border-radius": radius, "--cb": o.stroke === "none" ? "transparent" : o.stroke, "--cw": `${o.strokeW ?? 3}px` } });
@@ -1560,6 +1572,18 @@
       const color = hexColor(raw.color);
       if (color) o.color = color;
       if (["left", "center", "right"].includes(raw.align)) o.align = raw.align;
+    }
+    if (o.kind === "model") {
+      // 3D モデル: a GLB / glTF file (or a built-in model), its view, and a still picture of it (models.js).
+      const src = typeof raw.src === "string" ? raw.src.trim() : "";
+      if (!/^(data:(model\/gltf-binary|model\/gltf\+json|application\/octet-stream|application\/json)[;,]|idb:|https?:\/\/|blob:|builtin:[a-z]{2,16}$)/i.test(src) || src.length > 120_000_000) return null;
+      o.src = src;
+      if (typeof raw.fileName === "string" && raw.fileName.trim()) o.fileName = raw.fileName.trim().slice(0, 200);
+      if (typeof raw.poster === "string" && /^data:image\/(png|jpeg|webp);base64,/.test(raw.poster) && raw.poster.length <= 3_000_000) o.poster = raw.poster;
+      const v = raw.view && typeof raw.view === "object" ? raw.view : {};
+      const view = { yaw: num(v.yaw, -360, 360, 0), pitch: num(v.pitch, -89, 89, 0), roll: num(v.roll, -180, 180, 0), zoom: num(v.zoom, 0.3, 4, 1), panX: num(v.panX, -2, 2, 0), panY: num(v.panY, -2, 2, 0) };
+      const kept = Object.fromEntries(Object.entries(view).filter(([k, val]) => (k === "zoom" ? val !== 1 : val !== 0)).map(([k, val]) => [k, Math.round(val * 1000) / 1000]));
+      if (Object.keys(kept).length) o.view = kept;
     }
     if (o.kind === "camera") {
       // カメオ: the presenter's camera, live on the slide (a circle or another shape).
@@ -3202,6 +3226,7 @@
     else if (o.kind === "ink") inkBody(o, rot);
     else if (o.kind === "zoom") zoomBody(o, rot, ctx);
     else if (o.kind === "camera") cameraBody(o, rot, ctx);
+    else if (o.kind === "model") modelBody(o, rot, ctx);
     else if (o.kind === "equation") equationBody(o, rot);
     else if (o.kind === "chart") chartBody(o, rot);
     else if (o.kind === "icon") {

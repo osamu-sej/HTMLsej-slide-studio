@@ -15,7 +15,7 @@ export function plainText(html) {
     .trim();
 }
 
-const KIND_NAMES = { shape: "図形", text: "テキスト", image: "画像", line: "線", icon: "アイコン", video: "動画", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt", ink: "インク", zoom: "ズーム", camera: "カメオ", equation: "数式" };
+const KIND_NAMES = { shape: "図形", text: "テキスト", image: "画像", line: "線", icon: "アイコン", video: "動画", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt", ink: "インク", zoom: "ズーム", camera: "カメオ", equation: "数式", model: "3D モデル" };
 
 /** The words an object holds: its text, a table's cells, a chart's title and labels. */
 function wordsOf(o) {

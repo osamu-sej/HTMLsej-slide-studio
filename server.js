@@ -131,6 +131,7 @@ function loadStatic() {
   add("/engine/objects.js", readFileSync(join(PUBLIC, "engine", "objects.js"), "utf8"), TYPES[".js"]);
   add("/engine/animate.js", readFileSync(join(PUBLIC, "engine", "animate.js"), "utf8"), TYPES[".js"]);
   add("/engine/motion.js", readFileSync(join(PUBLIC, "engine", "motion.js"), "utf8"), TYPES[".js"]);
+  add("/engine/models.js", readFileSync(join(PUBLIC, "engine", "models.js"), "utf8"), TYPES[".js"]);
   add("/engine/engine.css", readFileSync(join(PUBLIC, "engine", "engine.css"), "utf8"), TYPES[".css"]);
   for (const name of readdirSync(join(PUBLIC, "assets")).filter((n) => /^[a-z0-9-]+\.jpg$/.test(n))) add(`/assets/${name}`, readFileSync(join(PUBLIC, "assets", name)), TYPES[".jpg"]);
   for (const name of readdirSync(join(PUBLIC, "samples")).filter((n) => /^[a-z0-9-]+\.json$/.test(n))) add(`/samples/${name}`, readFileSync(join(PUBLIC, "samples", name)), TYPES[".json"]);
@@ -140,7 +141,21 @@ function loadStatic() {
   // Polygon boolean operations (polygon-clipping, MIT) for 図形の結合, loaded by the editor on first use.
   const clipping = join(here, "node_modules", "polygon-clipping", "dist", "polygon-clipping.umd.min.js");
   if (existsSync(clipping)) add("/vendor/polygon-clipping.js", readFileSync(clipping), TYPES[".js"]);
+  // 3D models (three.js, MIT): the core and the glTF loader, with their imports pointed at each other (no import map).
+  for (const [name, code] of threeFiles()) add(`/vendor/three/${name}`, code, TYPES[".js"]);
   return files;
+}
+/** three.js's files for 3D models: [name, code] with the loader's imports made relative. */
+function threeFiles() {
+  const dir = join(here, "node_modules", "three");
+  if (!existsSync(join(dir, "build", "three.module.js"))) return [];
+  const relative = (code) => code.replace(/from\s*(['"])three\1/g, "from './three.module.js'").replace(/from\s*(['"])\.\.\/utils\/([A-Za-z]+\.js)\1/g, "from './$2'");
+  return [
+    ["three.core.js", readFileSync(join(dir, "build", "three.core.js"), "utf8")],
+    ["three.module.js", readFileSync(join(dir, "build", "three.module.js"), "utf8")],
+    ...[["GLTFLoader.js", "loaders/GLTFLoader.js"], ["BufferGeometryUtils.js", "utils/BufferGeometryUtils.js"], ["SkeletonUtils.js", "utils/SkeletonUtils.js"]]
+      .map(([name, path]) => [name, relative(readFileSync(join(dir, "examples", "jsm", path), "utf8"))]),
+  ];
 }
 const staticFiles = loadStatic();
 const PORT = Number(process.env.PORT ?? 8787);

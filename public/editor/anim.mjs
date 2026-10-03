@@ -233,8 +233,11 @@ export function createAnimations(editor, app, kit) {
     return svg;
   }
   // What only HTML can do (typewriter, decode, a pen drawing, figures counting, a chart growing…) comes first.
-  const htmlKeys = (cls) => Object.keys(cls === "em" ? E.ANIM_EM : E.ANIM_IN).filter((fx) => E.animIsHtml(cls, fx) && !(cls === "out" && E.ANIM_IN[fx].noExit));
-  const pptKeys = (cls) => Object.keys(cls === "em" ? E.ANIM_EM : E.ANIM_IN).filter((fx) => !E.animIsHtml(cls, fx));
+  // 3D モデルの動き (到着・ターンテーブル・スイング・ジャンプしてターン・退出) are offered only for 3D models.
+  const isModelFx = (cls, fx) => Boolean((cls === "em" ? E.ANIM_EM : E.ANIM_IN)[fx]?.model);
+  const htmlKeys = (cls) => Object.keys(cls === "em" ? E.ANIM_EM : E.ANIM_IN).filter((fx) => E.animIsHtml(cls, fx) && !isModelFx(cls, fx) && !(cls === "out" && E.ANIM_IN[fx].noExit));
+  const pptKeys = (cls) => Object.keys(cls === "em" ? E.ANIM_EM : E.ANIM_IN).filter((fx) => !E.animIsHtml(cls, fx) && !isModelFx(cls, fx));
+  const modelKeys = (cls) => Object.keys(cls === "em" ? E.ANIM_EM : E.ANIM_IN).filter((fx) => isModelFx(cls, fx));
   function htmlBlock(go) {
     return h("div", { class: "an-html-block" },
       h("div", { class: "rb-gallery-head an-head-html" }, h("b", { class: "an-html-badge" }, "HTML"), "HTMLならでは（PowerPointにはない動き）"),
@@ -245,11 +248,14 @@ export function createAnimations(editor, app, kit) {
     return (close) => {
       const go = (cls, fx) => { close(); run(cls, fx); };
       const hasMedia = selectionTargets().some(mediaOk);
+      const models = selectionTargets().length > 0 && selectionTargets().every((id) => byId(id)?.kind === "model");
       const section = (cls, keys) => [h("div", { class: `rb-gallery-head an-head-${cls}` }, E.ANIM_CLASSES[cls]), h("div", { class: "an-grid" }, keys.map((fx) => fxButton(cls, fx, go)))];
       if (htmlOnly) return h("div", { class: "rb-gallery an-gallery" }, title ? h("div", { class: "rb-menu-head" }, title) : null, htmlBlock(go));
       return h("div", { class: "rb-gallery an-gallery" },
         title ? h("div", { class: "rb-menu-head" }, title) : null,
         h("button", { type: "button", class: "an-none", onclick: () => { close(); none(); } }, "なし（アニメーションを外す）"),
+        models ? h("div", { class: "an-model-block" }, h("div", { class: "rb-gallery-head an-head-model" }, "3D"),
+          h("div", { class: "an-grid" }, [...modelKeys("in").map((fx) => fxButton("in", fx, go)), ...modelKeys("em").map((fx) => fxButton("em", fx, go)), ...modelKeys("out").map((fx) => fxButton("out", fx, go))])) : null,
         htmlBlock(go),
         section("in", pptKeys("in")),
         section("em", pptKeys("em")),

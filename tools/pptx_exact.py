@@ -38,8 +38,10 @@ NS = {
     "dsp": "http://schemas.microsoft.com/office/drawing/2008/diagram",
     "mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
     "p14": "http://schemas.microsoft.com/office/powerpoint/2010/main",
+    "am3d": "http://schemas.microsoft.com/office/drawing/2017/model3d",
 }
 A = "{%s}" % NS["a"]
+AM3D = "{%s}" % NS["am3d"]
 P = "{%s}" % NS["p"]
 R = "{%s}" % NS["r"]
 DSP = "{%s}" % NS["dsp"]
@@ -266,7 +268,7 @@ class Deck:
         self.images: dict[str, str | None] = {}
         self.themes: dict[str, Theme] = {}
         self.sids: dict[str, str] = {}
-        self.stats = {"slides": 0, "objects": 0, "pictures": 0, "tables": 0, "charts": 0, "animations": 0, "skipped": 0, "hidden": 0, "unsupported": 0, "comments": 0}
+        self.stats = {"slides": 0, "objects": 0, "pictures": 0, "tables": 0, "charts": 0, "animations": 0, "skipped": 0, "hidden": 0, "unsupported": 0, "comments": 0, "models": 0}
         self.sej = self._is_sej()
         self.comment_authors = comment_authors(prs)
 
@@ -1127,6 +1129,36 @@ class SlideReader:
             o["hidden"] = True
         self.add(o, spid, group)
 
+    def model3d(self, data, b, spid, part, nv):
+        """A 3D model: its GLB file, how PowerPoint turned it, and the picture PowerPoint drew of it (the poster)."""
+        m = data.find(AM3D + "model3d")
+        rid = m.get(R + "embed") if m is not None else None
+        target = self.rel_target(part or self.slide.part, rid) if rid else None
+        if target is None or not target.blob or len(target.blob) > 100_000_000:
+            self.deck.stats["unsupported"] += 1
+            return None
+        o = {"id": self.new_id("m", spid), "kind": "model", **b, "src": "data:model/gltf-binary;base64," + base64.b64encode(target.blob).decode()}
+        name = nv.get("name") if nv is not None else None
+        if name:
+            o["name"] = name[:60]
+        if nv is not None and nv.get("descr"):
+            o["alt"] = nv.get("descr")[:500]
+        # The turn (60000ths of a degree): across the model (ax, a tilt), round its upright (ay) and in the slide (az).
+        rot = m.find(f"{AM3D}trans/{AM3D}rot")
+        if rot is not None:
+            deg = lambda k: round((int(rot.get(k, "0")) / 60000 + 180) % 360 - 180, 1)
+            view = {"pitch": max(-89, min(89, deg("ax"))), "yaw": deg("ay"), "roll": deg("az")}
+            view = {k: v for k, v in view.items() if v}
+            if view:
+                o["view"] = view
+        blip = m.find(f"{AM3D}raster/{AM3D}blip")
+        poster_part = self.rel_target(part or self.slide.part, blip.get(R + "embed")) if blip is not None and blip.get(R + "embed") else None
+        poster = image_url(poster_part, self.deck) if poster_part is not None else None
+        if poster and poster.startswith(("data:image/png", "data:image/jpeg", "data:image/webp")):
+            o["poster"] = poster
+        self.deck.stats["models"] += 1
+        return o
+
     def frame(self, el, tf, group, part=None):
         """A graphic frame: a table, a chart, SmartArt, or an embedded object (its picture)."""
         xf = self.xfrm_of(el)
@@ -1149,6 +1181,10 @@ class SlideReader:
                 self.add(chart, spid, group)
         elif uri.endswith("/diagram"):
             self.smartart(data, xf, tf, group, spid, part)
+        elif uri == NS["am3d"]:
+            model = self.model3d(data, b, spid, part, nv)
+            if model:
+                self.add(model, spid, group)
         else:
             # An embedded object (Excel, a picture of an equation…): the picture PowerPoint keeps of it.
             pic = next(iter(data.iter(P + "pic")), None)

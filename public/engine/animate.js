@@ -79,6 +79,9 @@
     draw: { label: "線を描く", out: "線を消す", html: true, dur: 1500, ease: "smooth", custom: (c, exit) => drawIn(c, exit) },
     countUp: { label: "カウントアップ", html: true, noExit: true, dur: 1400, ease: "out", custom: (c) => countUp(c) },
     chartGrow: { label: "グラフが伸びる", html: true, noExit: true, dur: 1300, ease: "out", custom: (c) => chartGrow(c) },
+    // 3D モデルの動き (model: true, for 3D models only): models.js turns the model by --m3d-yaw as the box flies in.
+    arrive3d: { label: "到着", out: "退出", model: true, dur: 1600, ease: "out", origin: "center",
+      kf: () => [{ opacity: 0, transform: "translate(0px, 160px) scale(0.7)", "--m3d-yaw": "-240" }, { opacity: 1, offset: 0.35 }, { opacity: 1, transform: "translate(0px, 0px) scale(1)", "--m3d-yaw": "0" }] },
   };
 
   // Emphasis: what changes for a moment (or stays changed) on something already on the slide.
@@ -108,6 +111,13 @@
     ripple: { label: "波紋", html: true, dur: 1100, ease: "out", run: (c) => ripple(c) },
     marker: { label: "マーカーを引く", html: true, dur: 800, ease: "smooth", lasting: true, run: (c) => marker(c) },
     spotlight: { label: "スポットライト", html: true, dur: 500, ease: "smooth", lasting: true, run: (c, state) => spotlight(c, state) },
+    // 3D モデルの強調: turning in place (its view stays; a whole turn ends where it began).
+    turntable3d: { label: "ターンテーブル", model: true, dur: 2000, ease: "smooth", dirs: [["cw", "右回り"], ["ccw", "左回り"]], dir: "cw", amounts: AMOUNT_SPIN, amount: 360, lasting: true,
+      run: (c) => box(c, [{ "--m3d-yaw": "0" }, { "--m3d-yaw": String((c.dir === "ccw" ? -1 : 1) * c.amount) }], { composite: "add" }) },
+    swing3d: { label: "スイング", model: true, dur: 2000, ease: "smooth",
+      run: (c) => box(c, [{ "--m3d-yaw": "0" }, { "--m3d-yaw": "32" }, { "--m3d-yaw": "-32" }, { "--m3d-yaw": "16" }, { "--m3d-yaw": "0" }], { composite: "add" }) },
+    jump3d: { label: "ジャンプしてターン", model: true, dur: 1600, ease: "smooth",
+      run: (c) => box(c, [{ "--m3d-yaw": "0", "--m3d-lift": "0" }, { "--m3d-lift": "0.35", offset: 0.45 }, { "--m3d-yaw": "360", "--m3d-lift": "0" }], { composite: "add" }) },
   };
 
   // Motion paths: points in slide pixels from where the object is, scaled to the object when it is added.

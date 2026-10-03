@@ -6,7 +6,7 @@
 
 import { chromeOf, signature } from "./htmlfx.mjs";
 
-const NEEDS_ALT = new Set(["image", "video", "chart", "smartart", "icon", "ink", "lottie", "camera", "zoom"]);
+const NEEDS_ALT = new Set(["image", "video", "chart", "smartart", "icon", "ink", "lottie", "camera", "zoom", "model"]);
 const KIND_LABEL = { image: "図", video: "ビデオ", chart: "グラフ", smartart: "SmartArt", icon: "アイコン", ink: "インク", lottie: "アニメーション", camera: "カメオ", zoom: "ズーム", shape: "図形", text: "テキスト", table: "表", equation: "数式", audio: "オーディオ", line: "線" };
 const VAGUE_LINK = /^(こちら|ここ|これ|クリック|ここをクリック|こちらをクリック|詳細|詳しく|リンク|link|here|click|click here|more|read more)$/i;
 

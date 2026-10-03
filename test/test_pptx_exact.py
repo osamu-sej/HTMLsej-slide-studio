@@ -303,3 +303,45 @@ class ReviewCommentsTest(unittest.TestCase):
         thread = page["comments"][0]
         self.assertEqual((thread["by"], thread["text"]), ("Reviewer A", "Shorter title?"))
         self.assertEqual([(r["by"], r["text"]) for r in thread["replies"]], [("Writer B", "Done.")])
+
+
+class Model3dTest(unittest.TestCase):
+    """A PowerPoint 3D model comes over as a 3D model: its GLB, its turn, the picture PowerPoint drew, its name."""
+
+    def test_a_3d_model_keeps_its_file_turn_and_picture(self):
+        from pptx.opc.package import Part
+        from pptx.opc.packuri import PackURI
+        import base64
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        glb = b"glTF" + (2).to_bytes(4, "little") + (12).to_bytes(4, "little")
+        model = Part(PackURI("/ppt/media/model3d1.glb"), "model/gltf-binary", prs.part.package, blob=glb)
+        png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+        picture = Part(PackURI("/ppt/media/image9.png"), "image/png", prs.part.package, blob=png)
+        rid_model = slide.part.relate_to(model, "http://schemas.microsoft.com/office/2017/06/relationships/model3d")
+        rid_pic = slide.part.relate_to(picture, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")
+        ns = ('xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+              'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+              'xmlns:am3d="http://schemas.microsoft.com/office/drawing/2017/model3d"')
+        xml = (f'<mc:AlternateContent {ns}><mc:Choice Requires="am3d"><p:graphicFrame>'
+               '<p:nvGraphicFramePr><p:cNvPr id="7" name="3D モデル 6" descr="店舗の模型"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>'
+               f'<p:xfrm><a:off x="{Inches(1)}" y="{Inches(1)}"/><a:ext cx="{Inches(3)}" cy="{Inches(2)}"/></p:xfrm>'
+               '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/drawing/2017/model3d">'
+               f'<am3d:model3d r:embed="{rid_model}"><am3d:spPr/><am3d:camera/><am3d:trans><am3d:rot ax="1200000" ay="-1800000" az="0"/></am3d:trans>'
+               f'<am3d:raster rName="Office3DRenderer" rVer="16.0.8326"><am3d:blip r:embed="{rid_pic}"/></am3d:raster></am3d:model3d>'
+               '</a:graphicData></a:graphic></p:graphicFrame></mc:Choice>'
+               f'<mc:Fallback><p:pic><p:nvPicPr><p:cNvPr id="7" name="3D モデル 6"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="{rid_pic}"/></p:blipFill>'
+               f'<p:spPr><a:xfrm><a:off x="{Inches(1)}" y="{Inches(1)}"/><a:ext cx="{Inches(3)}" cy="{Inches(2)}"/></a:xfrm></p:spPr></p:pic></mc:Fallback></mc:AlternateContent>')
+        slide.shapes._spTree.append(etree.fromstring(xml))
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        [o] = [x for x in deck["slideData"][0]["elements"] if x["kind"] == "model"]
+        self.assertTrue(o["src"].startswith("data:model/gltf-binary;base64,"))
+        self.assertEqual(base64.b64decode(o["src"].split(",", 1)[1]), glb)
+        self.assertEqual(o["view"], {"pitch": 20.0, "yaw": -30.0})
+        self.assertTrue(o["poster"].startswith("data:image/png"))
+        self.assertEqual((o["name"], o["alt"]), ("3D モデル 6", "店舗の模型"))
+        self.assertGreater(o["w"], o["h"], "its box keeps PowerPoint's shape")
+        self.assertEqual(deck["stats"]["models"], 1)
+        self.assertFalse(any(x["kind"] == "image" for x in deck["slideData"][0]["elements"]), "not also its fallback picture")

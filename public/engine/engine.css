@@ -1540,6 +1540,13 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-camera { position: absolute; inset: 0; overflow: hidden; background: #d9d9d9; box-shadow: inset 0 0 0 var(--cw, 3px) var(--cb, transparent); }
 .hs-camera-feed { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 .hs-camera-placeholder { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 38%, #b7c3da 0 18%, transparent 19%), radial-gradient(ellipse at 50% 100%, #b7c3da 0 42%, transparent 43%), #dce4f2; }
+/* 3D モデル (models.js): the still picture until the live drawing is ready, then the canvas over it. */
+.hs-model { position: absolute; inset: 0; }
+.hs-model-poster, .hs-model-canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.hs-model.is-live .hs-model-poster { visibility: hidden; }
+.hs-model-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6%; background: #eef2f8; color: #808080; font-size: 28px; }
+.hs-model-icon { width: 34%; height: 34%; color: #808080; }
+.hs-model.is-broken .hs-model-poster { opacity: .6; }
 .hs-camera-placeholder span { margin-top: 70%; color: #1f3864; font: 700 22px/1 system-ui, sans-serif; letter-spacing: .1em; }
 /* 数式: TeX drawn as MathML. */
 .hs-equation { position: absolute; inset: 0; display: flex; align-items: center; overflow: visible; }

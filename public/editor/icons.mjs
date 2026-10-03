@@ -190,6 +190,8 @@ const P = {
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
   spell: '<path d="M3 15 7 4h1l4 11M4.4 11.5h6.2"/><path d="m12 17 3 3 6-7"/>',
   record: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
+  model3d: '<path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/>',
+  rotate3d: '<ellipse cx="12" cy="12" rx="9" ry="4"/><path d="M12 3v18M18.5 9.5 21 12l-2.5 2.5"/>',
   video2: '<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="m10 9 5 3-5 3z" fill="currentColor"/><path d="M3 9h3M3 15h3M18 9h3M18 15h3"/>',
 };
 
