@@ -91,6 +91,9 @@ const shared = {
   notes: notesSchema,
   elements: z.array(objectSchema).max(5000).optional(),
   hidden: z.boolean().optional(),
+  // PowerPoint's sections (the first slide of each carries its name) and review comments on a slide.
+  section: z.string().max(40).optional(),
+  comments: z.array(z.object({ id: z.string().max(32), text: z.string().max(2000), at: z.string().max(40).optional(), done: z.boolean().optional() }).passthrough()).max(200).optional(),
   timeline: z.array(timelineEntrySchema).max(5000).optional(),
   sid: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).optional(),
   // 画面切り替え set by hand: the way in's length (ms) and moving on by itself after some seconds.
@@ -240,6 +243,8 @@ export const deckShape = z.object({
   motion: deckMotionSchema.optional(),
   // Standing instructions for every AI request on this deck ("役員向け", "数値は9月時点"…).
   memo: z.string().max(2000).optional().default(""),
+  // The guides people drag on the slides (表示 → ガイド), in slide px.
+  guides: z.object({ x: z.array(z.number()).max(20).optional(), y: z.array(z.number()).max(20).optional() }).optional(),
   slides: z.array(slideSchema).min(1).max(500),
 });
 export const reviseRequestSchema = z.object({
@@ -289,7 +294,7 @@ export const chatResultSchema = z.object({
 });
 
 // Fields only people set (uploaded photos and videos, hand placement) are hidden from the AI's output schema.
-const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "advance", "hideTitle", "master", "sourceViewport", "hidden"]);
+const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "advance", "hideTitle", "master", "sourceViewport", "hidden", "section", "comments"]);
 function withoutUserFields(node) {
   if (Array.isArray(node)) return node.map(withoutUserFields);
   if (!node || typeof node !== "object") return node;

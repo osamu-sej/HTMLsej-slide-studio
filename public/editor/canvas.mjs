@@ -187,6 +187,77 @@ export function createCanvas(app) {
     // Animation order badges and other marks drawn by others (the animation pane).
     for (const fn of overlays) layer.append(...(fn(list, k) || []));
     if (extra) layer.append(...extra);
+    // The deck's guides lie under everything else drawn here.
+    if (ed.guides) layer.prepend(...guideMarks(k));
+  }
+
+  // ---------------------------------------------------------------- guides (PowerPoint's ガイド)
+  // Dashed lines across the slide that objects snap to: dragged to move (out of the slide to delete, with Ctrl to
+  // copy), added from the 表示 tab or a right-click. They belong to the deck (deck.guides: slide px).
+  const GUIDE_MAX = 20;
+  function customGuides() {
+    const g = app.deck()?.guides;
+    return { x: Array.isArray(g?.x) ? g.x : [], y: Array.isArray(g?.y) ? g.y : [] };
+  }
+  /** What moving objects snap to: the SEJ template's own guides and the deck's. */
+  function allGuides() {
+    const g = customGuides();
+    return { x: [...ops.SEJ_GUIDES.x, ...g.x], y: [...ops.SEJ_GUIDES.y, ...g.y] };
+  }
+  function guideMarks(k) {
+    const g = customGuides();
+    const title = "ガイド：ドラッグで移動（スライドの外へ出すと削除・Ctrlを押しながらでコピー）";
+    return [
+      ...g.x.map((v, i) => h("div", { class: "ed-cguide v", "data-axis": "x", "data-i": String(i), style: { left: `${v * k}px` }, title })),
+      ...g.y.map((v, i) => h("div", { class: "ed-cguide h", "data-axis": "y", "data-i": String(i), style: { top: `${v * k}px` }, title })),
+    ];
+  }
+  function setGuides(next) {
+    app.setGuides({ x: next.x.slice(0, GUIDE_MAX), y: next.y.slice(0, GUIDE_MAX) });
+    draw();
+  }
+  /** A new guide (vertical "x" or horizontal "y"), in the middle of the slide unless told where. */
+  function addGuide(axis, at = axis === "x" ? E.W / 2 : E.H / 2) {
+    const g = customGuides();
+    if (g[axis].length >= GUIDE_MAX) { app.toast(`ガイドは縦・横それぞれ${GUIDE_MAX}本までです`); return; }
+    if (!ed.guides) setView("guides", true);
+    setGuides({ ...g, [axis]: [...g[axis], Math.round(at * 2) / 2] });
+    app.toast(axis === "x" ? "垂直ガイドを追加しました（ドラッグで移動）" : "水平ガイドを追加しました（ドラッグで移動）");
+  }
+  function clearGuides() { setGuides({ x: [], y: [] }); }
+  function dragGuide(event, axis, i) {
+    event.preventDefault();
+    event.stopPropagation();
+    const g = customGuides();
+    const copy = event.ctrlKey || event.metaKey;
+    const el = event.target.closest(".ed-cguide");
+    const size = axis === "x" ? E.W : E.H;
+    const label = h("div", { class: "ed-cguide-label" });
+    ed.layer.append(label);
+    let at = g[axis][i];
+    const move = (e) => {
+      const p = toSlide(e);
+      const k = scale();
+      at = Math.round((axis === "x" ? p[0] : p[1]) * 2) / 2;
+      const out = at < 0 || at > size;
+      el.style[axis === "x" ? "left" : "top"] = `${at * k}px`;
+      el.classList.toggle("out", out);
+      // As PowerPoint shows it: the distance from the middle of the slide, in cm.
+      const cm = Math.abs((at - size / 2) / ops.PX_PER_CM).toFixed(2);
+      label.textContent = out ? "削除" : `${cm} cm`;
+      label.style.left = `${p[0] * k + 10}px`;
+      label.style.top = `${p[1] * k - 26}px`;
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      label.remove();
+      const next = { x: [...g.x], y: [...g.y] };
+      if (at < 0 || at > size) { if (!copy) next[axis].splice(i, 1); } else if (copy) next[axis].push(at); else next[axis][i] = at;
+      if (JSON.stringify(next) !== JSON.stringify(g)) setGuides(next); else draw();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   }
   const overlays = new Set();
   const handles = new Map();
@@ -303,6 +374,8 @@ export function createCanvas(app) {
     if (event.button !== 0 || !ed.slideEl || app.busy()) return;
     if (event.target.closest(".inline-tools, .ph-handle, .hs-placed, .ed-menu, .motion-banner")) return;
     closeMenu();
+    const guide = event.target.closest?.(".ed-cguide");
+    if (guide) { dragGuide(event, guide.dataset.axis, Number(guide.dataset.i)); return; }
     const list = objects();
     const p = toSlide(event);
     const handle = event.target.closest?.(".ed-handle")?.dataset.handle;
@@ -434,7 +507,7 @@ export function createCanvas(app) {
     const b0 = ops.bounds(moving, ends(drag.list));
     let lines = [];
     if (snapping || ed.snapGrid) {
-      const snap = ops.snapBox({ x: b0.x + dx, y: b0.y + dy, w: b0.w, h: b0.h }, snapping ? targetsFor(drag.list, ids) : [], { tolerance, guides: snapping && ed.guides ? ops.SEJ_GUIDES : null, grid: ed.snapGrid ? ops.PX_PER_CM / 4 : 0 });
+      const snap = ops.snapBox({ x: b0.x + dx, y: b0.y + dy, w: b0.w, h: b0.h }, snapping ? targetsFor(drag.list, ids) : [], { tolerance, guides: snapping && ed.guides ? allGuides() : null, grid: ed.snapGrid ? ops.PX_PER_CM / 4 : 0 });
       if (!(event.shiftKey && dx === 0)) dx += snap.dx;
       if (!(event.shiftKey && dy === 0)) dy += snap.dy;
       lines = snap.lines;
@@ -462,8 +535,8 @@ export function createCanvas(app) {
       // Upright boxes snap their moving edges to other objects and the guides.
       if (snapping && !o.rot) {
         const targets = targetsFor(drag.list, [o.id]);
-        const xs = [...targets.flatMap((t) => [t.x, t.x + t.w / 2, t.x + t.w]), 0, E.W / 2, E.W, ...(ed.guides ? ops.SEJ_GUIDES.x : [])];
-        const ys = [...targets.flatMap((t) => [t.y, t.y + t.h / 2, t.y + t.h]), 0, E.H / 2, E.H, ...(ed.guides ? ops.SEJ_GUIDES.y : [])];
+        const xs = [...targets.flatMap((t) => [t.x, t.x + t.w / 2, t.x + t.w]), 0, E.W / 2, E.W, ...(ed.guides ? allGuides().x : [])];
+        const ys = [...targets.flatMap((t) => [t.y, t.y + t.h / 2, t.y + t.h]), 0, E.H / 2, E.H, ...(ed.guides ? allGuides().y : [])];
         const [hx, hy] = { nw: [-1, -1], n: [0, -1], ne: [1, -1], e: [1, 0], se: [1, 1], s: [0, 1], sw: [-1, 1], w: [-1, 0] }[drag.handle];
         if (hx && !keep) {
           const edge = hx > 0 ? next.x + next.w : next.x;
@@ -1374,6 +1447,10 @@ export function createCanvas(app) {
       !any && { label: "図形を描く…", run: () => app.showTab?.("insert") },
       !any && app.canConvert?.() && "-",
       !any && app.canConvert?.() && { label: "図形に変換（レイアウトを部品に分ける）", run: () => app.convertSlide() },
+      !any && "-",
+      !any && { label: "垂直ガイドを追加", run: () => addGuide("x", p[0]) },
+      !any && { label: "水平ガイドを追加", run: () => addGuide("y", p[1]) },
+      !any && (customGuides().x.length || customGuides().y.length) && { label: "ガイドをすべて削除", run: clearGuides },
     ].filter(Boolean);
   }
 
@@ -1450,7 +1527,7 @@ export function createCanvas(app) {
     removeSelection, duplicateSelection, groupSelection, ungroupSelection, order, alignSelection, distributeSelection, rotateSelection, flipSelection,
     setLocked, setHidden, rename, moveInOrder, copyFormat, pasteFormat,
     get painter() { return ed.painter; },
-    setZoom, zoomPercent, zoomStep, get zoom() { return ed.zoom; }, setView, applyZoom, openMenu,
+    setZoom, zoomPercent, zoomStep, get zoom() { return ed.zoom; }, setView, applyZoom, openMenu, addGuide, clearGuides, customGuides,
     FONT_SIZES, closeMenu,
   };
 }

@@ -182,3 +182,22 @@ test("the server keeps objects people placed: schemas, AI summaries and every AI
   assert.equal(applied.slides[1].sid, "s1");
   assert.equal(applied.slides[1].timeline.length, 1);
 });
+
+test("an AI rewrite keeps the slide's place in the show, its section and the review comments on it", () => {
+  const slides = [
+    { type: "title", title: "表紙" },
+    { type: "content", title: "現状", points: ["A"], hidden: true, section: "背景", comments: [{ id: "c1", text: "数字を確認", at: "2026-10-03T09:00:00Z" }] },
+    { type: "closing", title: "おわり" },
+  ];
+  const applied = applyChatOperations(slides, { operations: [{ op: "replace", slide: 2, content: { type: "content", title: "現状の課題", points: ["A", "B"] } }] });
+  assert.equal(applied.slides[1].title, "現状の課題");
+  assert.equal(applied.slides[1].hidden, true, "a hidden slide stays out of the show");
+  assert.equal(applied.slides[1].section, "背景");
+  assert.deepEqual(applied.slides[1].comments, slides[1].comments);
+  // The AI is never asked for them (as properties: "section" is also the name of a slide type).
+  for (const schema of [codexDeckSchema, codexChatSchema]) assert.doesNotMatch(JSON.stringify(schema), /"(section|comments|hidden)":\{/, "the AI never writes them");
+  // The deck people save keeps them.
+  const saved = deckShape.parse({ title: "t", slides });
+  assert.equal(saved.slides[1].section, "背景");
+  assert.equal(saved.slides[1].comments[0].text, "数字を確認");
+});

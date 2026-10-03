@@ -336,6 +336,7 @@ export function createEditorUi(editor, app) {
     { id: "slideshow", label: "スライド ショー" },
     { id: "review", label: "校閲" },
     { id: "view", label: "表示" },
+    { id: "developer", label: "開発" },
     { id: "shape", label: "図形の書式", contextual: () => hasShape() },
     { id: "picture", label: "図の形式", contextual: () => hasImage() },
     { id: "tableDesign", label: "テーブル デザイン", contextual: () => tables.isTable() },
@@ -363,6 +364,24 @@ export function createEditorUi(editor, app) {
   function closeFloating() { if (!floating) return; floating = false; closePop(true); renderRibbon(true); }
   function floatingOutside(event) { if (floating && !ribbon.contains(event.target) && !pop?.el.contains(event.target)) closeFloating(); }
   function floatingKey(event) { if (floating && !pop && event.key === "Escape") { event.stopPropagation(); closeFloating(); } }
+  function fileMenu() {
+    return menu([
+      { head: "ファイル" },
+      { label: "新規（作成画面へ）", icon: "plus", run: () => app.goCreate() },
+      { label: "開く（保存庫）…", icon: "pane", run: () => app.openLibrary() },
+      { label: "上書き保存", icon: "down", keys: "⌘S", run: () => app.saveDeck() },
+      { label: "名前を付けて保存（別の資料として）", icon: "duplicate", run: () => app.saveDeck({ asNew: true }) },
+      "-", { head: "書き出し" },
+      { label: "HTMLファイル（動きごと）", icon: "play", run: () => app.exportHtml() },
+      { label: "PDF・印刷", icon: "slide", run: () => app.printPdf() },
+      { label: "JSONで保存", icon: "down", run: () => app.saveJson() },
+      { label: "レビュー用ファイル", icon: "review", run: () => app.exportReview() },
+      "-",
+      { label: "JSONを読み込む…", icon: "up", run: () => app.openJson() },
+      { label: "版の履歴・過去の資料…", icon: "clock", run: () => app.openHistory() },
+      { label: "使い方とショートカット", icon: "tip", keys: "?", run: () => app.openHelp() },
+    ]);
+  }
   function ribbonOptions(anchor) {
     openPop(anchor, menu([
       { head: "リボンの表示オプション" },
@@ -388,7 +407,9 @@ export function createEditorUi(editor, app) {
     document.removeEventListener("pointerdown", floatingOutside, true);
     document.removeEventListener("keydown", floatingKey, true);
     if (floating) { document.addEventListener("pointerdown", floatingOutside, true); document.addEventListener("keydown", floatingKey, true); }
-    const head = h("div", { class: "rb-tabs", role: "tablist" },
+    // PowerPoint's ファイル: new, open, save, save as, export, history (a menu at the start of the tabs).
+    const fileBtn = h("button", { type: "button", class: "rb-file", title: "ファイル：新規・開く・保存・書き出し・履歴", "aria-haspopup": "true", onclick: (event) => openPop(event.currentTarget, fileMenu()) }, "ファイル");
+    const head = h("div", { class: "rb-tabs", role: "tablist" }, fileBtn,
       // Switching tabs keeps the caret (and the cells picked in a table), as in PowerPoint.
       tabs.map((t) => h("button", { type: "button", role: "tab", class: t.contextual ? "contextual" : "", "aria-selected": String(t.id === tab && (ribbonMode === "full" || floating)), "data-tab": t.id, "data-keeps-text": "", onmousedown: (event) => event.preventDefault(),
         onclick: () => {
@@ -423,14 +444,14 @@ export function createEditorUi(editor, app) {
     fitRibbon();
   }
   // Off the 1枚 view: whole tabs and groups that work on slides rather than on the objects of the one on the stage.
-  const OFF_SLIDE_TABS = new Set(["design", "transition", "slideshow", "review", "view"]);
+  const OFF_SLIDE_TABS = new Set(["design", "transition", "slideshow", "review", "view", "developer"]);
   const OFF_SLIDE_GROUPS = new Set(["スライド"]);
   // A narrow window squeezes the ribbon as PowerPoint does, from the right-hand groups first: small buttons
   // lose their words (the tooltip keeps them), then whole groups fold into one button that opens them;
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
   const GROUP_ICONS = { スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
     図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane",
-    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review" };
+    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review" };
   function fold(g) {
     const items = g.querySelector(":scope > .rb-items");
     const label = g.querySelector(":scope > .rb-label")?.textContent || "";
@@ -494,7 +515,8 @@ export function createEditorUi(editor, app) {
           { label: "レイアウトを選んで追加…", icon: "layout", run: () => app.openTypeDialog("insert") },
         ]), { big: true }),
         col(btn("layout", "レイアウト", "このスライドのレイアウトを変える", () => app.openTypeDialog("change")), btn("duplicateSlide", "複製", "このスライドを複製", () => app.duplicateSlide()),
-          btn("convert", "図形に変換", "このスライドのレイアウトを図形・テキストボックス・画像に分けて、1つずつ自由に編集できるようにする（白紙のスライドになります）", () => app.convertSlide(), { enabled: () => app.canConvert() }))),
+          btn("convert", "図形に変換", "このスライドのレイアウトを図形・テキストボックス・画像に分けて、1つずつ自由に編集できるようにする（白紙のスライドになります）", () => app.convertSlide(), { enabled: () => app.canConvert() })),
+        col(btn("thumbs", "セクション", "このスライドからセクションを始める（サムネイルでセクション名を右クリックすると、名前の変更・削除・移動）", () => app.addSection()))),
       group("クリップボード",
         btn("paste", "貼り付け", "貼り付け（⌘V）", () => editor.pasteFromMemory(), { big: true }),
         col(btn("cut", "切り取り", "切り取り（⌘X）", () => { document.execCommand("cut") || cutFallback(); }, { enabled: any }),
@@ -555,6 +577,8 @@ export function createEditorUi(editor, app) {
         col(drop("loop", "背景の動き", "表紙・章扉・ひと言・最後のスライドの背景", choose("背景の動き", [["none", "テンプレートの波紋だけ"], ...Object.entries(E.BACKDROPS)], () => motion().backdrop, setMotion("backdrop"))),
           drop("textbox", "文字の動き", "表紙・章扉などの大きな文字", choose("大きな文字の動き", [["none", "動かさない"], ...Object.entries(E.KINETIC)], () => motion().kinetic, setMotion("kinetic"))),
           drop("highlight", "強調の見せ方", "**語句** で囲んだ語句", choose("強調の見せ方", Object.entries(E.EMPHASES), () => motion().emphasis, setMotion("emphasis"))))),
+      group("デザイナー",
+        btn("magic", "デザイン|アイデア", "このスライドの見せ方の違う3つの案をAIが作り、並べて選べます（Codexに接続しているとき。右の「AIと話す」に届きます）", () => app.designIdeas(), { big: true, enabled: () => app.canAi() })),
       group("ユーザー設定",
         btn("slide", "スライドの|サイズ", "ワイド画面（16:9・13.33×7.5インチ）：SEJテンプレートの大きさです", () => app.toast("スライドのサイズはワイド画面（16:9・13.33×7.5インチ）です（SEJテンプレート）"), { big: true }),
         col(btn("chartBar", "数字を数え上げる", "数字のカウントアップとグラフが伸びる動き（資料全体）", () => app.setDeckDesign({ motion: { numbers: !motion().numbers } }), { pressed: () => motion().numbers }),
@@ -568,7 +592,8 @@ export function createEditorUi(editor, app) {
     return [
       group("スライド ショーの開始",
         btn("showStart", "最初から", "最初のスライドから発表する（F5）", () => app.presentFrom(0), { big: true }),
-        btn("showHere", "このスライド|から", "このスライドから発表する（⇧F5）", () => app.presentFrom(app.index()), { big: true })),
+        btn("showHere", "このスライド|から", "このスライドから発表する（⇧F5）", () => app.presentFrom(app.index()), { big: true }),
+        btn("clock", "リハーサル", "最初から発表して1枚ずつの時間を計り、終わったらその時間で自動的に切り替えるようにできます", () => app.rehearse(), { big: true })),
       group("設定",
         btn("hideSlide", "非表示スライド|に設定", "発表ではこのスライドを飛ばす（編集用に残ります。もう一度で戻す）", () => app.toggleHiddenSlide(), { big: true, pressed: () => Boolean(app.slide()?.hidden), enabled: () => app.index() > 0 }),
         col(btn("presenter", "発表者ツールを使用", "発表を始めると、ノート・次のスライド・経過時間の発表者ビューを別ウィンドウで開く（発表中は P）", () => app.setPresenterView(!app.presenterView()), { pressed: () => app.presenterView() }),
@@ -580,6 +605,11 @@ export function createEditorUi(editor, app) {
   /** 校閲: the checks, find and replace, notes, the AI's review, and review files to and from others. */
   function reviewTab() {
     return [
+      group("コメント",
+        btn("comment", "新しい|コメント", "このスライドにコメントを付ける（右の作業ウィンドウ「コメント」）", () => app.newComment(), { big: true }),
+        col(btn("up", "前へ", "前のコメントのあるスライドへ", () => app.commentGo(-1)),
+          btn("down", "次へ", "次のコメントのあるスライドへ", () => app.commentGo(1)),
+          btn("eye", "コメントの表示", "コメントの作業ウィンドウを開く", () => app.showPanel("comment"), { pressed: () => app.panel() === "comment" }))),
       group("チェック",
         btn("check", "チェック", "構成・文字のあふれ・SEJブランドを確かめる", () => app.openCheck(), { big: true }),
         btn("magic", "あふれを|AIで直す", "文字が収まらないスライドをAIで順番に直す", () => app.fixOverflow(), { big: true, enabled: () => app.canFixOverflow() })),
@@ -786,7 +816,13 @@ export function createEditorUi(editor, app) {
       group("表示/非表示",
         col(btn("ruler", "ルーラー", "スライドの上と左に目盛り（cm、スライドの中央が0）を表示", () => app.toggleRulers(), { pressed: () => app.rulersShown() }),
           btn("grid", "グリッド線", "1cmごとの線を表示", () => editor.setView("grid", !st.grid), { pressed: () => st.grid }),
-          btn("guides", "ガイド", "SEJの本文の領域（安全領域）と中央に合わせる", () => editor.setView("guides", !st.guides), { pressed: () => st.guides })),
+          drop("guides", "ガイド", "ガイド：SEJの本文の領域・中央と、自分で置くガイド（ドラッグで移動・スライドの外へ出すと削除）", () => menu([
+            { label: "ガイドを表示する（吸着）", icon: "guides", on: st.guides, run: () => editor.setView("guides", !st.guides) },
+            "-",
+            { label: "垂直ガイドを追加", icon: "alignCenter", run: () => editor.addGuide("x") },
+            { label: "水平ガイドを追加", icon: "alignMiddle", run: () => editor.addGuide("y") },
+            { label: "ガイドをすべて削除", icon: "trash", disabled: !(editor.customGuides().x.length || editor.customGuides().y.length), run: () => editor.clearGuides() },
+          ]))),
         col(btn("notes", "ノート", "スライドの下にスピーカーノートを表示", () => app.toggleNotes(), { pressed: () => app.notesShown() }),
           btn("smart", "スマートガイド", "ほかの図形の端・中央・等間隔に吸着（Altで一時的に外す）", () => editor.setView("smart", !st.smart), { pressed: () => st.smart }),
           btn("snapGrid", "グリッドに|合わせる", "0.25cmごとに吸着", () => editor.setView("snapGrid", !st.snapGrid), { pressed: () => st.snapGrid }))),
@@ -803,8 +839,23 @@ export function createEditorUi(editor, app) {
     ];
   }
 
+  /** 開発: the slide as code — its JSON (edit and apply, checked first) and the HTML it becomes; the deck's data and files. */
+  function developerTab() {
+    return [
+      group("コード",
+        btn("effectOpts", "スライドの|JSON", "このスライドのデータ（レイアウト・文字・部品・アニメーション・インタラクション）をJSONで見て直す", () => app.openSlideJson(), { big: true }),
+        btn("textbox", "HTMLを|表示", "このスライドをエンジンが描いたHTMLを見る・コピーする", () => app.openSlideHtml(), { big: true })),
+      group("資料のデータ",
+        col(btn("down", "JSONで保存", "資料全体をJSONファイルに保存（別のPCで続きを編集できます）", () => app.saveJson()),
+          btn("up", "JSONを読み込む", "JSONから資料を開く", () => app.openJson()))),
+      group("書き出し",
+        btn("play", "HTML出力", "動きごと1つのHTMLファイルに書き出す", () => app.exportHtml(), { big: true }),
+        btn("slide", "PDF", "PDFとして保存・印刷", () => app.printPdf(), { big: true })),
+    ];
+  }
+
   function buildTab(id) {
-    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab }[id]();
+    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, developer: developerTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab }[id]();
   }
 
   /**
