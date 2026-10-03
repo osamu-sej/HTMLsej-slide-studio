@@ -77,6 +77,8 @@ export function enhanceSlide(slide, E, { chrome = new Set() } = {}) {
     // A SmartArt's items float in one after another.
     if (o.kind === "smartart") { push(o, "floatIn", 700); arrive[arrive.length - 1].by = "item"; added.diagrams = (added.diagrams || 0) + 1; continue; }
     if (o.kind === "line" && list.length <= 60) { push(o, "draw", 900); added.lines += 1; continue; }
+    // A 3D model arrives turning (到着).
+    if (o.kind === "model") { push(o, "arrive3d", 1600); added.models = (added.models || 0) + 1; continue; }
     if (["text", "shape"].includes(o.kind) && o !== title && /\d/.test(wordsOf(o, E)) && biggestSize(o) >= 56 && wordsOf(o, E).length <= 24) { push(o, "countUp", 1400); added.numbers += 1; }
   }
   // Under the mouse and on a click (what PowerPoint cannot do at all).
@@ -101,6 +103,6 @@ export function enhanceSlide(slide, E, { chrome = new Set() } = {}) {
 
 /** In words: what おまかせ added ("タイトル・グラフ2・数字1"). */
 export function describeAdded(added) {
-  const names = { title: "タイトル", charts: "グラフ", diagrams: "SmartArt", numbers: "数字", lines: "線", cards: "カード", pictures: "写真" };
+  const names = { title: "タイトル", charts: "グラフ", diagrams: "SmartArt", numbers: "数字", lines: "線", cards: "カード", pictures: "写真", models: "3D モデル" };
   return Object.entries(added).filter(([, n]) => n > 0).map(([k, n]) => (n > 1 ? `${names[k]}${n}` : names[k])).join("・");
 }

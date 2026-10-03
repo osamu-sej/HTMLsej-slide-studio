@@ -189,6 +189,14 @@ test("app shell, engine, assets and security headers", async () => {
     assert.doesNotMatch(engine, /\/\*__ICONS__\*\/\{\}/, "icons are injected into the engine");
     assert.match(engine, /"bulb":\{"label":/);
     assert.equal((await server.request("/engine/motion.js")).status, 200);
+    // 3D models: models.js, and three.js with the glTF loader's imports made relative (no import map needed).
+    assert.match(await (await server.request("/engine/models.js")).text(), /mountModels/);
+    const loader = await (await server.request("/vendor/three/GLTFLoader.js")).text();
+    assert.match(loader, /from '\.\/three\.module\.js'/);
+    assert.match(loader, /from '\.\/BufferGeometryUtils\.js'/);
+    assert.doesNotMatch(loader.replace(/\/\*[\s\S]*?\*\//g, ""), /from ['"]three['"]/);
+    for (const name of ["three.module.js", "three.core.js", "BufferGeometryUtils.js", "SkeletonUtils.js"]) assert.equal((await server.request(`/vendor/three/${name}`)).status, 200, name);
+    assert.match(await (await server.request("/")).text(), /\/engine\/models\.js/);
     assert.equal((await server.request("/saved-library.js")).status, 200);
     assert.match(await (await server.request("/engine/engine.css")).text(), /\.hs-slide/);
     const app = await (await server.request("/app.js")).text();

@@ -354,6 +354,8 @@
       send();
     }
     mountLottie(slide, { play: true, frame: 0 });
+    // 3D models are drawn live while their slide is shown (models.js).
+    E.mountModels?.(slide);
   }
 
   function stopMedia(slide) {
@@ -364,6 +366,7 @@
     }
     for (const frame of slide.querySelectorAll("iframe")) frame.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*");
     stopLottie(slide);
+    E.stopModels?.(slide);
   }
 
   // ---------------------------------------------------------------- interaction (hover, tooltips, details, parallax)

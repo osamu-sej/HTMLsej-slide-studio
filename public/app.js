@@ -2040,6 +2040,7 @@ function renderStage() {
   editorUi.renderRibbon();
   if (state.motionPreview) return;
   E.stopLottie(body);
+  E.stopModels?.(body);
   if (!state.deck) {
     body.replaceChildren(h("div", { class: "empty-stage" }, h("div", {}, h("strong", {}, "まだ資料がありません"), "「作成」から構成を作るか、雛形・サンプル・JSONから始めてください。")));
     return;
@@ -2095,8 +2096,9 @@ function renderStage() {
     fitState.byKey.set(slideKey(index), { fs: result.fs, ts: result.ts, ...(result.objs ? { objs: result.objs } : {}), issues: result.issues.map((issue) => ({ ...issue, slide: index })), brand });
   }
   wirePlacedMedia(el, slide);
-  // The editor stays still: a Lottie animation shows one frame from its middle.
+  // The editor stays still: a Lottie animation shows one frame from its middle; 3D models are drawn live.
   E.mountLottie(el, { play: false, frame: 0.5 });
+  E.mountModels?.(el);
   editor.attach(wrap, el, index);
 }
 
@@ -5771,15 +5773,37 @@ async function fetchText(url) {
 }
 
 async function engineBundle() {
-  const [css, engine, objects, animate, motion] = await Promise.all([
+  const [css, engine, objects, animate, motion, models] = await Promise.all([
     fetchText(`/engine/engine.css?v=${APP_VERSION}`),
     fetchText(`/engine/engine.js?v=${APP_VERSION}`),
     fetchText(`/engine/objects.js?v=${APP_VERSION}`),
     fetchText(`/engine/animate.js?v=${APP_VERSION}`),
     fetchText(`/engine/motion.js?v=${APP_VERSION}`),
+    fetchText(`/engine/models.js?v=${APP_VERSION}`),
   ]);
   const js = (text) => text.replace(/<\/script/gi, "<\\/script");
-  return { css: css.replace(/<\/style/gi, "<\\/style"), engine: js(engine), objects: js(objects), animate: js(animate), motion: js(motion) };
+  return { css: css.replace(/<\/style/gi, "<\\/style"), engine: js(engine), objects: js(objects), animate: js(animate), motion: js(motion), models: js(models) };
+}
+
+/**
+ * three.js for an exported file with 3D models: its modules as text, turned into blob: modules when the file opens
+ * (each import pointed at the blob made before it), so the file needs nothing from the network.
+ */
+async function threeBundle() {
+  const names = { core: "three.core.js", module: "three.module.js", bgu: "BufferGeometryUtils.js", sku: "SkeletonUtils.js", gltf: "GLTFLoader.js" };
+  const sources = Object.fromEntries(await Promise.all(Object.entries(names).map(async ([key, name]) => [key, await fetchText(`/vendor/three/${name}?v=${APP_VERSION}`)])));
+  const boot = `(function () {
+  var src = JSON.parse(document.getElementById("hs-three").textContent);
+  var url = function (code) { return URL.createObjectURL(new Blob([code], { type: "text/javascript" })); };
+  var swap = function (code, from, to) { return code.split("'" + from + "'").join("'" + to + "'").split('"' + from + '"').join('"' + to + '"'); };
+  var core = url(src.core);
+  var mod = url(swap(src.module, "./three.core.js", core));
+  var bgu = url(swap(src.bgu, "./three.module.js", mod));
+  var sku = url(swap(src.sku, "./three.module.js", mod));
+  var gltf = url(swap(swap(swap(src.gltf, "./three.module.js", mod), "./BufferGeometryUtils.js", bgu), "./SkeletonUtils.js", sku));
+  window.SlideEngine.threeUrls = { three: mod, gltf: gltf };
+})();`;
+  return { data: safeJson(sources), boot };
 }
 
 /** The deck with every photo and video it uses written into it, so the file works anywhere. */
@@ -5828,6 +5852,8 @@ async function standaloneHtml({ title, body, boot, data, background = "#07080c",
   const fonts = E.fontHref([data.deck.theme]);
   // The Lottie player travels with the file only when a slide has an animation to play.
   const lottie = player && data.deck.slides.some((slide) => slide.media?.kind === "lottie" || (slide.elements || []).some((o) => o.kind === "lottie")) ? (await fetchText("/vendor/lottie.js")).replace(/<\/script/gi, "<\\/script") : "";
+  // So does three.js, only when a slide has a 3D model.
+  const three = player && data.deck.slides.some((slide) => (slide.elements || []).some((o) => o.kind === "model")) ? await threeBundle() : null;
   return `<!doctype html>
 <html lang="ja">
 <head>
@@ -5848,6 +5874,8 @@ ${body}
 <script>${bundle.objects}</script>
 <script>${bundle.animate}</script>
 <script>${bundle.motion}</script>
+<script>${bundle.models}</script>
+${three ? `<script type="application/json" id="hs-three">${three.data}</script>\n<script>${three.boot}</script>` : ""}
 ${lottie ? `<script>${lottie}</script>` : ""}
 <script type="application/json" id="hs-data">${safeJson(data)}</script>
 <script>${boot}</script>

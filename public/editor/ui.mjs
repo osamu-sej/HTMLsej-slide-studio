@@ -15,6 +15,7 @@ import { createSmartArt } from "./smartart.mjs";
 import { createInk } from "./ink.mjs";
 import { createExtras } from "./extras.mjs";
 import { createPictureTools } from "./picture.mjs";
+import { createModels } from "./model3d.mjs";
 
 const SIZES_PT = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const LINE_WIDTHS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 8, 12];
@@ -354,6 +355,7 @@ export function createEditorUi(editor, app) {
     { id: "playback", label: "再生", contextual: () => media.has() },
     { id: "smartartDesign", label: "SmartArt のデザイン", contextual: () => smart.isSmartArt() },
     { id: "zoomTool", label: "ズーム", contextual: () => extras.isZoom() },
+    { id: "model3d", label: "3D モデル", contextual: () => models3d.isModel() },
   ];
 
   function signature() {
@@ -732,7 +734,8 @@ export function createEditorUi(editor, app) {
         drop("shapes", "図形", "図形を描く", () => shapeGallery(pickTool), { big: true }),
         drop("icon", "アイコン", "アイコンを入れる", () => iconGallery(insertIcon), { big: true }),
         drop("chartBar", "グラフ", "グラフを入れる（データは表で入力）", () => tables.chartPicker(), { big: true }),
-        drop("smartart", "SmartArt", "SmartArt グラフィック：リスト・手順・循環・階層構造・集合関係・マトリックス・ピラミッド", () => smart.insertGallery(), { big: true })),
+        drop("smartart", "SmartArt", "SmartArt グラフィック：リスト・手順・循環・階層構造・集合関係・マトリックス・ピラミッド", () => smart.insertGallery(), { big: true }),
+        drop("model3d", "3D|モデル", "3D モデル（GLB・glTF）を入れる：このデバイス・ストック 3D モデル。回転・パンとズーム・3D のアニメーション", () => models3d.insertMenu(), { big: true })),
       group("テキスト",
         drop("textbox", "テキスト ボックス", "テキストボックスを描く", menu([
           { label: "横書きテキスト ボックス", icon: "textbox", run: () => pickTool({ kind: "text" }) },
@@ -1017,7 +1020,7 @@ export function createEditorUi(editor, app) {
   }
 
   function buildTab(id) {
-    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, developer: developerTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab, playback: media.playbackTab, smartartDesign: smart.designTab, draw: ink.drawTab, zoomTool: extras.zoomTab }[id]();
+    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, developer: developerTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab, playback: media.playbackTab, smartartDesign: smart.designTab, draw: ink.drawTab, zoomTool: extras.zoomTab, model3d: models3d.tab }[id]();
   }
 
   /**
@@ -1271,7 +1274,7 @@ export function createEditorUi(editor, app) {
   }
   function kindIcon(o) {
     if (o.kind === "shape") return E.SHAPES[o.shape] ? shapeThumb(o.shape, 18, 14) : freeformThumb(o.path?.closed ? "polygon" : "curve");
-    return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", audio: "audio", lottie: "lottie", table: "table", chart: "chartBar", smartart: "smartart", ink: "pen", zoom: "zoomSlide", camera: "camera", equation: "equation" }[o.kind] || "shapes", 16);
+    return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", audio: "audio", lottie: "lottie", table: "table", chart: "chartBar", smartart: "smartart", ink: "pen", zoom: "zoomSlide", camera: "camera", equation: "equation", model: "model3d" }[o.kind] || "shapes", 16);
   }
 
   // アニメーション・画面切り替え (anim.mjs) build their tabs and the animation pane with these same parts.
@@ -1291,6 +1294,8 @@ export function createEditorUi(editor, app) {
   const extras = createExtras(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), refreshRibbon: () => refresh() });
   // 図の形式 → 背景の削除・透明色・図の圧縮 (picture.mjs).
   const pictureTools = createPictureTools(editor, app);
+  // 挿入 → 3D モデル and the 3D モデル tab (model3d.mjs).
+  const models3d = createModels(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), refreshRibbon: () => refresh() });
 
   editor.subscribe(() => { renderRibbon(); renderPane(); });
 
