@@ -861,7 +861,7 @@ export class CodexSlideServer extends EventEmitter {
       ...(job.plan.outputSchema ? { outputSchema: job.plan.outputSchema } : {}),
     });
     job.turnId = turnResult?.turn?.id ?? null;
-    const first = { image: ["画像を生成中", "指定された絵柄で新しい画像を描いています。"], chat: ["考えています", "依頼を読んで、資料の該当箇所を確認しています。"], variants: ["別案を考えています", "見せ方の違う案を組み立てています。"], outline: ["骨子を考えています", "話の流れと各スライドの役割を決めています。"], notes: ["原稿を書いています", "スライドごとの話す内容を組み立てています。"] }[job.kind] ?? ["構成を生成", "Codexが流れとレイアウトを設計しています。"];
+    const first = { image: ["画像を生成中", "指定された絵柄で新しい画像を描いています。"], chat: ["考えています", "依頼を読んで、資料の該当箇所を確認しています。"], variants: ["別案を考えています", "見せ方の違う案を組み立てています。"], outline: ["骨子を考えています", "話の流れと各スライドの役割を決めています。"], notes: ["原稿を書いています", "スライドごとの話す内容を組み立てています。"], translate: ["翻訳しています", "スライドの文字を訳しています。"] }[job.kind] ?? ["構成を生成", "Codexが流れとレイアウトを設計しています。"];
     this.#updateJob(job, {
       status: "running",
       stage: job.attempt > 1 ? "自動修正中" : first[0],
@@ -1101,6 +1101,7 @@ export class CodexSlideServer extends EventEmitter {
       deck: job.result?.deck ?? null,
       slide: job.result?.slide ?? null,
       notes: job.result?.notes ?? null,
+      texts: job.result?.texts ?? null,
       chat: job.result?.chat ?? null,
       outline: job.result?.outline ?? null,
       variants: job.result?.variants ?? null,

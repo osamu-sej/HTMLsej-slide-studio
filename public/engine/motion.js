@@ -773,7 +773,8 @@
     const order = only?.size ? [...only] : [...shown];
     if (!order.length) order.push(0);
     const kiosk = Boolean(opts.kiosk);
-    const looping = Boolean(opts.loop || kiosk);
+    // ビデオの作成 plays the show once to its end (stopAtEnd), even as a kiosk.
+    const looping = !opts.stopAtEnd && Boolean(opts.loop || kiosk);
     const place = (i) => Math.max(0, order.indexOf(story.parent[i] ?? i));
     const transition = TRANSITIONS.has(deck.transition) ? deck.transition : "fade";
     const doc = host.ownerDocument;
@@ -996,9 +997,11 @@
       clearTimeout(autoTimer);
       if (opts.useTimings === false) return;
       // 自動プレゼンテーション (kiosk): a slide without a time of its own stays for a while, then the show moves on.
-      const secs = Number(slides[i]?.advance ?? (kiosk ? opts.kioskSeconds || 8 : NaN));
+      // (ビデオの作成 may ignore the slides' own times and give each the same seconds.)
+      const own = opts.ignoreTimings ? null : slides[i]?.advance;
+      const secs = Number(own ?? (kiosk ? opts.kioskSeconds || 8 : NaN));
       // The finished view (#static) stays put; 「アニメーションを表示しない」 still keeps the slides' timings.
-      if ((slides[i]?.advance == null && !kiosk) || !Number.isFinite(secs) || secs < 0 || (still && !opts.noAnimation)) return;
+      if ((own == null && !kiosk) || !Number.isFinite(secs) || secs < 0 || (still && !opts.noAnimation)) return;
       const tick = () => {
         if (current?.firstElementChild !== slideEl || demoRun) return;
         if (E.animBusy?.(slideEl)) { autoTimer = setTimeout(tick, 200); return; }

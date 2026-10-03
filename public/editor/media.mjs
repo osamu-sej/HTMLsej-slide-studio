@@ -13,6 +13,13 @@ const fmt = (sec) => {
 };
 
 /** A recorded WebM reports no length until it has been read to the end: ask for a far point once to learn it. */
+/** SubRip (.srt) subtitles as WebVTT (the timestamps' commas become dots); WebVTT is kept as it is. */
+export function toVtt(text) {
+  const t = String(text ?? "").replace(/^\uFEFF/, "").replace(/\r/g, "").trim();
+  if (/^WEBVTT/.test(t)) return t;
+  return `WEBVTT\n\n${t.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2")}`;
+}
+
 function knowDuration(el) {
   return new Promise((resolve) => {
     const done = () => resolve(Number.isFinite(el.duration) ? el.duration : NaN);
@@ -350,6 +357,9 @@ export function createMedia(editor, app, kit) {
           videoCheck("全画面再生", "再生を始めると全画面に広げる", "fullscreen"),
           videoCheck("再生中のみ表示", "再生していないときは見せない", "hideIdle"),
           check("再生が終了したら巻き戻す", "再生し終わったら最初の位置に戻す", () => (current() ? Boolean(current().rewind) : null), (on) => setMedia({ rewind: on || undefined })))),
+      group("キャプション",
+        btn("caption", "キャプション|の挿入", "ビデオに字幕ファイル（WebVTT .vtt・SubRip .srt）を付ける：発表で動画の下に字幕が出ます", () => insertCaptions(), { big: true, enabled: () => Boolean(current()) && !isAudio() }),
+        btn("trash", "キャプション|の削除", "このビデオの字幕を外す", () => setMedia((o) => (o.kind === "video" ? { captions: undefined, captionLang: undefined } : null)), { big: true, enabled: () => Boolean(current()?.captions) })),
       group("オーディオ スタイル",
         btn("clear", "スタイル|なし", "再生の設定を既定に戻す（クリック時に再生・繰り返さない）", () => resetStyle(), { big: true, enabled: () => Boolean(current()) }),
         btn("audio", "バックグラウンド|で再生", "スライドショーの間ずっと流す：自動で開始・スライド切り替え後も再生・繰り返す・アイコンを隠す", () => background(), { big: true, enabled: () => isAudio() })),
@@ -360,6 +370,17 @@ export function createMedia(editor, app, kit) {
     function videoCheck(label, title, key) {
       return check(label, title, () => (current() && !isAudio() ? Boolean(current()[key]) : null), (on) => setMedia((o) => (o.kind === "video" ? { [key]: on || undefined } : null)));
     }
+  }
+  async function insertCaptions() {
+    const o = current();
+    if (!o || o.kind !== "video") return;
+    const [file] = await app.pickFiles(".vtt,.srt,text/vtt", false);
+    if (!file) return;
+    const vtt = toVtt(await file.text());
+    if (vtt.length > 300_000 || !/-->/.test(vtt)) { app.toast("字幕ファイルを読めませんでした（WebVTT か SubRip の形式で、300KBまで）"); return; }
+    const lang = /[ぁ-んァ-ヶ一-龠]/.test(vtt) ? "ja" : "en";
+    setMedia((x) => (x.id === o.id ? { captions: vtt, captionLang: lang } : null));
+    app.toast("キャプションを付けました（発表とHTML出力で動画の下に出ます）");
   }
   function resetStyle() {
     const o = current();

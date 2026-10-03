@@ -321,6 +321,7 @@ export const toCodexSchema = (schema) => withoutUserFields(normalizeCodexOutputS
 export const codexDeckSchema = toCodexSchema(generatedDeckSchema);
 export const codexSlideSchema = toCodexSchema(z.object({ slide: aiSlideSchema }));
 export const codexNotesSchema = toCodexSchema(notesResultSchema);
+export { translateRequestSchema, translateResultSchema } from "./translate.mjs";
 export const codexChatSchema = toCodexSchema(chatResultSchema);
 
 // The layouts the AI chooses from (44); ALL_SLIDE_TYPES adds 白紙.

@@ -101,7 +101,7 @@ export function accessibilityIssues(deck, E) {
       if (eye.join() !== ids.join()) add("warning", "order", i, "読み取り順序を確認してください", "画面読み上げは見た目と違う順に読みます。「見た目の順にそろえる」か、読み取り順序で並べ替え");
     }
     // ビデオの内容
-    if (objects.some((o) => o.kind === "video" && !o.decorative)) add("tip", "media", i, "ビデオの内容をノートか文字でも伝えましょう", "字幕のない動画は、聞こえない人に内容が届きません");
+    if (objects.some((o) => o.kind === "video" && !o.decorative && !o.captions)) add("tip", "media", i, "ビデオに字幕（キャプション）がありません", "再生タブの「キャプションの挿入」で字幕ファイル（.vtt・.srt）を付けるか、ノートや文字で内容も伝えましょう");
   });
   for (const [title, at] of titles) if (at.length > 1) for (const i of at) add("warning", "duplicate", i, `同じタイトルのスライドがあります（「${title.slice(0, 20)}」：${at.map((n) => n + 1).join("・")}枚目）`, "見分けられるタイトルにすると、目次と読み上げで迷いません");
   const rank = { error: 0, warning: 1, tip: 2 };

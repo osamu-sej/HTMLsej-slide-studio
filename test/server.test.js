@@ -457,6 +457,20 @@ test("AI speaker notes are written only for the requested slides", async () => {
   });
 });
 
+test("translation returns one string per string, keeps empty ones, and asks again when the count is wrong", async () => {
+  await withFakeCodex([{ texts: ["Sales", "AI use"] }, { texts: ["Sales", "", "AI use"] }], async (server, prompts) => {
+    const response = await server.postJson("/api/decks/translate", { texts: ["売上", "", "AIの活用"], to: "en" });
+    assert.equal(response.status, 202);
+    const job = await waitForJob(server, (await response.json()).jobId);
+    assert.equal(job.status, "completed", job.error);
+    assert.deepEqual(job.texts, ["Sales", "", "AI use"]);
+    const [first] = await prompts();
+    assert.match(first, /英語に翻訳/);
+    assert.match(first, /"AIの活用"/);
+    assert.equal((await server.postJson("/api/decks/translate", { texts: ["a"], to: "fr" })).status, 400, "only the offered languages");
+  });
+});
+
 test("chat proposes operations on the original numbering, keeps photos and videos, repairs overflow, and never switches off the SEJ template", async () => {
   const photo = `data:image/jpeg;base64,${(await readFile(PHOTO)).toString("base64")}`;
   const long = "とても長い説明文".repeat(13);

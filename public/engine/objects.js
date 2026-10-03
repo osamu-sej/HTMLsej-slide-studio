@@ -1186,7 +1186,7 @@
   const VOLUMES = { 0: "ミュート", 0.33: "小", 0.66: "中", 1: "大" };
   // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
   const TABLE_STYLES = { sej: "罫線（SEJ）", rows: "淡い横線", grid: "格子", lines: "横線だけ", plain: "線なし", brown: "淡茶の見出し" };
-  const CHART_KINDS = { bar: "縦棒", "clustered-bar": "集合縦棒", "stacked-bar": "積み上げ縦棒", "100-stacked-bar": "100%積み上げ縦棒", line: "折れ線", "multi-line": "折れ線（複数）", donut: "ドーナツ", combo: "複合（棒と折れ線）" };
+  const CHART_KINDS = { bar: "縦棒", "clustered-bar": "集合縦棒", "stacked-bar": "積み上げ縦棒", "100-stacked-bar": "100%積み上げ縦棒", line: "折れ線", "multi-line": "折れ線（複数）", area: "面", pie: "円", donut: "ドーナツ", scatter: "散布図", radar: "レーダー", waterfall: "ウォーターフォール", funnel: "じょうご", combo: "複合（棒と折れ線）" };
   const DASHES = {
     solid: ["実線", null], roundDot: ["丸点線", [0, 2]], squareDot: ["角点線", [1, 1]], dash: ["破線", [4, 3]], dashDot: ["一点鎖線", [4, 3, 1, 3]],
     longDash: ["長破線", [8, 3]], longDashDot: ["長鎖線", [8, 3, 1, 3]], longDashDotDot: ["長二点鎖線", [8, 3, 1, 3, 1, 3]],
@@ -1534,6 +1534,11 @@
       if (o.kind === "video" || o.kind === "audio") Object.assign(o, normalizePlayback(raw, o.kind));
       // スライド ショーの記録: the slide's narration (played with the slide unless 「ナレーションを付けない」).
       if (o.kind === "audio" && raw.narration === true) o.narration = true;
+      // 再生 →「キャプションの挿入」: subtitles for a video (WebVTT text, shown with the video).
+      if (o.kind === "video" && typeof raw.captions === "string" && /^\uFEFF?WEBVTT/.test(raw.captions.trim()) && raw.captions.length <= 300_000) {
+        o.captions = raw.captions.replace(/^\uFEFF/, "");
+        if (typeof raw.captionLang === "string" && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(raw.captionLang)) o.captionLang = raw.captionLang;
+      }
     }
     if (o.kind === "zoom") {
       // スライド ズーム: a live picture of another slide; clicking it in the show goes there (and back).
@@ -2294,7 +2299,7 @@
     if (c.type === "stacked-bar" || c.type === "100-stacked-bar") {
       data.barData = c.labels.map((label, i) => ({ label, values: c.series.map((s) => s.values[i] ?? 0) }));
       data.legendLabels = c.series.map((s) => s.name);
-    } else if (c.type === "multi-line" || c.type === "clustered-bar") {
+    } else if (["multi-line", "clustered-bar", "area", "scatter", "radar"].includes(c.type)) {
       data.xAxisLabels = c.labels;
       data.series = c.series.map((s) => ({ label: s.name, values: s.values }));
     } else if (c.type === "combo") {
@@ -3203,6 +3208,10 @@
       const media = E.mediaEl(desc, ctx, "hs-obj-media");
       const video = media.querySelector("video");
       if (video) playbackData(video, o);
+      if (video && o.captions) {
+        video.setAttribute("crossorigin", "anonymous");
+        video.append(h("track", { kind: "captions", src: `data:text/vtt;charset=utf-8,${encodeURIComponent(o.captions)}`, srclang: o.captionLang || "ja", label: "字幕", default: true }));
+      }
       if (video && ctx.live && o.hideIdle) media.classList.add("hs-hide-idle");
       rot.append(media);
     } else if (o.kind === "audio") audioBody(o, rot, ctx);

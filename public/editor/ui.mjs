@@ -386,6 +386,7 @@ export function createEditorUi(editor, app) {
       { label: "PDF・印刷（配布資料・ノート）…", icon: "print", keys: "⌘P", run: () => app.printPdf() },
       { label: "JSONで保存", icon: "down", run: () => app.saveJson() },
       { label: "レビュー用ファイル", icon: "review", run: () => app.exportReview() },
+      { label: "ビデオの作成（WebM）…", icon: "video2", run: () => app.openVideoExport() },
       "-",
       { label: "JSONを読み込む…", icon: "up", run: () => app.openJson() },
       { label: "版の履歴・過去の資料…", icon: "clock", run: () => app.openHistory() },
@@ -465,7 +466,7 @@ export function createEditorUi(editor, app) {
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
   const GROUP_ICONS = { グラフィックの作成: "smartart", "SmartArt のスタイル": "fill", 文字: "font", リセット: "reset", プレビュー: "play", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
     図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane",
-    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review", 描画ツール: "pen", 変換: "inkShape", 再生: "play", 音声: "mic", ズームのオプション: "zoomSlide", ズームのスタイル: "outline", 数式と記号: "equation", モニター: "presenter", キャプションと字幕: "subtitles", 文章校正: "spell" };
+    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review", 描画ツール: "pen", 変換: "inkShape", 再生: "play", 音声: "mic", ズームのオプション: "zoomSlide", ズームのスタイル: "outline", 数式と記号: "equation", モニター: "presenter", キャプションと字幕: "subtitles", 文章校正: "spell", キャプション: "caption", 言語: "textCase" };
   function fold(g) {
     const items = g.querySelector(":scope > .rb-items");
     const label = g.querySelector(":scope > .rb-label")?.textContent || "";
@@ -527,6 +528,9 @@ export function createEditorUi(editor, app) {
         drop("slide", "新しい|スライド", "スライドを追加", menu([
           { label: "白紙（自由配置）", icon: "slide", run: () => app.insertBlankSlide() },
           { label: "レイアウトを選んで追加…", icon: "layout", run: () => app.openTypeDialog("insert") },
+          "-",
+          { label: "スライドの再利用…", icon: "duplicateSlide", run: () => app.openReuse() },
+          { label: "アウトラインからスライド…", icon: "textLeft", run: () => app.openOutlineSlides() },
         ]), { big: true }),
         col(btn("layout", "レイアウト", "このスライドのレイアウトを変える", () => app.openTypeDialog("change")), btn("duplicateSlide", "複製", "このスライドを複製", () => app.duplicateSlide()),
           btn("convert", "図形に変換", "このスライドのレイアウトを図形・テキストボックス・画像に分けて、1つずつ自由に編集できるようにする（白紙のスライドになります）", () => app.convertSlide(), { enabled: () => app.canConvert() })),
@@ -674,6 +678,13 @@ export function createEditorUi(editor, app) {
       group("文章校正",
         btn("spell", "スペル|チェック", "入力中の文字のスペルを確かめる（ブラウザの辞書。間違いに赤い波線）", () => app.setSpellcheck(!app.spellcheck()), { big: true, pressed: () => app.spellcheck() }),
         btn("textCase", "表記ゆれ|チェック", "全角・半角（ＡＩ／AI）、長音（ユーザ／ユーザー）、送り仮名（行う／行なう）のゆれを見つけて統一する", () => app.openProofing(), { big: true })),
+      group("言語",
+        drop("textCase", "翻訳", "スライドの文字をほかの言語に訳す（AI。部品・ノートも。数値と固有名詞はそのまま）", () => menu([
+          { head: "このスライドを翻訳" },
+          ...[["en", "英語"], ["zh", "中国語"], ["ko", "韓国語"], ["ja", "日本語"]].map(([k, l]) => ({ label: `${l}に`, run: () => app.translate(k, "slide") })),
+          "-", { head: "資料全体を翻訳" },
+          ...[["en", "英語"], ["zh", "中国語"], ["ko", "韓国語"], ["ja", "日本語"]].map(([k, l]) => ({ label: `資料全体を${l}に`, run: () => app.translate(k, "deck") })),
+        ]), { big: true, enabled: () => app.canAi() })),
       group("検索", btn("find", "検索・|置換", "資料全体の文字を検索・置換（⌘F）", () => app.openReplace(), { big: true })),
       group("ノート", btn("notes", "ノートを|作成", "スピーカーノートをまとめて作る（簡易・AI）", () => app.openNotes(), { big: true })),
       group("AI", btn("magic", "AIで全体を|見直す", "指示を出して資料全体をAIに見直してもらう（Codexに接続しているとき）", () => app.reviseDeck(), { big: true, enabled: () => app.canAi() })),
@@ -688,12 +699,17 @@ export function createEditorUi(editor, app) {
       group("スライド", drop("slide", "新しい|スライド", "スライドを追加", menu([
         { label: "白紙（自由配置）", icon: "slide", run: () => app.insertBlankSlide() },
         { label: "レイアウトを選んで追加…", icon: "layout", run: () => app.openTypeDialog("insert") },
+        "-",
+        { label: "スライドの再利用…", icon: "duplicateSlide", run: () => app.openReuse() },
+        { label: "アウトラインからスライド…", icon: "textLeft", run: () => app.openOutlineSlides() },
       ]), { big: true })),
       group("画像",
         drop("image", "画像", "画像を入れる", menu([
           { label: "このデバイス…", icon: "image", run: insertImages },
           { label: "内蔵の写真…", icon: "image", run: () => openPop(ribbon.querySelector('[data-rb="photos"]') || ribbon, photoGallery(insertPhoto)) },
           { label: "URLから…", icon: "link", run: () => insertFromUrl("image") },
+          "-",
+          { label: "フォト アルバム…", icon: "image", run: () => app.openPhotoAlbum() },
         ]), { big: true }),
         btn("screenshot", "スクリーン|ショット", "ウィンドウ・タブ・画面を撮って画像として入れる", () => extras.insertScreenshot(), { big: true }),
         h("span", { "data-rb": "photos" })),

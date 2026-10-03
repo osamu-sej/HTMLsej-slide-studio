@@ -10,7 +10,15 @@ const SAMPLE = {
   labels: ["4月", "5月", "6月", "7月"],
   series: [{ name: "売上", values: [120, 135, 128, 160] }, { name: "前年", values: [110, 118, 125, 131] }],
 };
-const CHART_ICONS = { bar: "chartBar", "stacked-bar": "chartStack", "100-stacked-bar": "chartStack", line: "chartLine", "multi-line": "chartLine", donut: "chartDonut", combo: "chartCombo" };
+const CHART_ICONS = { bar: "chartBar", "stacked-bar": "chartStack", "100-stacked-bar": "chartStack", line: "chartLine", "multi-line": "chartLine", donut: "chartDonut", combo: "chartCombo", area: "chartArea", pie: "chartPie", scatter: "chartScatter", radar: "chartRadar", waterfall: "chartWaterfall", funnel: "chartFunnel" };
+// Sample data that suits each kind of chart when it is inserted (the data editor opens right after).
+const SAMPLES = {
+  pie: { labels: ["来店", "アプリ", "宅配"], series: [{ name: "構成比", values: [60, 25, 15] }] },
+  scatter: { labels: ["10", "20", "30", "40", "50", "60"], series: [{ name: "売上（万円）", values: [120, 180, 210, 260, 300, 380] }] },
+  radar: { labels: ["品揃え", "接客", "清潔さ", "価格", "立地"], series: [{ name: "自店", values: [4, 3.5, 4.5, 3, 4] }, { name: "地区平均", values: [3.5, 3.5, 3.8, 3.4, 3.6] }] },
+  waterfall: { labels: ["前年", "来店客増", "客単価", "廃棄減", "人件費", "合計"], series: [{ name: "利益（百万円）", values: [100, 25, 12, 8, -15, 0] }] },
+  funnel: { labels: ["認知", "興味", "来店", "購入", "リピート"], series: [{ name: "人数", values: [1000, 620, 380, 240, 120] }] },
+};
 
 export function createTableUi(editor, app, kit) {
   const { E, h } = app;
@@ -56,7 +64,8 @@ export function createTableUi(editor, app, kit) {
   function insertChart(type) {
     const data = JSON.parse(JSON.stringify(SAMPLE));
     if (["bar", "line", "donut"].includes(type)) data.series = data.series.slice(0, 1);
-    if (type === "donut") { data.labels = ["来店", "アプリ", "宅配"]; data.series[0].values = [60, 25, 15]; data.series[0].name = "構成比"; }
+    if (type === "donut") Object.assign(data, JSON.parse(JSON.stringify(SAMPLES.pie)));
+    if (SAMPLES[type]) Object.assign(data, JSON.parse(JSON.stringify(SAMPLES[type])));
     const o = ops.makeObject("chart", { x: 0, y: 0, w: 960, h: 560 }, { chart: { type, ...data } });
     const [made] = editor.insert([o]);
     if (made) { showTab("chartDesign"); editChart(made.id); }
@@ -216,7 +225,7 @@ export function createTableUi(editor, app, kit) {
       editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: { ...x.chart, [key]: value.trim() || undefined } } : x)), { select: [o.id] });
     };
     return [
-      group("種類", drop("chartBar", "グラフの種類|の変更", "縦棒・積み上げ・折れ線・ドーナツ・複合", () => chartPicker(setKind), { big: true, enabled: isChart })),
+      group("種類", drop("chartBar", "グラフの種類|の変更", "縦棒・積み上げ・折れ線・面・円・ドーナツ・散布図・レーダー・ウォーターフォール・じょうご・複合", () => chartPicker(setKind), { big: true, enabled: isChart })),
       group("データ", btn("table", "データの|編集", "項目と値を表で直す（Excelから貼り付けもできます）", () => { const o = chart(); if (o) editChart(o.id); }, { big: true, enabled: isChart }),
         // A chart brought over from PowerPoint keeps its formatting until it is reset to the studio's look.
         btn("reset", "書式を|リセット", "PowerPointから取り込んだグラフの書式（色・ラベル・軸・凡例）を外し、スタジオのグラフの描き方にします", resetStyle, { big: true, enabled: () => Boolean(chart()?.chart.style) })),
