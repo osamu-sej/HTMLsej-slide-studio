@@ -69,7 +69,7 @@ export const detailSchema = z.object({
 // Objects people place by hand (shapes, text boxes, pictures, lines…), their animations, and a slide's id that
 // links between slides point at. People make them in the editor; the AI never writes them (USER_ONLY_FIELDS) and
 // every AI change keeps them (server/chat.mjs). public/engine/objects.js validates their contents.
-export const OBJECT_KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart"];
+export const OBJECT_KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart", "ink", "zoom", "camera", "equation"];
 export const objectSchema = z.object({ id: z.string().min(1).max(32), kind: z.enum(OBJECT_KINDS) }).passthrough();
 export const timelineEntrySchema = z.object({ el: z.string().min(1).max(64) }).passthrough();
 
@@ -250,6 +250,9 @@ export const deckShape = z.object({
   memo: z.string().max(2000).optional().default(""),
   // The guides people drag on the slides (表示 → ガイド), in slide px.
   guides: z.object({ x: z.array(z.number()).max(20).optional(), y: z.array(z.number()).max(20).optional() }).optional(),
+  // スライド ショーの設定 and 目的別スライド ショー (checked again by the studio: public/editor/show.mjs).
+  show: z.record(z.string(), z.unknown()).optional(),
+  customShows: z.array(z.object({ id: z.string().max(32), name: z.string().max(60), sids: z.array(z.string().max(32)).max(500) })).max(30).optional(),
   slides: z.array(slideSchema).min(1).max(500),
 });
 export const reviseRequestSchema = z.object({

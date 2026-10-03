@@ -12,6 +12,8 @@ import { createFreeform } from "./freeform.mjs";
 import { createMedia } from "./media.mjs";
 import { MERGE_HINTS, MERGE_MODES, canMerge, clippingLib, mergeObjects } from "./merge.mjs";
 import { createSmartArt } from "./smartart.mjs";
+import { createInk } from "./ink.mjs";
+import { createExtras } from "./extras.mjs";
 
 const SIZES_PT = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const LINE_WIDTHS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 8, 12];
@@ -333,6 +335,7 @@ export function createEditorUi(editor, app) {
   const TABS = [
     { id: "home", label: "ホーム" },
     { id: "insert", label: "挿入" },
+    { id: "draw", label: "描画" },
     { id: "design", label: "デザイン" },
     { id: "transition", label: "画面切り替え" },
     { id: "animation", label: "アニメーション" },
@@ -348,6 +351,7 @@ export function createEditorUi(editor, app) {
     { id: "chartDesign", label: "グラフのデザイン", contextual: () => tables.isChart() },
     { id: "playback", label: "再生", contextual: () => media.has() },
     { id: "smartartDesign", label: "SmartArt のデザイン", contextual: () => smart.isSmartArt() },
+    { id: "zoomTool", label: "ズーム", contextual: () => extras.isZoom() },
   ];
 
   function signature() {
@@ -428,7 +432,7 @@ export function createEditorUi(editor, app) {
         },
         ondblclick: () => toggleRibbon() }, t.label)),
       h("span", { class: "rb-spacer" }),
-      h("span", { class: "rb-hint" }, editor.tool ? "描画中（Escでやめる）" : editor.painter ? "書式を貼り付ける図形をクリック（Esc）" : ""),
+      h("span", { class: "rb-hint" }, ""),
       h("button", { type: "button", class: "rb-options", title: "リボンの表示オプション（常に表示・タブのみ・自動的に非表示）", "aria-haspopup": "true", onclick: (event) => ribbonOptions(event.currentTarget) }, ico("ribbon", 15), h("span", {}, "表示オプション"), h("b", { class: "rb-caret" }, "▾")));
     const showBody = ribbonMode === "full" || floating;
     const pin = h("div", { class: "rb-end" }, floating
@@ -460,7 +464,7 @@ export function createEditorUi(editor, app) {
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
   const GROUP_ICONS = { グラフィックの作成: "smartart", "SmartArt のスタイル": "fill", 文字: "font", リセット: "reset", プレビュー: "play", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
     図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane",
-    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review" };
+    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review", 描画ツール: "pen", 変換: "inkShape", 再生: "play", 音声: "mic", ズームのオプション: "zoomSlide", ズームのスタイル: "outline", 数式と記号: "equation", モニター: "presenter", キャプションと字幕: "subtitles" };
   function fold(g) {
     const items = g.querySelector(":scope > .rb-items");
     const label = g.querySelector(":scope > .rb-label")?.textContent || "";
@@ -502,7 +506,7 @@ export function createEditorUi(editor, app) {
   function refresh() {
     for (const fn of updaters) { try { fn(); } catch { /* a control without a target */ } }
     const hint = ribbon?.querySelector(".rb-hint");
-    if (hint) hint.textContent = editor.tool ? "描画中：スライド上をドラッグ（Escでやめる）" : editor.painter ? "書式を貼り付ける図形をクリック（Escでやめる）" : "";
+    if (hint) hint.textContent = ink?.tool ? `${{ pen: "ペンで書いています", eraser: "消しゴム：消したい線をなぞる", lasso: "投げ縄：インクを囲む" }[ink.tool]}（Escでやめる）` : editor.tool ? "描画中：スライド上をドラッグ（Escでやめる）" : editor.painter ? "書式を貼り付ける図形をクリック（Escでやめる）" : extras?.dictating ? "音声入力中：話すと文字になります" : "";
   }
 
   function fontControls() {
@@ -544,6 +548,7 @@ export function createEditorUi(editor, app) {
           drop("fontColor", "", "文字の色（SEJの文字色：黒・濃紺・グレー）", () => colors(E.PALETTE.text, textColorOf(), (c) => editor.textFormat("color", c), { custom: false, note: "白抜き文字は使いません（SEJテンプレート）" }), { enabled: hasText, keep: true, swatch: textColorOf }),
           drop("highlight", "", "蛍光ペン（マーカー）", () => colors(E.PALETTE.highlight, "", (c) => editor.textFormat("highlight", c === "none" ? null : c), { none: "マーカーなし", custom: false }), { enabled: hasText, keep: true }),
           drop("spacing", "", "文字の間隔", () => menu(CHAR_SPACING.map(([v, label]) => ({ label, on: Math.abs((one()?.ls || 0) - v) < 0.001, run: () => editor.textFormat("ls", v) }))), { enabled: hasText, keep: true }),
+          drop("textCase", "", "文字種の変換（大文字・小文字・全角・半角）", () => extras.caseMenu(), { enabled: hasText, keep: true }),
           btn("clear", "", "書式のクリア", () => editor.textFormat("clear"), { enabled: hasText, keep: true }))),
       group("段落",
         row(btn("bullet", "", "箇条書き", () => editor.textFormat("bullet"), { enabled: hasText, pressed: () => editor.textState()?.list === "bullet", keep: true }),
@@ -557,6 +562,7 @@ export function createEditorUi(editor, app) {
           btn("textJustify", "", "両端揃え（⌘J）", () => editor.textFormat("align", "justify"), { enabled: hasText, pressed: () => editor.textState()?.align === "justify", keep: true }),
           btn("vtext", "", "縦書き", () => editor.textFormat("vertical"), { enabled: hasText, pressed: tState("vertical") }),
           drop("valignMiddle", "", "文字の配置（上下）", () => menu([["top", "上揃え", "valignTop"], ["middle", "上下中央揃え", "valignMiddle"], ["bottom", "下揃え", "valignBottom"]].map(([v, label, icon]) => ({ label, icon, on: editor.textState()?.valign === v, run: () => editor.textFormat("valign", v) }))), { enabled: hasText }),
+          drop("columns", "", "段組み：テキストを2段・3段に分ける", () => extras.columnsMenu(), { enabled: hasText }),
           drop("smartart", "", "SmartArt に変換：選んだテキストの段落（箇条書きのレベル）を図に", () => smart.convertGallery(), { enabled: () => selected().some((o) => ["shape", "text"].includes(o.kind) && o.text) }))),
       group("図形描画",
         drop("shapes", "図形", "図形を描く", () => shapeGallery(pickTool), { big: true }),
@@ -568,6 +574,8 @@ export function createEditorUi(editor, app) {
         col(btn("find", "検索・置換", "資料全体の文字を検索・置換（⌘F）", () => app.openReplace()),
           btn("selectAll", "すべて選択", "このスライドのオブジェクトをすべて選択（⌘A）", () => editor.select(editor.objects().filter((o) => !o.hidden).map((o) => o.id))),
           btn("pane", "選択ウィンドウ", "オブジェクトの一覧・表示/非表示・順番", () => app.openPanel("format", "selection")))),
+      group("音声",
+        btn("mic", "ディク|テーション", "音声入力：話した言葉をカーソルの位置に入力（もう一度押すと終わります。Chrome・Edge）", () => extras.toggleDictation(), { big: true, keep: true, pressed: () => extras.dictating })),
     ];
   }
 
@@ -597,18 +605,37 @@ export function createEditorUi(editor, app) {
     ];
   }
 
-  /** スライド ショー: start from the beginning or from here, hide a slide, rehearse its motion here. */
+  /**
+   * スライド ショー: start from the beginning, from here or a custom show; the show's settings (a kiosk, looping, a
+   * range, timings, no animation), hiding a slide, rehearsing, the presenter view and live subtitles.
+   */
   function slideshowTab() {
+    const show = () => app.showSettings();
+    const customMenu = () => menu([
+      { head: "目的別スライド ショー" },
+      ...app.customShows().map((cs) => ({ label: `${cs.name}（${cs.sids.length}枚）`, icon: "showStart", run: () => app.presentCustom(cs.id) })),
+      app.customShows().length ? "-" : null,
+      { label: "目的別スライド ショー…", icon: "customShow", run: () => app.openCustomShows() },
+    ]);
     return [
       group("スライド ショーの開始",
         btn("showStart", "最初から", "最初のスライドから発表する（F5）", () => app.presentFrom(0), { big: true }),
         btn("showHere", "このスライド|から", "このスライドから発表する（⇧F5）", () => app.presentFrom(app.index()), { big: true }),
-        btn("clock", "リハーサル", "最初から発表して1枚ずつの時間を計り、終わったらその時間で自動的に切り替えるようにできます", () => app.rehearse(), { big: true })),
+        drop("customShow", "目的別|スライド ショー", "相手や時間に合わせて選んだスライドだけを、決めた順番で発表する", customMenu, { big: true })),
       group("設定",
+        btn("presenter", "スライド ショー|の設定", "種類（自動プレゼンテーション）・繰り返し・発表するスライド（範囲・目的別）・タイミング・アニメーションなし・ペンの色", () => app.openShowSettings(), { big: true }),
         btn("hideSlide", "非表示スライド|に設定", "発表ではこのスライドを飛ばす（編集用に残ります。もう一度で戻す）", () => app.toggleHiddenSlide(), { big: true, pressed: () => Boolean(app.slide()?.hidden), enabled: () => app.index() > 0 }),
+        btn("clock", "リハーサル", "最初から発表して1枚ずつの時間を計り、終わったらその時間で自動的に切り替えるようにできます", () => app.rehearse(), { big: true }),
+        col(btn("check", "タイミングを使用", "リハーサル・自動で切り替えの時間で進める（オフにするとクリックで進む）", () => app.setShowSettings({ useTimings: show().useTimings === false }), { pressed: () => show().useTimings !== false }),
+          btn("audio", "ナレーションの再生", "記録したナレーションを発表で流す", () => app.setShowSettings({ noNarration: !show().noNarration }), { pressed: () => !show().noNarration }),
+          btn("previewPlay", "動きを確認", "閲覧表示：このスライドの動きをこの画面で再生する", () => app.previewMotion()))),
+      group("モニター",
         col(btn("presenter", "発表者ツールを使用", "発表を始めると、ノート・次のスライド・経過時間の発表者ビューを別ウィンドウで開く（発表中は P）", () => app.setPresenterView(!app.presenterView()), { pressed: () => app.presenterView() }),
-          btn("previewPlay", "動きを確認", "閲覧表示：このスライドの動きをこの画面で再生する", () => app.previewMotion()),
+          btn("pen", "ペンの色", "発表中のペン（Ctrl+P）の色：スライド ショーの設定で変えられます", () => app.openShowSettings()),
           btn("clock", "自動で切り替え", "このスライドを何秒で次へ進めるか（画面切り替えタブ）", () => showTab("transition", { open: true })))),
+      group("キャプションと字幕",
+        btn("subtitles", "常に字幕を|使用", "発表を始めると、話した言葉を字幕で出す（発表中は J で切り替え。マイクを使います）", () => app.setShowSettings({ captions: !show().captions }), { big: true, pressed: () => Boolean(show().captions) }),
+        drop("caption", "字幕の|設定", "字幕の言語", () => menu([{ head: "話す言語" }, ...[["ja-JP", "日本語"], ["en-US", "英語"], ["zh-CN", "中国語"], ["ko-KR", "韓国語"]].map(([k, label]) => ({ label, on: (show().captionLang || "ja-JP") === k, run: () => app.setShowSettings({ captionLang: k }) }))]), { big: true })),
     ];
   }
 
@@ -652,6 +679,7 @@ export function createEditorUi(editor, app) {
           { label: "内蔵の写真…", icon: "image", run: () => openPop(ribbon.querySelector('[data-rb="photos"]') || ribbon, photoGallery(insertPhoto)) },
           { label: "URLから…", icon: "link", run: () => insertFromUrl("image") },
         ]), { big: true }),
+        btn("screenshot", "スクリーン|ショット", "ウィンドウ・タブ・画面を撮って画像として入れる", () => extras.insertScreenshot(), { big: true }),
         h("span", { "data-rb": "photos" })),
       group("表", drop("table", "表", "表を入れる（行と列を選ぶ）", () => tables.tablePicker(), { big: true })),
       group("図",
@@ -663,7 +691,9 @@ export function createEditorUi(editor, app) {
         drop("textbox", "テキスト ボックス", "テキストボックスを描く", menu([
           { label: "横書きテキスト ボックス", icon: "textbox", run: () => pickTool({ kind: "text" }) },
           { label: "縦書きテキスト ボックス", icon: "vtext", run: () => pickTool({ kind: "text", vertical: true }) },
-        ]), { big: true })),
+        ]), { big: true }),
+        drop("wordart", "ワード|アート", "ワードアート：SEJの文字色で見出し向きの文字を入れる", () => extras.wordArtMenu(), { big: true }),
+        col(drop("number", "スライド番号", "スライド番号・総数・日付のフィールド（自動で更新）", () => extras.fieldMenu(), { keep: true }))),
       group("線",
         col(btn("line", "直線", "直線を引く", () => pickTool({ kind: "line", variant: "line" })), btn("arrow", "矢印", "矢印を引く", () => pickTool({ kind: "line", variant: "arrow" }))),
         col(btn("arrows", "両矢印", "両方向の矢印", () => pickTool({ kind: "line", variant: "double" })), btn("line", "コネクタ", "図形どうしをつなぐカギ線（端を図形の点に近づけるとつながります）", () => pickTool({ kind: "line", variant: "elbow" })))),
@@ -673,12 +703,21 @@ export function createEditorUi(editor, app) {
           { label: "YouTube・URL…", icon: "link", run: () => insertFromUrl("video") },
         ]), { big: true }),
         drop("audio", "オーディオ", "音声を入れる：ファイル・この場で録音・URL", () => media.audioMenu(), { big: true }),
-        btn("screenRec", "画面|録画", "画面・ウィンドウ・タブを録画して、ビデオとして入れる（マイクの音声も）", () => media.recorder("screen"), { big: true })),
-      group("記号と日付",
+        btn("screenRec", "画面|録画", "画面・ウィンドウ・タブを録画して、ビデオとして入れる（マイクの音声も）", () => media.recorder("screen"), { big: true }),
+        btn("camera", "カメオ", "カメラの映像（発表中にライブで映る。丸や角丸に切り抜けます）", () => extras.insertCamera(), { big: true })),
+      group("数式と記号",
+        btn("equation", "数式", "数式を入れる（TeXの書き方。分数・ルート・Σ…）", () => extras.equationDialog(), { big: true }),
         col(drop("symbol", "記号と特殊文字", "記号を入れる（文字の入力中はカーソルの位置に）", () => symbolGallery(), { keep: true }),
           drop("date", "日付と時刻", "今日の日付を入れる（文字の入力中はカーソルの位置に）", () => dateMenu(), { keep: true }))),
-      group("リンク", h("span", { "data-rb": "link" }, btn("link", "リンク・|動作", "選んだ文字にリンク／図形をクリックしたときの動作（スライドへ移動・Webページを開く）", editLink, { big: true, keep: true, enabled: () => Boolean(one()) || editor.typing }))),
+      group("リンク", zoomDrop(),
+        h("span", { "data-rb": "link" }, btn("link", "リンク・|動作", "選んだ文字にリンク／図形をクリックしたときの動作（スライドへ移動・Webページを開く）", editLink, { big: true, keep: true, enabled: () => Boolean(one()) || editor.typing }))),
     ];
+  }
+
+  /** 挿入 → ズーム: サマリー・スライド・セクション (the slide picker opens under the same button). */
+  function zoomDrop() {
+    const el = drop("zoomSlide", "ズーム", "ズーム：別のスライドへ飛んで戻ってくる、スライドの縮小版を入れる", () => extras.zoomMenu(el), { big: true });
+    return el;
   }
 
   function arrangeMenu() {
@@ -926,7 +965,7 @@ export function createEditorUi(editor, app) {
   }
 
   function buildTab(id) {
-    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, developer: developerTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab, playback: media.playbackTab, smartartDesign: smart.designTab }[id]();
+    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, developer: developerTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab, playback: media.playbackTab, smartartDesign: smart.designTab, draw: ink.drawTab, zoomTool: extras.zoomTab }[id]();
   }
 
   /**
@@ -1180,7 +1219,7 @@ export function createEditorUi(editor, app) {
   }
   function kindIcon(o) {
     if (o.kind === "shape") return E.SHAPES[o.shape] ? shapeThumb(o.shape, 18, 14) : freeformThumb(o.path?.closed ? "polygon" : "curve");
-    return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", audio: "audio", lottie: "lottie", table: "table", chart: "chartBar", smartart: "smartart" }[o.kind] || "shapes", 16);
+    return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", audio: "audio", lottie: "lottie", table: "table", chart: "chartBar", smartart: "smartart", ink: "pen", zoom: "zoomSlide", camera: "camera", equation: "equation" }[o.kind] || "shapes", 16);
   }
 
   // アニメーション・画面切り替え (anim.mjs) build their tabs and the animation pane with these same parts.
@@ -1194,6 +1233,10 @@ export function createEditorUi(editor, app) {
   // 挿入 → オーディオ・画面録画 and the 再生 tab of a video or a sound (media.mjs).
   const media = createMedia(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), refreshRibbon: () => refresh() });
   const tables = createTableUi(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), colors, showTab: (id) => showTab(id) });
+  // 描画 (ink.mjs): pens, highlighters, the eraser and the lasso, ink to shapes, ink replay.
+  const ink = createInk(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), refreshRibbon: () => refresh() });
+  // ズーム・カメオ・スクリーンショット・数式・ワードアート・フィールド・段組み・文字種・音声入力 (extras.mjs).
+  const extras = createExtras(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), refreshRibbon: () => refresh() });
 
   editor.subscribe(() => { renderRibbon(); renderPane(); });
 
@@ -1202,6 +1245,8 @@ export function createEditorUi(editor, app) {
     editSmartart: (id, item) => { editor.select([id]); showTab("smartartDesign"); smart.openPane(id, item); }, smartartToShapes: (id) => smart.toShapes(id), startCrop: (id) => crop.start(id), editPoints: (id) => freeform.editPoints(id),
     showTab, closePop, openPop, shapeGallery, iconGallery, photoGallery, toggleRibbon, setRibbonMode, zoomMenu,
     popMenu: (anchor, items) => openPop(anchor, menu(items)),
+    editEquation: (id) => { const o = editor.objects().find((x) => x.id === id); if (o?.kind === "equation") extras.equationDialog(o); },
+    stopInk: () => ink.stop(), get inkTool() { return ink.tool; },
     get tab() { return tab; }, get ribbonMode() { return ribbonMode; }, get floating() { return floating; },
   };
 }

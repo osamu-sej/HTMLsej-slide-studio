@@ -990,6 +990,7 @@
   }
   const styleText = (style) => Object.entries(style).map(([k, v]) => `${k}: ${v}`).join("; ");
 
+  const FIELDS = new Set(["slideno", "total", "date"]);
   function cleanInline(src, doc, depth = 0) {
     const out = [];
     for (const node of [...src.childNodes]) {
@@ -1020,6 +1021,15 @@
         continue;
       }
       if (mapped === "span") {
+        // Fields filled in when the slide is drawn (挿入 → スライド番号・日付と時刻の自動更新).
+        const field = node.getAttribute("data-field");
+        if (FIELDS.has(field)) {
+          const span = doc.createElement("span");
+          span.setAttribute("data-field", field);
+          span.textContent = (node.textContent || "#").slice(0, 24);
+          out.push(span);
+          continue;
+        }
         const style = inlineStyle(node);
         if (!Object.keys(style).length) { out.push(...children); continue; }
         const span = doc.createElement("span");
@@ -1170,8 +1180,8 @@
 
   // ---------------------------------------------------------------- objects: kinds, defaults, normalization
 
-  const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart"];
-  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt" };
+  const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart", "ink", "zoom", "camera", "equation"];
+  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ", smartart: "SmartArt", ink: "インク", zoom: "ズーム", camera: "カメオ", equation: "数式" };
   // Media playback (PowerPoint's 再生 tab): how loud, and where the sound sits on the slides.
   const VOLUMES = { 0: "ミュート", 0.33: "小", 0.66: "中", 1: "大" };
   // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
@@ -1200,6 +1210,10 @@
     video: { fit: "cover", autoplay: false, loop: false, muted: false },
     audio: { autoplay: false, loop: false, color: "#1f3864" },
     smartart: {},
+    ink: {},
+    zoom: { back: true, stroke: "#b7c3da", strokeW: 3 },
+    equation: { fs: 56, color: "#1a1a1a", align: "center" },
+    camera: { mask: "ellipse", stroke: "none", strokeW: 3 },
     lottie: { fit: "contain", autoplay: true, loop: true },
     table: { style: "sej", header: true, banded: true, firstCol: false, lastRow: false, fs: 28, color: "#1a1a1a", lh: 1.35 },
     chart: {},
@@ -1243,6 +1257,163 @@
     return o;
   }
 
+  // Ink (描画): strokes written with a pen or a highlighter, each a list of points as fractions of the object's box.
+  const INK_COLORS = new Set(["#1f3864", "#1a1a1a", "#808080", "#b7c3da", "#d6c9b8", "#dce4f2", "#f5f0ea", "#c00000"]);
+  function normalizeStrokes(list) {
+    return (Array.isArray(list) ? list : []).slice(0, 400).map((st) => {
+      const pts = (Array.isArray(st?.pts) ? st.pts : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 4000)
+        .map(([x, y]) => [Math.round(clamp(Number(x), -0.5, 1.5) * 10000) / 10000, Math.round(clamp(Number(y), -0.5, 1.5) * 10000) / 10000]);
+      if (!pts.length) return null;
+      const color = hexColor(st.color);
+      return { pts, color: color && INK_COLORS.has(color) ? color : "#1f3864", width: num(st.width, 1, 80, 6), ...(st.highlighter === true ? { highlighter: true } : {}) };
+    }).filter(Boolean);
+  }
+  /** A smooth path through a stroke's points (midpoint quadratics), in the box's pixels. */
+  function inkPath(pts, w, hh) {
+    const p = pts.map(([x, y]) => [x * w, y * hh]);
+    if (p.length === 1) return `M${r2(p[0][0])} ${r2(p[0][1])} l0.01 0`;
+    let d = `M${r2(p[0][0])} ${r2(p[0][1])}`;
+    for (let i = 1; i < p.length - 1; i += 1) d += ` Q${r2(p[i][0])} ${r2(p[i][1])} ${r2((p[i][0] + p[i + 1][0]) / 2)} ${r2((p[i][1] + p[i + 1][1]) / 2)}`;
+    return `${d} L${r2(p[p.length - 1][0])} ${r2(p[p.length - 1][1])}`;
+  }
+  function inkBody(o, rotEl) {
+    const svg = s("svg", { class: "hs-obj-geom hs-ink", width: r2(o.w), height: r2(o.h), viewBox: `0 0 ${r2(Math.max(1, o.w))} ${r2(Math.max(1, o.h))}`, overflow: "visible", "aria-hidden": "true" });
+    for (const st of o.strokes || []) {
+      svg.append(s("path", { d: inkPath(st.pts, o.w, o.h), fill: "none", stroke: st.color, "stroke-width": st.width, "stroke-linecap": st.highlighter ? "square" : "round", "stroke-linejoin": "round", "stroke-opacity": st.highlighter ? 0.9 : null, class: st.highlighter ? "hs-ink-hl" : null }));
+    }
+    rotEl.append(svg);
+  }
+
+  /** Slide numbers, the number of slides and today's date in text (fields), as the slide is drawn. */
+  function fillFields(el, ctx) {
+    const fields = el.querySelectorAll?.("span[data-field]");
+    if (!fields?.length) return;
+    const story = E.storyMap(ctx.deck?.slides || []);
+    const now = new Date();
+    for (const f of fields) {
+      const kind = f.getAttribute("data-field");
+      f.textContent = kind === "slideno" ? String(story.no[ctx.index] ?? (ctx.index ?? 0) + 1)
+        : kind === "total" ? String(story.order.length || (ctx.deck?.slides || []).length || 1)
+          : `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
+    }
+  }
+
+  // ---------------------------------------------------------------- 数式 (TeX → MathML)
+
+  const TEX_SYMBOLS = {
+    alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", zeta: "ζ", eta: "η", theta: "θ", iota: "ι", kappa: "κ", lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π", rho: "ρ", sigma: "σ", tau: "τ", upsilon: "υ", phi: "φ", chi: "χ", psi: "ψ", omega: "ω",
+    Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π", Sigma: "Σ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+    infty: "∞", partial: "∂", nabla: "∇", degree: "°", ldots: "…", cdots: "⋯", prime: "′",
+  };
+  const TEX_OPS = {
+    times: "×", cdot: "·", div: "÷", pm: "±", mp: "∓", le: "≤", leq: "≤", ge: "≥", geq: "≥", ne: "≠", neq: "≠", approx: "≈", equiv: "≡", sim: "∼", propto: "∝",
+    to: "→", rightarrow: "→", leftarrow: "←", Rightarrow: "⇒", Leftarrow: "⇐", leftrightarrow: "↔", Leftrightarrow: "⇔", in: "∈", notin: "∉", subset: "⊂", supset: "⊃", cup: "∪", cap: "∩", forall: "∀", exists: "∃", therefore: "∴", because: "∵",
+  };
+  const TEX_BIG = { sum: "∑", prod: "∏", int: "∫", oint: "∮", lim: "lim", max: "max", min: "min", log: "log", ln: "ln", sin: "sin", cos: "cos", tan: "tan", exp: "exp" };
+  const MATH_NS = "http://www.w3.org/1998/Math/MathML";
+  /** A small TeX subset as MathML elements (built node by node, never from markup). */
+  function texToMathML(tex, doc = root.document) {
+    const m = (tag, kids = [], text = null) => { const el = doc.createElementNS(MATH_NS, tag); if (text != null) el.textContent = text; for (const k of kids) if (k) el.append(k); return el; };
+    let i = 0;
+    const src = String(tex);
+    const peek = () => src[i];
+    const skip = () => { while (i < src.length && /\s/.test(src[i])) i += 1; };
+    function group() {
+      skip();
+      if (peek() === "{") { i += 1; const kids = sequence("}"); i += 1; return kids.length === 1 ? kids[0] : m("mrow", kids); }
+      return atom();
+    }
+    function command() {
+      i += 1;
+      let name = "";
+      while (i < src.length && /[A-Za-z]/.test(src[i])) { name += src[i]; i += 1; }
+      if (!name) { const ch = src[i] || ""; i += 1; return ch === "\\" ? m("mspace", [], null) : m("mo", [], ch); }
+      if (name === "frac") return m("mfrac", [group(), group()]);
+      if (name === "sqrt") {
+        skip();
+        if (peek() === "[") { i += 1; let idx = ""; while (i < src.length && src[i] !== "]") { idx += src[i]; i += 1; } i += 1; return m("mroot", [group(), texRow(idx)]); }
+        return m("msqrt", [group()]);
+      }
+      if (name === "text" || name === "mathrm") { skip(); let t = ""; if (peek() === "{") { i += 1; let depth = 1; while (i < src.length && depth) { if (src[i] === "{") depth += 1; if (src[i] === "}") depth -= 1; if (depth) t += src[i]; i += 1; } } return m(name === "text" ? "mtext" : "mi", [], t); }
+      if (name === "left" || name === "right") { skip(); const ch = src[i] === "\\" ? (i += 2, src[i - 1]) : src[i++]; return m("mo", [], ch === "." ? "" : ch); }
+      if (name === "quad" || name === "qquad") return m("mspace", [], null);
+      if (TEX_SYMBOLS[name]) return m("mi", [], TEX_SYMBOLS[name]);
+      if (TEX_OPS[name]) return m("mo", [], TEX_OPS[name]);
+      if (TEX_BIG[name]) { const el = m(TEX_BIG[name].length > 1 ? "mi" : "mo", [], TEX_BIG[name]); if (TEX_BIG[name].length === 1) el.setAttribute("largeop", "true"); return el; }
+      return m("mi", [], name);
+    }
+    function atom() {
+      skip();
+      const ch = peek();
+      if (ch === undefined) return null;
+      if (ch === "\\") return command();
+      if (ch === "{") return group();
+      if (/[0-9.]/.test(ch)) { let n = ""; while (i < src.length && /[0-9.]/.test(src[i])) { n += src[i]; i += 1; } return m("mn", [], n); }
+      i += 1;
+      if (/[A-Za-z]/.test(ch)) return m("mi", [], ch);
+      if (/[-+=<>*/!|(),:;\[\]]/.test(ch)) return m("mo", [], ch === "-" ? "−" : ch === "*" ? "×" : ch);
+      return m("mi", [], ch);
+    }
+    function sequence(until) {
+      const out = [];
+      while (i < src.length && src[i] !== until) {
+        skip();
+        if (i >= src.length || src[i] === until) break;
+        let base = atom();
+        if (!base) break;
+        // Subscripts and superscripts (in either order); big operators take them as limits.
+        let sub = null;
+        let sup = null;
+        for (let k = 0; k < 2; k += 1) {
+          skip();
+          if (src[i] === "_" && !sub) { i += 1; sub = group(); }
+          else if (src[i] === "^" && !sup) { i += 1; sup = group(); }
+        }
+        const big = base.getAttribute?.("largeop") === "true";
+        if (sub && sup) base = m(big ? "munderover" : "msubsup", [base, sub, sup]);
+        else if (sub) base = m(big ? "munder" : "msub", [base, sub]);
+        else if (sup) base = m(big ? "mover" : "msup", [base, sup]);
+        out.push(base);
+      }
+      return out;
+    }
+    const texRow = (t) => texToMathML(t, doc).firstChild || m("mrow");
+    const math = m("math", [m("mrow", sequence(undefined))]);
+    math.setAttribute("display", "block");
+    return math;
+  }
+  function equationBody(o, rotEl) {
+    const box = h("div", { class: "hs-equation", style: { "font-size": `${o.fs}px`, color: o.color, "justify-content": o.align === "left" ? "flex-start" : o.align === "right" ? "flex-end" : "center" } });
+    box.append(texToMathML(o.tex));
+    rotEl.append(box);
+  }
+
+  // スライド ズーム: the target slide drawn small inside the object (not again inside itself).
+  let zoomDepth = 0;
+  function zoomBody(o, rotEl, ctx) {
+    const slides = ctx.deck?.slides || [];
+    const at = slides.findIndex((slide) => slide.sid === o.target);
+    const box = h("div", { class: "hs-zoom", style: { "--zb": o.stroke === "none" ? "transparent" : o.stroke, "--zw": `${o.strokeW ?? 3}px` } });
+    if (at < 0 || zoomDepth > 0) {
+      box.append(h("div", { class: "hs-zoom-missing" }, at < 0 ? "リンク先のスライドがありません" : `スライド ${at + 1}`));
+    } else {
+      zoomDepth += 1;
+      try {
+        const el = E.render(slides[at], { deck: ctx.deck, index: at, mode: "thumb", assetBase: ctx.assetBase, assetMap: ctx.assetMap, mediaUrls: ctx.mediaUrls });
+        box.append(E.mount(el, { contain: true, className: "hs-zoom-thumb" }));
+      } finally { zoomDepth -= 1; }
+    }
+    rotEl.append(box);
+  }
+  /** カメオ: a placeholder while editing; while presenting, the camera (the player starts it). */
+  function cameraBody(o, rotEl, ctx) {
+    const radius = o.mask === "ellipse" ? "50%" : o.mask === "roundRect" ? "12%" : "0";
+    const box = h("div", { class: "hs-camera", style: { "border-radius": radius, "--cb": o.stroke === "none" ? "transparent" : o.stroke, "--cw": `${o.strokeW ?? 3}px` } });
+    if (ctx.live) box.append(h("video", { class: "hs-camera-feed", autoplay: true, muted: true, playsinline: true }));
+    else box.append(h("div", { class: "hs-camera-placeholder" }, h("span", {}, "カメラ")));
+    rotEl.append(box);
+  }
+
   /** One object, as kept in a deck: unknown fields go, numbers are clamped, text is made safe. Null if unusable. */
   function normalizeObject(raw) {
     if (!raw || typeof raw !== "object" || !KINDS.includes(raw.kind)) return null;
@@ -1276,6 +1447,9 @@
         blur: num(raw.shadow.blur, 0, 500, 0), color, opacity: num(raw.shadow.opacity, 0, 1, 1) };
     }
     for (const key of ["locked", "hidden"]) if (raw[key] === true) o[key] = true;
+    // 代替テキスト (what a screen reader says for the object) or 装飾用 (a screen reader skips it).
+    if (raw.decorative === true) o.decorative = true;
+    else if (typeof raw.alt === "string" && raw.alt.trim()) o.alt = raw.alt.trim().slice(0, 500);
     if (typeof raw.group === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(raw.group)) o.group = raw.group;
     // The layout item an object came from (図形に変換): its "詳しく" card and deep-dive page open from it.
     if (typeof raw.item === "string" && /^[A-Za-z]{1,20}(\[\d{1,2}\])?$/.test(raw.item)) o.item = raw.item;
@@ -1332,13 +1506,15 @@
       if (psp) o.psp = psp;
       if (Array.isArray(raw.pad) && raw.pad.length === 4) o.pad = raw.pad.map((v) => num(v, 0, 400, 0));
       if (AUTOFIT[raw.autofit]) o.autofit = raw.autofit;
+      // 段組み: the words run in two to four columns.
+      const cols = Math.round(num(raw.cols, 1, 4, 1));
+      if (cols > 1) { o.cols = cols; const gap = num(raw.colGap, 0, 200); if (gap != null) o.colGap = gap; }
     }
     // Pictures, videos, animations
     if (["image", "video", "audio", "lottie"].includes(o.kind)) {
       const src = typeof raw.src === "string" ? raw.src.trim() : "";
       if (!/^(data:(image|video|audio|application\/json)|idb:|asset:|https?:\/\/|blob:)/i.test(src) || src.length > 80_000_000) return null;
       o.src = src;
-      if (typeof raw.alt === "string" && raw.alt.trim()) o.alt = raw.alt.trim().slice(0, 200);
       if (typeof raw.fileName === "string" && raw.fileName.trim()) o.fileName = raw.fileName.trim().slice(0, 200);
       if (FITS[raw.fit]) o.fit = raw.fit;
       if (o.kind === "image") {
@@ -1356,6 +1532,40 @@
         for (const key of ["autoplay", "loop", "muted"]) if (typeof raw[key] === "boolean") o[key] = raw[key];
       }
       if (o.kind === "video" || o.kind === "audio") Object.assign(o, normalizePlayback(raw, o.kind));
+    }
+    if (o.kind === "zoom") {
+      // スライド ズーム: a live picture of another slide; clicking it in the show goes there (and back).
+      if (typeof raw.target !== "string" || !/^[A-Za-z0-9_-]{1,32}$/.test(raw.target)) return null;
+      o.target = raw.target;
+      if (raw.back === false) o.back = false;
+      const stroke = colorOrNone(raw.stroke);
+      if (stroke) o.stroke = stroke;
+      const strokeW = num(raw.strokeW, 0, 40);
+      if (strokeW != null) o.strokeW = strokeW;
+    }
+    if (o.kind === "equation") {
+      // 数式: kept as TeX (\frac{a}{b}, x^2, \sqrt{x}, \sum_{i=1}^{n}…), drawn as MathML.
+      const tex = typeof raw.tex === "string" ? raw.tex.replace(/[\u0000-\u001f]/g, " ").slice(0, 2000) : "";
+      if (!tex.trim()) return null;
+      o.tex = tex;
+      const fs = num(raw.fs, 12, 300);
+      if (fs != null) o.fs = fs;
+      const color = hexColor(raw.color);
+      if (color) o.color = color;
+      if (["left", "center", "right"].includes(raw.align)) o.align = raw.align;
+    }
+    if (o.kind === "camera") {
+      // カメオ: the presenter's camera, live on the slide (a circle or another shape).
+      if (["rect", "roundRect", "ellipse"].includes(raw.mask)) o.mask = raw.mask;
+      const stroke = colorOrNone(raw.stroke);
+      if (stroke) o.stroke = stroke;
+      const strokeW = num(raw.strokeW, 0, 40);
+      if (strokeW != null) o.strokeW = strokeW;
+    }
+    if (o.kind === "ink") {
+      const strokes = normalizeStrokes(raw.strokes);
+      if (!strokes.length) return null;
+      o.strokes = strokes;
     }
     if (o.kind === "smartart") {
       o.smartart = normalizeSmartart(raw.smartart);
@@ -2280,7 +2490,9 @@
       const [l, t, r, b] = g.text;
       const [pt, pr, pb, pl] = o.pad;
       const box = h("div", { class: ["hs-obj-text", o.vertical ? "is-vertical" : ""], "data-valign": o.valign, style: { left: `${r2(l + pl)}px`, top: `${r2(t + pt)}px`, width: `${r2(Math.max(0, r - l - pl - pr))}px`, height: `${r2(Math.max(0, b - t - pt - pb))}px` } });
-      box.append(textNode(o, scale));
+      const tx = textNode(o, scale);
+      if (o.cols > 1) { tx.style.columnCount = String(o.cols); tx.style.columnGap = `${o.colGap ?? 28}px`; tx.style.width = "100%"; }
+      box.append(tx);
       rotEl.append(box);
     }
   }
@@ -2881,7 +3093,7 @@
       frame.style.clipPath = `path(${g.rule === "evenodd" ? "evenodd, " : ""}'${g.paths.join(" ")}')`;
     }
     if (url) {
-      const img = h("img", { src: url, alt: o.alt || "", draggable: "false", decoding: "async" });
+      const img = h("img", { src: url, alt: o.decorative ? "" : o.alt || "", draggable: "false", decoding: "async" });
       if (o.crop) {
         const { l, t, r, b } = o.crop;
         Object.assign(img.style, { position: "absolute", width: `${(100 / (1 - l - r)).toFixed(4)}%`, height: `${(100 / (1 - t - b)).toFixed(4)}%`, left: `${((-l / (1 - l - r)) * 100).toFixed(4)}%`, top: `${((-t / (1 - t - b)) * 100).toFixed(4)}%`, "max-width": "none" });
@@ -2949,6 +3161,10 @@
       "data-stroke": ["shape", "text", "image"].includes(o.kind) && o.stroke !== "none" ? o.stroke : null,
       "data-autofit": o.autofit && o.autofit !== "none" ? o.autofit : null, "data-item": o.item || null,
       "data-bbox": Object.values(bounds(o)).map(r2).join(","),
+      // Screen readers: a decorative object is skipped; a picture-like object says its alternative text.
+      "aria-hidden": o.decorative ? "true" : null,
+      role: !o.decorative && o.alt && !["shape", "text", "table", "image"].includes(o.kind) ? "img" : null,
+      "aria-label": !o.decorative && o.alt && o.kind !== "image" ? o.alt : null,
       style: { left: `${r2(o.x)}px`, top: `${r2(o.y)}px`, width: `${r2(o.w)}px`, height: `${r2(o.h)}px` },
     });
     const move = h("div", { class: "hs-obj-move" });
@@ -2969,6 +3185,10 @@
     } else if (o.kind === "image") imageBody(o, rot, ctx);
     else if (o.kind === "table") tableBody(o, rot);
     else if (o.kind === "smartart") smartartBody(o, rot, scale);
+    else if (o.kind === "ink") inkBody(o, rot);
+    else if (o.kind === "zoom") zoomBody(o, rot, ctx);
+    else if (o.kind === "camera") cameraBody(o, rot, ctx);
+    else if (o.kind === "equation") equationBody(o, rot);
     else if (o.kind === "chart") chartBody(o, rot);
     else if (o.kind === "icon") {
       const icon = E.icon(o.icon, "hs-obj-icon");
@@ -2996,6 +3216,7 @@
     move.append(fx);
     el.append(move);
     if (o.opacity != null) el.style.opacity = String(o.opacity);
+    fillFields(el, ctx);
     if (ctx.live) {
       if (o.action) { el.dataset.action = o.action.type; el.title = o.action.type === "url" ? o.action.href : ""; }
       if (o.action?.type === "popup") el.dataset.detail = `obj:${o.id}`;
@@ -3089,5 +3310,6 @@
     corners, bounds, sites, lineEnds, linePath, objectLayer, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,
+    normalizeStrokes, inkPath, INK_COLORS, texToMathML,
   });
 })(typeof window !== "undefined" ? window : globalThis);

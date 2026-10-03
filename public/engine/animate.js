@@ -725,11 +725,23 @@
         out.push(...animateEl(c, part.fx, dir([{ clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)" }])));
         continue;
       }
+      // Ink (描画) is drawn again stroke by stroke, in the order it was written (PowerPoint's 描画で再生).
+      const ink = node.dataset?.kind === "ink";
+      const total = pens.reduce((sum, el) => { try { return sum + el.getTotalLength(); } catch { return sum; } }, 0) || 1;
+      let done = 0;
       for (const el of pens) {
         let len = 0;
         try { len = el.getTotalLength(); } catch { len = 0; }
         if (!len) continue;
         const dash = `${len} ${len}`;
+        if (ink) {
+          const start = done / total;
+          done += len;
+          const end = done / total;
+          const frames = [{ strokeDasharray: dash, strokeDashoffset: `${len}`, offset: 0 }, { strokeDasharray: dash, strokeDashoffset: `${len}`, offset: start }, { strokeDasharray: dash, strokeDashoffset: "0", offset: Math.max(end, start + 0.001) }, { strokeDasharray: dash, strokeDashoffset: "0", offset: 1 }].filter((f, i, all) => i === 0 || f.offset > all[i - 1].offset || i === all.length - 1);
+          out.push(...animateEl({ ...c, easing: "linear" }, el, dir(frames)));
+          continue;
+        }
         const frames = temp.includes(el)
           ? [{ strokeDasharray: dash, strokeDashoffset: `${len}`, opacity: 1 }, { strokeDasharray: dash, strokeDashoffset: "0", opacity: 1, offset: 0.65 }, { strokeDasharray: dash, strokeDashoffset: "0", opacity: 0 }]
           : [{ strokeDasharray: dash, strokeDashoffset: `${len}` }, { strokeDasharray: dash, strokeDashoffset: "0", offset: 0.7 }, { strokeDasharray: dash, strokeDashoffset: "0" }];

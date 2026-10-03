@@ -742,6 +742,9 @@ export function createCanvas(app) {
       startTyping(hit.id, { cell: td ? [Number(td.dataset.r), Number(td.dataset.c)] : [0, 0], at: [event.clientX, event.clientY] });
     } else if (hit.kind === "image") app.showTab?.("picture");
     else if (hit.kind === "chart") app.editChart?.(hit.id);
+    else if (hit.kind === "equation" && !hit.locked) app.editEquation?.(hit.id);
+    else if (hit.kind === "zoom") app.showTab?.("zoomTool");
+    else if (hit.kind === "ink") app.showTab?.("draw");
     else if (hit.kind === "smartart" && !hit.locked) {
       // The item under the pointer opens in the SmartArt's テキスト ウィンドウ.
       const node = document.elementsFromPoint(event.clientX, event.clientY).map((el) => el.closest?.("[data-item]")).find((el) => el?.closest?.(`[data-el="${hit.id}"]`));
@@ -1451,6 +1454,9 @@ export function createCanvas(app) {
       one?.kind === "chart" && { label: "データの編集…", run: () => app.editChart?.(one.id) },
       one?.kind === "smartart" && !one.locked && { label: "テキスト ウィンドウ", run: () => app.editSmartart?.(one.id, null) },
       one?.kind === "smartart" && !one.locked && { label: "図形に変換", run: () => app.smartartToShapes?.(one.id) },
+      one?.kind === "equation" && !one.locked && { label: "数式の編集…", run: () => app.editEquation?.(one.id) },
+      one?.kind === "zoom" && { label: "ズーム先へ移動", run: () => { const i = app.slideOfSid?.(one.target) ?? -1; if (i >= 0) app.select?.(i); } },
+      one?.kind === "ink" && { label: "描画タブ（ペン・消しゴム・インクを図形に変換）", run: () => app.showTab?.("draw") },
       !any && { label: "すべて選択", keys: "⌘A", run: () => { ed.sel = visible().map((o) => o.id); draw(); emit(); } },
       !any && { label: "図形を描く…", run: () => app.showTab?.("insert") },
       !any && app.canConvert?.() && "-",
