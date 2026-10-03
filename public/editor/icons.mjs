@@ -117,7 +117,6 @@ const P = {
   previewPlay: '<circle cx="12" cy="12" r="9"/><path d="m10 8.5 5.5 3.5-5.5 3.5z" fill="currentColor"/>',
   transition: '<rect x="2.5" y="6" width="12" height="9" rx="1"/><rect x="9.5" y="9" width="12" height="9" rx="1" fill="currentColor" fill-opacity=".2"/><path d="M12 3.5h3.5V6"/>',
   applyAll: '<rect x="3" y="3" width="8" height="6" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="11" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="6" rx="1"/><path d="M8 21h8"/>',
-  pen: '<path d="M4 20 15.5 8.5l-4-4L4 16z"/><path d="m11.5 4.5 2-2 4 4-2 2"/>',
   // インタラクション (HTML only)
   magic: '<path d="m4 20 11-11M13 7l2-2 2 2-2 2zM18 3v3M16.5 4.5h3M20 10v2M19 11h2M8 3v2M7 4h2"/>',
   hover: '<path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V10M12 9.5a1.5 1.5 0 0 1 3 0V11M15 10.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-.5a6 6 0 0 1-4.6-2.2L4.5 15.6a1.5 1.5 0 0 1 2.3-1.9L9 16"/>',
@@ -177,6 +176,15 @@ const P = {
   lockFile: '<rect x="5" y="10.5" width="14" height="10" rx="1.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5M12 14.5v2.5"/>',
   customShow: '<rect x="3" y="4" width="8" height="6" rx=".8"/><rect x="13" y="4" width="8" height="6" rx=".8"/><rect x="3" y="14" width="8" height="6" rx=".8"/><path d="m14 17 2 2 4-4"/>',
   subtitles: '<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M7 15.5h10M9 12.5h6"/>',
+  equation: '<path d="M4 6h7l-4 6 4 6H4"/><path d="M14 10h6M14 14h6"/>',
+  columns: '<path d="M3.5 5h7M3.5 9h7M3.5 13h7M3.5 17h5M13.5 5h7M13.5 9h7M13.5 13h7M13.5 17h4"/>',
+  textCase: '<path d="M3 18 7.5 6h1L13 18M4.6 14h6.8"/><path d="M15 12.5c1-1.2 4.5-1.5 4.5 1.2V18M19.5 15c-3-.6-5 .2-5 1.6s2.6 1.8 5-.6"/>',
+  screenshot: '<path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><rect x="8" y="9" width="8" height="6" rx="1"/>',
+  print: '<path d="M7 8V3.5h10V8"/><rect x="3.5" y="8" width="17" height="8" rx="1.5"/><path d="M7 13.5h10v7H7z"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
+  spell: '<path d="M3 15 7 4h1l4 11M4.4 11.5h6.2"/><path d="m12 17 3 3 6-7"/>',
+  record: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
+  video2: '<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="m10 9 5 3-5 3z" fill="currentColor"/><path d="M3 9h3M3 15h3M18 9h3M18 15h3"/>',
 };
 
 export function ico(name, size = 18) {

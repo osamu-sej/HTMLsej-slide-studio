@@ -11,6 +11,8 @@ import { createShell } from "./editor/window.mjs?v=__APP_VERSION__";
 import { createComments } from "./editor/comments.mjs?v=__APP_VERSION__";
 import { userName } from "./editor/people.mjs?v=__APP_VERSION__";
 import { createCoedit } from "./editor/coedit.mjs?v=__APP_VERSION__";
+import { inkObject } from "./editor/ink.mjs?v=__APP_VERSION__";
+import { createShowTools, customShowsOf, keptInk, playerOptions, showOf, showSlides } from "./editor/show.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -629,6 +631,9 @@ function normalizeDeck(value, base = null) {
     motion: normalizeMotion(meta.motion ?? base?.motion ?? DEFAULT_MOTION),
     memo: String(meta.memo ?? base?.memo ?? "").slice(0, 2000),
     ...(guidesOf(meta.guides ?? base?.guides) ? { guides: guidesOf(meta.guides ?? base?.guides) } : {}),
+    // スライド ショーの設定・目的別スライド ショー.
+    ...(showOf(meta.show ?? base?.show) ? { show: showOf(meta.show ?? base?.show) } : {}),
+    ...(customShowsOf(meta.customShows ?? base?.customShows) ? { customShows: customShowsOf(meta.customShows ?? base?.customShows) } : {}),
     slides: normalized,
   });
 }
@@ -2239,6 +2244,7 @@ const editorApp = {
   resetAllActions,
   prepareActionPlanPrompt,
   previewMotion: (opts) => previewMotion(opts),
+  previewEffect: (entries) => previewEffect(entries),
   previewTransition: () => previewTransition(),
   stopPreview: () => stopMotionPreview(),
   previewing: () => Boolean(state.motionPreview),
@@ -2259,6 +2265,11 @@ const editorApp = {
   ensureSid,
   slideOfSid: (sid) => state.deck?.slides.findIndex((slide) => slide.sid === sid) ?? -1,
   insertBlankSlide: () => insertSlide(Math.min(state.selected + 1, state.deck.slides.length - 1), defaultSlide("blank")),
+  // サマリー ズーム: a new slide after this one, made with its parts already on it.
+  insertSlideWith: (partial) => insertSlide(Math.min(state.selected + 1, state.deck.slides.length - 1), { ...defaultSlide(partial?.type || "blank"), ...partial }),
+  select: (index) => select(index),
+  onSlide: () => state.mode === "edit" && state.view === "single" && Boolean(state.deck?.slides[state.selected]),
+  editEquation: (id) => editorUi.editEquation(id),
   duplicateSlide: () => { const i = state.selected; if (i > 0 && i < state.deck.slides.length - 1) insertSlide(i + 1, copyOf(state.deck.slides[i])); else toast("表紙と最後のスライドは複製できません"); },
   openTypeDialog: (mode) => openTypeDialog(mode),
   setView: (view) => setView(view),
@@ -2280,6 +2291,13 @@ const editorApp = {
   setDeckDesign: (patch) => setDeckDesign(patch),
   openDesign: () => openDesignDialog(),
   presentFrom: (index) => openPresenter(index),
+  presentCustom: (id) => openPresenter(0, { custom: id }),
+  customShows: () => customShowsOf(state.deck?.customShows) || [],
+  showSettings: () => showOf(state.deck?.show) || {},
+  setShowSettings: (patch) => setDeckFields({ show: showOf({ ...(showOf(state.deck?.show) || {}), ...patch }) }),
+  openShowSettings: () => showTools.openSettings(),
+  openCustomShows: (id) => showTools.openCustomShows(id),
+  setDeckFields: (patch) => setDeckFields(patch),
   toggleHiddenSlide: () => toggleHiddenSlide(),
   presenterView: () => presenterViewOn(),
   setPresenterView: (on) => setPresenterViewOn(on),
@@ -2332,6 +2350,8 @@ const editorApp = {
   printPdf: () => printPdf(),
 };
 const converter = createConverter(editorApp);
+// スライド ショーの設定・目的別スライド ショー (public/editor/show.mjs).
+const showTools = createShowTools(editorApp);
 const editor = createCanvas(editorApp);
 const editorUi = createEditorUi(editor, editorApp);
 // The window around the slide: splitters, notes, message bar, status bar (public/editor/window.mjs).
@@ -2853,14 +2873,15 @@ async function onStageDrop(event) {
  * `from`: start at that click step with the earlier ones already done (the animation pane's 「ここから再生」);
  * `auto: false` waits for clicks instead of playing the clicks by itself.
  */
-function previewMotion({ from = 0, auto = true, brief = false } = {}) {
+function previewMotion({ from = 0, auto = true, brief = false, slide: shown = null } = {}) {
   if (!state.deck || state.view !== "single") { setView("single"); }
   const wrap = document.querySelector("#stageBody .slide-wrap");
   if (!wrap) return;
   if (state.inline) finishInlineEdit(true);
   stopMotionPreview({ render: false });
   const index = state.selected;
-  const slide = state.deck.slides[index];
+  // `shown`: the slide with other animations than its own (描画で再生 plays only the ink being written).
+  const slide = shown || state.deck.slides[index];
   const el = E.render(slide, renderOptions({ index, mode: "present", fit: fitFor(index) ?? undefined }));
   const scaler = E.mount(el);
   const steps = () => E.stepsOf(el);
@@ -2868,7 +2889,7 @@ function previewMotion({ from = 0, auto = true, brief = false } = {}) {
   const count = h("span", {});
   const updateCount = () => { count.textContent = steps() ? `クリックで次へ（${step}/${steps()}）` : "マウスを乗せる・クリックで詳細"; };
   const banner = h("div", { class: "motion-banner" }, "▶ 動きを確認中", count,
-    h("button", { class: "btn", type: "button", onclick: (event) => { event.stopPropagation(); previewMotion({ auto }); } }, "もう一度"),
+    h("button", { class: "btn", type: "button", onclick: (event) => { event.stopPropagation(); previewMotion({ auto, brief, slide: shown }); } }, "もう一度"),
     h("button", { class: "btn", type: "button", onclick: (event) => { event.stopPropagation(); stopMotionPreview(); } }, "編集に戻る"));
   wrap.replaceChildren(scaler, banner);
   // Starting later, what comes before is already done; the step itself then plays.
@@ -2896,6 +2917,18 @@ function previewMotion({ from = 0, auto = true, brief = false } = {}) {
     };
     state.motionPreview.timer = setTimeout(next, Math.max(1100, first + 500));
   }
+}
+
+/** Plays only these animations on the stage (the slide's own are left alone), then goes back to editing. */
+function previewEffect(entries) {
+  const slide = state.deck?.slides[state.selected];
+  if (!slide || !entries?.length) return;
+  const timeline = E.normalizeTimeline(entries, slide);
+  if (!timeline.length) return;
+  previewMotion({ slide: { ...slide, timeline }, brief: true });
+  const el = state.motionPreview?.el;
+  const total = Math.max(...timeline.map((e) => (e.delay || 0) + (e.dur || 600)));
+  setTimeout(() => { if (state.motionPreview?.el === el) stopMotionPreview(); }, Math.min(10000, total + 1200));
 }
 
 /** The 画面切り替え tab's 「プレビュー」: the slide before gives way to this one, with this slide's transition. */
@@ -3898,6 +3931,16 @@ function openDesignDialog() {
   renderMotionGrids();
   syncDesignControls();
   $("designDialog").showModal();
+}
+
+/** Deck settings that are not slides (the show's settings, custom shows): one undo step; null removes one. */
+function setDeckFields(patch) {
+  if (!state.deck) return;
+  pushUndo();
+  for (const [key, value] of Object.entries(patch)) {
+    if (value == null) delete state.deck[key]; else state.deck[key] = value;
+  }
+  markChanged({ structural: true });
 }
 
 function setDeckDesign(patch) {
@@ -5248,8 +5291,14 @@ async function openCheckDialog(forExport) {
 
 // ---------------------------------------------------------------- presenting
 
-async function openPresenter(start = state.selected) {
+async function openPresenter(start = state.selected, { custom = null } = {}) {
   if (!state.deck || state.player) return;
+  // スライド ショーの設定: which slides (a range or a custom show) and how the show runs.
+  const settings = showOf(state.deck.show) || {};
+  const only = showSlides(state.deck, settings, custom);
+  if (only && !only.includes(start)) start = only[0];
+  // Ink written in the show comes back to the slides it was written on, found by their ids.
+  const sidsAtStart = state.deck.slides.map((slide) => slide.sid || null);
   if (state.inline) finishInlineEdit(true);
   stopMotionPreview({ render: false });
   const host = $("presenter");
@@ -5264,7 +5313,9 @@ async function openPresenter(start = state.selected) {
     fitFor: (i) => fitFor(i) ?? undefined,
     renderOptions: { assetBase: "/assets/", mediaUrls },
     fullscreenTarget: host,
-    onClose: ({ index }) => closePresenter(index),
+    ...playerOptions(settings),
+    only,
+    onClose: ({ index, ink }) => closePresenter(index, { ink, sidsAtStart }),
   });
   if (presenterViewOn()) state.player.openPresenterView?.();
 }
@@ -5311,16 +5362,29 @@ function keepRehearsal(times) {
   toast(`${count}枚のタイミングを保存しました（画面切り替えタブの「自動的に切り替え」で変えられます。⌘Zで戻せます）`);
 }
 
-function closePresenter(index) {
+function closePresenter(index, { ink = [], sidsAtStart = null } = {}) {
   const rehearsal = state.rehearsal;
   if (rehearsal) { clearInterval(rehearsal.timer); rehearsal.finish(); state.rehearsal = null; }
-  queueMicrotask(() => { if (rehearsal) keepRehearsal(rehearsal.times); });
+  queueMicrotask(() => { if (rehearsal) keepRehearsal(rehearsal.times); if (ink?.length) keepShowInk(ink, sidsAtStart); });
   state.player = null;
   const host = $("presenter");
   host.classList.add("hidden");
   host.replaceChildren();
   if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   if (Number.isInteger(index)) select(index);
+}
+
+/** PowerPoint asks, after a show with ink: keep the annotations? They become ink objects on their slides (one undo). */
+function keepShowInk(ink, sidsAtStart) {
+  if (!state.deck) return;
+  const count = ink.reduce((sum, item) => sum + (item.strokes?.length || 0), 0);
+  if (!count || !window.confirm(`発表中に書いたインク（${count}本）を保持しますか？\n「OK」でスライドに残し、「キャンセル」で破棄します。`)) return;
+  const made = keptInk(ink, sidsAtStart, state.deck, (strokes) => inkObject(strokes, E.newObjectId()));
+  if (!made.size) return;
+  pushUndo();
+  for (const [i, objects] of made) state.deck.slides[i].elements = [...(state.deck.slides[i].elements || []), ...objects];
+  markChanged({ structural: true });
+  toast(`${made.size}枚のスライドにインクを残しました（描画タブで消しゴム・図形に変換。⌘Zで戻せます）`);
 }
 
 async function printPdf() {
@@ -5453,12 +5517,18 @@ const EXPORT_BOOT = `(async function () {
   // "#5" opens slide 5; "#static" (or "#5-static") shows every slide finished, without motion.
   var still = /static/.test(location.hash);
   var start = Math.max(0, (parseInt((location.hash.match(/\\d+/) || ["1"])[0], 10) || 1) - 1);
-  E.createPlayer(document.body, {
-    deck: data.deck, start: start, closable: false, static: still,
+  // スライド ショーの設定 (a kiosk, looping, the slides it plays, timings, the pen colour) travel with the file.
+  var opts = {
+    deck: data.deck, start: start, closable: false,
     fitFor: function (i) { return data.fits[i] || undefined; },
     renderOptions: { assetMap: data.assets, assetBase: "" },
     onChange: function (s) { try { history.replaceState(null, "", "#" + (s.index + 1) + (still ? "-static" : "")); } catch (e) {} }
-  });
+  };
+  var show = data.show || {};
+  for (var key in show) if (Object.prototype.hasOwnProperty.call(show, key) && show[key] != null) opts[key] = show[key];
+  opts.static = still || Boolean(show.static);
+  if (opts.only && opts.only.indexOf(start) < 0) opts.start = opts.only[0];
+  E.createPlayer(document.body, opts);
 })();`;
 
 async function exportHtml({ checked = false } = {}) {
@@ -5478,7 +5548,7 @@ async function exportHtml({ checked = false } = {}) {
     const { deck, assets, bytes, missing } = await portableDeck();
     if (deck.slides[0].type === "title" && !deck.slides[0].date) deck.slides[0].date = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
     const fits = state.deck.slides.map((_, i) => { const fit = fitFor(i); return fit ? { fs: fit.fs, ts: fit.ts } : null; });
-    const html = await standaloneHtml({ title: deck.title, body: '<div class="hs-boot">読み込み中…</div>', boot: EXPORT_BOOT, data: { deck, fits, assets }, player: true });
+    const html = await standaloneHtml({ title: deck.title, body: '<div class="hs-boot">読み込み中…</div>', boot: EXPORT_BOOT, data: { deck, fits, assets, show: { ...playerOptions(showOf(deck.show)), only: showSlides(deck, showOf(deck.show)) } }, player: true });
     const fileName = `${fileSafe(deck.title, "presentation")}_${today()}.html`;
     await downloadBlob(new Blob([html], { type: "text/html" }), fileName);
     state.historyId = saveHistory({ exported: fileName });

@@ -1,6 +1,6 @@
 {
   "name": "htmlsej-slide-studio",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "private": true,
   "type": "module",
   "description": "AI-built slide decks as moving HTML presentations in the SEJ corporate template: outline, edit, talk to the AI, present over a screen share, and export a single HTML file.",
@@ -26,6 +26,8 @@
     "qa:media": "node qa/studio-media.mjs",
     "qa:graphics": "node qa/studio-graphics.mjs",
     "qa:coedit": "node qa/studio-coedit.mjs",
+    "qa:draw": "node qa/studio-draw.mjs",
+    "qa:show": "node qa/studio-show.mjs",
     "qa:sej": "node qa/shoot.mjs --themes=sej --deck=/qa/all-layouts.json && node qa/shoot.mjs --themes=sej --deck=/qa/sej-pages.json --per=8"
   },
   "engines": {

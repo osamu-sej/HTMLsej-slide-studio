@@ -8,7 +8,7 @@
   "use strict";
   const E = root.SlideEngine;
   if (!E) throw new Error("engine.js must load before motion.js");
-  const { h } = E;
+  const { h, s } = E;
 
   const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -766,12 +766,19 @@
     const slides = deck.slides || [];
     const total = slides.length;
     const story = E.storyMap(slides);
-    const order = story.order.length ? story.order : slides.map((_, i) => i);
+    // スライド ショーの設定: a custom show (in its own order) or a range plays only those slides.
+    const shown = story.order.length ? story.order : slides.map((_, i) => i);
+    const only = Array.isArray(opts.only) && opts.only.length ? new Set(opts.only.filter((i) => shown.includes(i))) : null;
+    const order = only?.size ? [...only] : [...shown];
+    if (!order.length) order.push(0);
+    const kiosk = Boolean(opts.kiosk);
+    const looping = Boolean(opts.loop || kiosk);
     const place = (i) => Math.max(0, order.indexOf(story.parent[i] ?? i));
     const transition = TRANSITIONS.has(deck.transition) ? deck.transition : "fade";
     const doc = host.ownerDocument;
     const win = doc.defaultView;
     let index = Math.max(0, Math.min(total - 1, opts.start || 0));
+    if (only?.size && !only.has(story.parent[index] ?? index)) index = order[0];
     let step = 0;
     let current = null;
     let interaction = null;
@@ -799,6 +806,8 @@
       h("span", { class: "hs-player-spacer" }),
       btn("一覧", "スライド一覧（O・G）", () => toggleGrid()),
       btn("自動デモ", "自動デモ：矢印が各ページを操作して見せます（D）", () => demo(), "demo"),
+      btn("ペン", "ペンとレーザー ポインター（Ctrl+P ペン・Ctrl+I 蛍光ペン・Ctrl+L レーザー・Ctrl+E 消しゴム・E すべて消去・Ctrl+A 矢印）", () => togglePenMenu(), "pen"),
+      btn("字幕", "話した言葉を字幕で表示（J）：マイクを使います（Chrome・Edge）", () => toggleCaptions(), "captions"),
       btn("ノート", "ノートを表示（N）", () => toggleNotes()),
       btn("発表者ビュー", "別ウィンドウにノート・次のスライド・経過時間（P）", () => openPresenterView()),
       btn("全画面", "全画面（F）", () => toggleFullscreen()),
@@ -807,10 +816,126 @@
     const black = h("div", { class: "hs-player-black", hidden: true, onclick: (event) => { event.stopPropagation(); black.hidden = true; } });
     const backBtn = h("button", { class: "hs-player-back", type: "button", hidden: true, title: "元のスライドへ戻る（Esc・←）", onclick: (event) => { event.stopPropagation(); closeDrill(); } }, "← 元のスライドへ");
     // Sounds set to play on across slides (再生 →「スライド切り替え後も再生」) move here when their slide is left.
+    // Writing on the slides while presenting (ペン・蛍光ペン・レーザー ポインター), kept per slide.
+    const inkSvg = s("svg", { class: "hs-show-ink", viewBox: "0 0 1920 1080", preserveAspectRatio: "none", "aria-hidden": "true" });
+    const laser = h("div", { class: "hs-laser", hidden: true });
+    const penMenu = h("div", { class: "hs-pen-menu", hidden: true });
+    const annotations = new Map();
+    let penMode = null;
+    let penColor = /^#[0-9a-f]{6}$/i.test(opts.penColor || "") ? opts.penColor : "#c00000";
+    // 字幕 (live subtitles): what the speaker says, written under the slide (the browser's speech recognition).
+    const captionBox = h("div", { class: "hs-captions", hidden: true, "aria-live": "polite" });
+    let captions = null;
     const carryHost = h("div", { class: "hs-carry", hidden: true });
     const carried = [];
-    const player = h("div", { class: "hs-player", tabindex: "-1" }, stage, progress, notes, backBtn, bar, grid, black, carryHost);
+    const player = h("div", { class: "hs-player", tabindex: "-1" }, stage, progress, notes, backBtn, bar, grid, black, carryHost, inkSvg, laser, penMenu, captionBox);
     host.append(player);
+    if (kiosk) player.classList.add("kiosk");
+
+    /** The ink layer lies exactly over the slide shown (its own 1920 × 1080 coordinates). */
+    function placeInk() {
+      const slideEl = current?.firstElementChild;
+      if (!slideEl) return;
+      const r = slideEl.getBoundingClientRect();
+      const base = player.getBoundingClientRect();
+      Object.assign(inkSvg.style, { left: `${r.left - base.left}px`, top: `${r.top - base.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+    }
+    const inkPathD = (pts) => (pts.length === 1 ? `M${pts[0][0]} ${pts[0][1]} l0.01 0` : `M${pts.map(([x, y]) => `${Math.round(x * 10) / 10} ${Math.round(y * 10) / 10}`).join(" L")}`);
+    function drawInk() {
+      const list = annotations.get(index) || [];
+      inkSvg.replaceChildren(...list.map((st) => s("path", { d: inkPathD(st.pts), fill: "none", stroke: st.color, "stroke-width": st.width, "stroke-linecap": st.highlighter ? "square" : "round", "stroke-linejoin": "round", "stroke-opacity": st.highlighter ? 0.9 : 1, class: st.highlighter ? "hs-ink-hl" : null })));
+      placeInk();
+    }
+    function setPen(mode) {
+      penMode = penMode === mode ? null : mode;
+      player.classList.toggle("pen-on", Boolean(penMode));
+      player.dataset.pen = penMode || "";
+      laser.hidden = penMode !== "laser";
+      penMenu.hidden = true;
+      if (penMode) flash({ pen: "ペン：ドラッグで書けます（Escで終わる）", highlighter: "蛍光ペン", laser: "レーザー ポインター", eraser: "消しゴム：消したい線をなぞる" }[penMode]);
+    }
+    function eraseAll() { annotations.delete(index); drawInk(); }
+    // カメオ: one camera for the whole show, shown in every camera object; stopped when the show ends.
+    let camera = null;
+    async function startCameras(slideEl) {
+      const feeds = [...slideEl.querySelectorAll(".hs-camera-feed")];
+      if (!feeds.length) return;
+      try {
+        camera ||= navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        const stream = await camera;
+        for (const video of feeds) { video.srcObject = stream; video.play().catch(() => {}); }
+      } catch {
+        camera = null;
+        flash("カメラを使えません（ブラウザでカメラを許可してください）");
+      }
+    }
+    function toggleCaptions() {
+      if (captions) { const rec = captions; captions = null; try { rec.stop(); } catch { /* stopped */ } captionBox.hidden = true; player.classList.remove("with-captions"); flash("字幕をオフにしました"); return; }
+      const Recognition = win.SpeechRecognition || win.webkitSpeechRecognition;
+      if (!Recognition) { flash("このブラウザは字幕に対応していません（Chrome・Edgeで使えます）"); return; }
+      const rec = new Recognition();
+      rec.lang = opts.captionLang || "ja-JP";
+      rec.continuous = true;
+      rec.interimResults = true;
+      let done = "";
+      rec.onresult = (event) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const text = event.results[i][0].transcript;
+          if (event.results[i].isFinal) done = `${done} ${text}`.trim().slice(-160); else interim += text;
+        }
+        captionBox.textContent = `${done} ${interim}`.trim().slice(-120);
+      };
+      rec.onerror = (event) => { if (event.error === "not-allowed" || event.error === "service-not-allowed") { flash("マイクを使えないため字幕を出せません"); captions = null; captionBox.hidden = true; } };
+      // Recognition stops by itself after a pause: it starts again while 字幕 is on.
+      rec.onend = () => { if (captions === rec) { try { rec.start(); } catch { /* starting */ } } };
+      try { rec.start(); } catch { flash("字幕を始められませんでした"); return; }
+      captions = rec;
+      captionBox.textContent = "（話すと字幕が出ます）";
+      captionBox.hidden = false;
+      player.classList.add("with-captions");
+    }
+    function togglePenMenu() {
+      if (!penMenu.hidden) { penMenu.hidden = true; return; }
+      const item = (label, mode, keys) => h("button", { type: "button", class: penMode === mode ? "on" : "", onclick: (event) => { event.stopPropagation(); setPen(mode); } }, h("span", {}, label), h("kbd", {}, keys));
+      penMenu.replaceChildren(
+        item("レーザー ポインター", "laser", "Ctrl+L"), item("ペン", "pen", "Ctrl+P"), item("蛍光ペン", "highlighter", "Ctrl+I"), item("消しゴム", "eraser", "Ctrl+E"),
+        h("div", { class: "hs-pen-colors" }, [["#c00000", "赤"], ["#1f3864", "濃紺"], ["#1a1a1a", "黒"]].map(([c, label]) => h("button", { type: "button", title: `インクの色：${label}`, class: penColor === c ? "on" : "", style: { background: c }, onclick: (event) => { event.stopPropagation(); penColor = c; if (penMode !== "pen") setPen("pen"); else penMenu.hidden = true; } }))),
+        h("button", { type: "button", onclick: (event) => { event.stopPropagation(); eraseAll(); penMenu.hidden = true; } }, h("span", {}, "スライド上のインクをすべて消去"), h("kbd", {}, "E")),
+        h("button", { type: "button", onclick: (event) => { event.stopPropagation(); if (penMode) setPen(penMode); penMenu.hidden = true; } }, h("span", {}, "矢印（ペンを使わない）"), h("kbd", {}, "Ctrl+A")));
+      penMenu.hidden = false;
+    }
+    const toSlide = (event) => { const r = inkSvg.getBoundingClientRect(); return [((event.clientX - r.left) / r.width) * 1920, ((event.clientY - r.top) / r.height) * 1080]; };
+    inkSvg.addEventListener("pointerdown", (event) => {
+      if (!penMode || penMode === "laser") return;
+      event.preventDefault();
+      event.stopPropagation();
+      inkSvg.setPointerCapture(event.pointerId);
+      const pts = [toSlide(event)];
+      // The highlighter is the SEJ pale blue, laid over the slide like a marker (multiplied, the words stay black).
+      const stroke = penMode === "eraser" ? null : { pts, color: penMode === "highlighter" ? "#dce4f2" : penColor, width: penMode === "highlighter" ? 26 : 5, highlighter: penMode === "highlighter" };
+      if (stroke) { if (!annotations.has(index)) annotations.set(index, []); annotations.get(index).push(stroke); }
+      const move = (ev) => {
+        const p = toSlide(ev);
+        if (stroke) { pts.push(p); drawInk(); return; }
+        const list = annotations.get(index) || [];
+        const kept = list.filter((st) => !st.pts.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 22 + st.width / 2));
+        if (kept.length !== list.length) { annotations.set(index, kept); drawInk(); }
+      };
+      const up = () => { inkSvg.removeEventListener("pointermove", move); inkSvg.removeEventListener("pointerup", up); };
+      inkSvg.addEventListener("pointermove", move);
+      inkSvg.addEventListener("pointerup", up);
+      drawInk();
+    });
+    inkSvg.addEventListener("click", (event) => { if (penMode) event.stopPropagation(); });
+    // The slide is rescaled when the window changes: the ink layer follows it.
+    const inkFollow = typeof ResizeObserver === "function" ? new ResizeObserver(() => requestAnimationFrame(placeInk)) : null;
+    inkFollow?.observe(stage);
+    player.addEventListener("pointermove", (event) => {
+      if (penMode !== "laser") return;
+      const base = player.getBoundingClientRect();
+      laser.style.transform = `translate(${event.clientX - base.left}px, ${event.clientY - base.top}px)`;
+    });
 
     /** Leaving a slide: its playing sounds that go on across slides keep playing (moved out of the slide). */
     function carrySounds(slideEl, from) {
@@ -868,8 +993,11 @@
      */
     function scheduleAdvance(slideEl, i) {
       clearTimeout(autoTimer);
-      const secs = Number(slides[i]?.advance);
-      if (slides[i]?.advance == null || !Number.isFinite(secs) || secs < 0 || still) return;
+      if (opts.useTimings === false) return;
+      // 自動プレゼンテーション (kiosk): a slide without a time of its own stays for a while, then the show moves on.
+      const secs = Number(slides[i]?.advance ?? (kiosk ? opts.kioskSeconds || 8 : NaN));
+      // The finished view (#static) stays put; 「アニメーションを表示しない」 still keeps the slides' timings.
+      if ((slides[i]?.advance == null && !kiosk) || !Number.isFinite(secs) || secs < 0 || (still && !opts.noAnimation)) return;
       const tick = () => {
         if (current?.firstElementChild !== slideEl || demoRun) return;
         if (E.animBusy?.(slideEl)) { autoTimer = setTimeout(tick, 200); return; }
@@ -908,6 +1036,8 @@
         interaction = activate(slide, { details: [...(slides[i]?.details || []), ...(E.objectDetails?.(slides[i]) || [])], elements: slides[i]?.elements || [], onDrill: back ? null : (to, el) => openDrill(to, el) });
         playMedia(slide, { sound: gesture, skip: playing });
         scheduleAdvance(slide, i);
+        drawInk();
+        startCameras(slide);
         if (still) return;
         // The first slide with clickable items says how to use them (once per presentation), and every page
         // rings what can be clicked once, right after it has arrived.
@@ -984,17 +1114,40 @@
         update();
         return;
       }
-      // At the end of a deep-dive page, the talk goes back to the slide it came from.
+      // At the end of a deep-dive page (or a zoomed-into slide), the talk goes back to the slide it came from.
+      if (zoomReturn()) return;
       if (back) { closeDrill(); return; }
       const pos = place(index);
       if (pos < order.length - 1) show(order[pos + 1], { dir: 1 });
+      // 「Esc キーが押されるまで繰り返す」: after the last slide, the first again.
+      else if (looping) show(order[0], { dir: 1 });
     }
 
     function prev() {
       if (interaction?.detailOpen) { interaction.closeDetail(); return; }
+      if (zoomReturn()) return;
       if (back) { closeDrill(); return; }
       const pos = place(index);
       if (pos > 0) show(order[pos - 1], { dir: -1, fullStep: true });
+    }
+
+    /** スライド ズーム: the slide grows out of its picture; at its end (ズームに戻る) the talk shrinks back into it. */
+    let zoomBack = null;
+    function zoomTo(o, el) {
+      const to = slides.findIndex((slide) => slide.sid === o.target);
+      if (to < 0) { flash("ズーム先のスライドが見つかりません"); return; }
+      const base = current?.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      const at = base ? { x: Math.round(r.left + r.width / 2 - base.left), y: Math.round(r.top + r.height / 2 - base.top) } : null;
+      zoomBack = o.back !== false ? { index, step, at } : null;
+      show(to, { dir: 1, via: "drill", at });
+    }
+    function zoomReturn() {
+      if (!zoomBack) return false;
+      const z = zoomBack;
+      zoomBack = null;
+      show(z.index, { dir: -1, atStep: z.step, via: "drill", at: z.at });
+      return true;
     }
 
     /** Open a deep-dive page (one level: not from another deep-dive page). */
@@ -1020,6 +1173,7 @@
 
     /** Go to a slide by its place in the deck; a deep-dive page opens over its slide. */
     function go(i) {
+      zoomBack = null;
       const target = Math.max(0, Math.min(total - 1, i));
       if (target === index) return;
       const parent = story.parent[target];
@@ -1048,8 +1202,10 @@
     }
 
     function close() {
+      // Ink written during the show goes back to the editor (which asks whether to keep it, as PowerPoint does).
+      const ink = [...annotations.entries()].filter(([, list]) => list.length).map(([i, list]) => ({ index: i, strokes: list }));
       destroy();
-      opts.onClose?.({ index });
+      opts.onClose?.({ index, ink });
     }
 
     // ---- presenter view: notes, the next slide and a clock in a second window (keep the audience window clean)
@@ -1227,8 +1383,21 @@
     // ---- input
     let digits = "";
     function onKey(event) {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.defaultPrevented) return;
+      // PowerPoint's pen keys: Ctrl+P ペン, Ctrl+I 蛍光ペン, Ctrl+L レーザー, Ctrl+E 消しゴム, Ctrl+A 矢印.
+      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+        const k = event.key.toLowerCase();
+        const mode = { p: "pen", i: "highlighter", l: "laser", e: "eraser" }[k];
+        if (mode) { event.preventDefault(); if (penMode !== mode) setPen(mode); return; }
+        if (k === "a") { event.preventDefault(); if (penMode) setPen(penMode); return; }
+        return;
+      }
+      if (event.altKey) return;
       const key = event.key;
+      if (kiosk && key !== "Escape") return;
+      if (penMode && key === "Escape") { event.preventDefault(); setPen(penMode); return; }
+      if (key === "e" || key === "E") { eraseAll(); return; }
+      if (key === "j" || key === "J") { toggleCaptions(); return; }
       gesture = true;
       if (key === "d" || key === "D") { demo(); return; }
       if (demoRun) { stopDemo(); if (key === "Escape") return; }
@@ -1257,7 +1426,9 @@
     }
     /** A shape, picture or text box with a link or an action (the editor's 「リンク・動作」) does that instead of advancing. */
     function act(el) {
-      const action = (slides[index]?.elements || []).find((o) => o.id === el.dataset.el)?.action;
+      const own = (slides[index]?.elements || []).find((o) => o.id === el.dataset.el);
+      if (own?.kind === "zoom") { zoomTo(own, el); return true; }
+      const action = own?.action;
       if (!action) return false;
       if (action.type === "next") next();
       else if (action.type === "prev") prev();
@@ -1272,10 +1443,14 @@
       return true;
     }
     const onStageClick = (event) => {
-      if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes, .hs-control, a[href]")) return;
+      if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes, .hs-control, a[href], .hs-pen-menu")) return;
+      // With a pen in hand, a click writes instead of moving on (the laser pointer still clicks through).
+      if (penMode && penMode !== "laser") return;
+      // A kiosk show only answers its buttons and links.
+      if (kiosk) { const actor = event.target.closest('.hs-obj[data-action], .hs-obj[data-kind="zoom"]'); if (actor) act(actor); return; }
       gesture = true;
       origin = { x: event.clientX, y: event.clientY };
-      const actor = event.target.closest(".hs-obj[data-action]");
+      const actor = event.target.closest('.hs-obj[data-action], .hs-obj[data-kind="zoom"]');
       if (actor && act(actor)) return;
       next();
     };
@@ -1309,6 +1484,9 @@
       interaction?.destroy();
       if (current?.firstElementChild) stopMedia(current.firstElementChild);
       for (const c of carried.splice(0)) E.mediaPause?.(c.audio, { stop: true });
+      inkFollow?.disconnect();
+      camera?.then((stream) => stream.getTracks().forEach((t) => t.stop())).catch(() => {});
+      if (captions) { const rec = captions; captions = null; try { rec.stop(); } catch { /* stopped */ } }
       clearTimeout(idle);
       if (pv?.win && !pv.win.closed) pv.win.close();
       clearInterval(pv?.timer);
@@ -1318,9 +1496,12 @@
     if (story.parent[index] != null) back = { index: story.parent[index], step: Infinity, at: null };
     show(index, { dir: 1, fullStep: Boolean(opts.fullStep) });
     player.focus({ preventScroll: true });
+    // スライド ショー →「常に字幕を使用」.
+    if (opts.captions) toggleCaptions();
 
     return {
-      el: player, next, prev, go, destroy, close, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill, demo, stopDemo,
+      el: player, next, prev, go, destroy, close, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill, demo, stopDemo, setPen, toggleCaptions,
+      get pen() { return penMode; }, get captioning() { return Boolean(captions); }, get order() { return [...order]; },
       get index() { return index; }, get step() { return step; }, get startedAt() { return started; }, get inDrill() { return Boolean(back); },
     };
   }

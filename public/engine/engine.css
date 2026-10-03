@@ -98,11 +98,13 @@
 .hs-smartart { position: absolute; inset: 0; }
 .hs-sa-step, .hs-sa-node { position: absolute; }
 .hs-sa-lines { position: absolute; left: 0; top: 0; overflow: visible; }
+/* Ink (描画): a highlighter lies under the words it marks. */
+.hs-ink .hs-ink-hl { mix-blend-mode: multiply; }
 /* A video shown only while it plays (再生中のみ表示). */
 .hs-hide-idle:not(.playing) { opacity: 0; }
 .hs-obj-missing { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: #f2f2f2; color: #808080; font-size: 22px; }
 .hs-obj-missing .hs-icon { font-size: 64px; }
-.hs-slide.hs-live .hs-obj[data-action], .hs-slide.hs-live .hs-obj[data-trigger] { pointer-events: auto; cursor: pointer; }
+.hs-slide.hs-live .hs-obj[data-action], .hs-slide.hs-live .hs-obj[data-trigger], .hs-slide.hs-live .hs-obj[data-kind="zoom"] { pointer-events: auto; cursor: pointer; }
 /* An object made from a layout item (図形に変換) keeps the item's "詳しく" card and deep-dive page. */
 .hs-slide.hs-live .hs-obj[data-detail], .hs-slide.hs-live .hs-obj[data-drill] { pointer-events: auto; cursor: pointer; }
 /* links in words open while presenting (and do not move the slide on) */
@@ -1496,6 +1498,38 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-demo-cursor.tap::after { animation: hs-demo-tap .45s ease-out; }
 @keyframes hs-demo-tap { from { opacity: 1; transform: scale(.4); } to { opacity: 0; transform: scale(1.7); } }
 .hs-player.in-demo .hs-player-btn.demo { background: rgba(143, 182, 255, .28); }
+
+/* Writing on slides while presenting (ペン・蛍光ペン・レーザー ポインター). */
+.hs-show-ink { position: absolute; z-index: 7; pointer-events: none; overflow: visible; }
+.hs-player.pen-on .hs-show-ink { pointer-events: auto; cursor: crosshair; }
+.hs-player[data-pen="eraser"] .hs-show-ink { cursor: cell; }
+.hs-player[data-pen="laser"] .hs-show-ink { pointer-events: none; }
+.hs-player[data-pen="laser"] .hs-player-stage { cursor: none; }
+.hs-laser { position: absolute; left: 0; top: 0; z-index: 9; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: radial-gradient(circle, #ff4d4d 0 40%, rgba(255, 0, 0, .55) 70%, rgba(255, 0, 0, 0) 100%); box-shadow: 0 0 14px 6px rgba(255, 40, 40, .55); pointer-events: none; }
+.hs-pen-menu { position: absolute; left: 50%; bottom: 72px; z-index: 9; transform: translateX(-50%); display: flex; flex-direction: column; gap: 2px; min-width: 280px; padding: 6px; border-radius: 12px; background: rgba(12, 14, 20, .92); box-shadow: 0 10px 40px rgba(0, 0, 0, .45); }
+.hs-pen-menu > button { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: #e8ecf4; font: 600 14px/1.2 system-ui, sans-serif; cursor: pointer; text-align: left; }
+.hs-pen-menu > button:hover, .hs-pen-menu > button.on { background: rgba(255, 255, 255, .12); }
+.hs-pen-menu kbd { font: 600 11px/1 system-ui, sans-serif; opacity: .65; }
+.hs-pen-colors { display: flex; gap: 8px; padding: 6px 10px; }
+.hs-pen-colors button { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .5); cursor: pointer; }
+.hs-pen-colors button.on { border-color: #fff; box-shadow: 0 0 0 2px rgba(255, 255, 255, .35); }
+.hs-player.kiosk .hs-player-bar, .hs-player.kiosk .hs-player-progress { display: none; }
+/* 字幕: the speaker's words under the slide. */
+.hs-captions { position: absolute; left: 50%; bottom: 84px; z-index: 8; transform: translateX(-50%); max-width: min(1100px, 88%); padding: 10px 18px; border-radius: 10px; background: rgba(0, 0, 0, .78); color: #fff; font: 600 clamp(18px, 2.2vw, 30px)/1.45 "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif; text-align: center; pointer-events: none; }
+/* スライド ズーム: another slide, small, framed; a click in the show goes there. */
+.hs-zoom { position: absolute; inset: 0; overflow: hidden; background: #fff; box-shadow: inset 0 0 0 var(--zw, 3px) var(--zb, #b7c3da); }
+.hs-zoom .hs-zoom-thumb { position: absolute; inset: 0; pointer-events: none; }
+.hs-zoom::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 var(--zw, 3px) var(--zb, #b7c3da); pointer-events: none; }
+.hs-zoom-missing { position: absolute; inset: 0; display: grid; place-items: center; color: #808080; font-size: 28px; background: #f2f2f2; }
+.hs-obj[data-kind="zoom"] { cursor: pointer; }
+/* カメオ: the presenter's camera in a circle (or a box). */
+.hs-camera { position: absolute; inset: 0; overflow: hidden; background: #d9d9d9; box-shadow: inset 0 0 0 var(--cw, 3px) var(--cb, transparent); }
+.hs-camera-feed { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+.hs-camera-placeholder { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 38%, #b7c3da 0 18%, transparent 19%), radial-gradient(ellipse at 50% 100%, #b7c3da 0 42%, transparent 43%), #dce4f2; }
+.hs-camera-placeholder span { margin-top: 70%; color: #1f3864; font: 700 22px/1 system-ui, sans-serif; letter-spacing: .1em; }
+/* 数式: TeX drawn as MathML. */
+.hs-equation { position: absolute; inset: 0; display: flex; align-items: center; overflow: visible; }
+.hs-equation math { font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", serif; }
 
 /* ================================================================== SEJ (the SEJ corporate template)
    Masters, grid and type follow assets/sej/template.pptx at 144 px per inch; the rules follow the SEJ brand
