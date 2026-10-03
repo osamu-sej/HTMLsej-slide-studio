@@ -1263,3 +1263,36 @@ audio.trim-media { background: transparent; }
 .trim-fields .field { display: flex; flex-direction: column; gap: 4px; }
 .trim-num { width: 110px; }
 .rb-field.off { opacity: .45; }
+/* 図形の結合: the live preview of the result over the slide. */
+.ed-merge-preview { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.ed-merge-preview path { fill: rgba(43, 107, 224, .28); stroke: #2b6be0; stroke-width: 2px; vector-effect: non-scaling-stroke; stroke-dasharray: 6 4; }
+
+/* SmartArt (smartart.mjs): the text pane beside the graphic, the gallery with previews, the colour choices. */
+.sa-pane { position: fixed; z-index: 1500; width: 300px; max-height: min(70vh, 560px); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg); }
+.sa-pane-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.sa-lines { list-style: none; margin: 0; padding: 8px 10px; overflow: auto; display: flex; flex-direction: column; gap: 3px; }
+.sa-row { display: flex; align-items: center; gap: 4px; }
+.sa-bullet { flex: none; width: 14px; text-align: center; font-size: 10px; color: var(--muted); }
+.sa-row.lv0 .sa-bullet { color: var(--ink); }
+.sa-line { flex: 1; min-width: 0; border: 1px solid transparent; border-radius: 4px; padding: 3px 6px; font-size: 13px; background: transparent; }
+.sa-line:hover { border-color: var(--line); }
+.sa-line:focus { border-color: var(--accent); outline: none; background: #fff; }
+.sa-hint { margin: 0; padding: 0 10px 6px; font-size: 11px; }
+.sa-pane-foot { padding: 6px 10px; border-top: 1px solid var(--line); color: var(--muted); }
+.sa-preview { position: relative; overflow: hidden; pointer-events: none; background: #fff; border-radius: 4px; }
+.sa-preview .sa-preview-inner.hs-slide { position: absolute; left: 0; top: 0; width: 640px; height: 360px; transform-origin: 0 0; background: transparent; overflow: visible; }
+.sa-gallery { width: min(760px, 92vw); }
+.sa-gallery-body { display: flex; gap: 10px; }
+.sa-gallery-kinds { display: flex; flex-direction: column; gap: 2px; min-width: 110px; }
+.sa-gallery-kinds button { border: 0; background: transparent; text-align: left; padding: 6px 8px; border-radius: 6px; font-size: 12.5px; cursor: pointer; }
+.sa-gallery-kinds button[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 700; }
+.sa-gallery-grid { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 8px; max-height: 60vh; overflow: auto; }
+.sa-gallery-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; font-size: 12px; }
+.sa-gallery-item:hover, .sa-gallery-item.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.sa-color-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 4px; }
+.sa-color { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; font-size: 11.5px; }
+.sa-color.on, .sa-color:hover { border-color: var(--accent); }
+.sa-layout-row { display: flex; gap: 4px; align-items: center; }
+.sa-layout-quick { padding: 2px; border: 1px solid var(--line); border-radius: 4px; background: #fff; cursor: pointer; }
+.sa-layout-quick.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.sa-layout-quick:disabled { opacity: .45; cursor: default; }

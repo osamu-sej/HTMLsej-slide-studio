@@ -94,6 +94,10 @@
 .hs-audio-track i { display: block; height: 100%; width: 0; background: #fff; }
 .hs-audio-time { flex: none; min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
 .hs-obj[data-kind="audio"] { cursor: pointer; }
+/* SmartArt: one positioned box per item (its shapes and the connector into it), so items can come in one by one. */
+.hs-smartart { position: absolute; inset: 0; }
+.hs-sa-step, .hs-sa-node { position: absolute; }
+.hs-sa-lines { position: absolute; left: 0; top: 0; overflow: visible; }
 /* A video shown only while it plays (再生中のみ表示). */
 .hs-hide-idle:not(.playing) { opacity: 0; }
 .hs-obj-missing { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: #f2f2f2; color: #808080; font-size: 22px; }

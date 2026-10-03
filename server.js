@@ -134,6 +134,9 @@ function loadStatic() {
   // Lottie player (lottie-web, MIT) for motion-graphic animations: the light SVG build, no eval, no workers.
   const lottie = join(here, "node_modules", "lottie-web", "build", "player", "lottie_light.min.js");
   if (existsSync(lottie)) add("/vendor/lottie.js", readFileSync(lottie), TYPES[".js"]);
+  // Polygon boolean operations (polygon-clipping, MIT) for 図形の結合, loaded by the editor on first use.
+  const clipping = join(here, "node_modules", "polygon-clipping", "dist", "polygon-clipping.umd.min.js");
+  if (existsSync(clipping)) add("/vendor/polygon-clipping.js", readFileSync(clipping), TYPES[".js"]);
   return files;
 }
 const staticFiles = loadStatic();
