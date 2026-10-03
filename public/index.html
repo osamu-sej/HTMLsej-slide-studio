@@ -162,6 +162,7 @@
           <button id="formTab" class="side-tab" type="button" role="tab" aria-selected="false">編集</button>
           <button id="formatTab" class="side-tab" type="button" role="tab" aria-selected="false" title="選んだ図形・文字・画像の書式と、オブジェクトの一覧">書式</button>
           <button id="animTab" class="side-tab" type="button" role="tab" aria-selected="false" title="アニメーション ウィンドウ：このスライドのアニメーションの順番・タイミング・効果">アニメーション</button>
+          <button id="commentTab" class="side-tab" type="button" role="tab" aria-selected="false" title="コメント：スライドへの確認・指摘（校閲）">コメント</button>
           <button id="sideClose" class="side-close" type="button" title="作業ウィンドウを閉じる（タブを押すと開きます）" aria-label="作業ウィンドウを閉じる">»</button>
         </div>
         <section id="chatPane" class="chat-pane" aria-label="AIとの会話">
@@ -190,6 +191,7 @@
         <aside id="inspector" class="inspector" aria-label="スライドの編集" hidden></aside>
         <aside id="formatPane" class="format-pane" aria-label="図形の書式" hidden></aside>
         <aside id="animPane" class="format-pane anim-pane" aria-label="アニメーション ウィンドウ" hidden></aside>
+        <aside id="commentPane" class="format-pane comment-pane" aria-label="コメント" hidden></aside>
       </div>
       <footer id="statusBar" class="status-bar" aria-label="ステータス バー">
         <span id="slidePos" class="sb-pos"></span>
@@ -216,6 +218,21 @@
         </div>
       </footer>
     </main>
+
+    <!-- 開発: the slide on the stage as JSON (edit and apply) or as the HTML the engine draws (app.js openCodeDialog). -->
+    <dialog id="codeDialog" class="code-dialog">
+      <div class="dialog-head"><h3 id="codeTitle">スライドのJSON</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
+      <div class="dialog-body">
+        <textarea id="codeText" class="code-text" spellcheck="false" aria-label="コード"></textarea>
+        <p id="codeStatus" class="hint" role="status"></p>
+      </div>
+      <div class="dialog-foot">
+        <button id="codeCopy" class="btn" type="button">コピー</button>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn btn-ghost" type="button" data-close>閉じる</button>
+        <button id="codeApply" class="btn btn-primary" type="button">適用</button>
+      </div>
+    </dialog>
 
     <dialog id="designDialog" class="design-dialog">
       <div class="dialog-head"><h3>動き（資料全体）</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
@@ -435,7 +452,7 @@
           <tr><td>文字の編集中 <kbd>Enter</kbd> / <kbd>Esc</kbd></td><td>確定 / 取り消し</td></tr>
           <tr><td><kbd>⌘</kbd>+<kbd>F1</kbd></td><td>リボンを折りたたむ / 表示する（タブのダブルクリック・右下の ˄ でも）</td></tr>
           <tr><td><kbd>⌘</kbd>+ホイール・<kbd>⌘</kbd>+<kbd>＋</kbd> / <kbd>−</kbd> / <kbd>0</kbd></td><td>拡大 / 縮小 / スライドをウィンドウに合わせる</td></tr>
-          <tr><td><kbd>⌘</kbd>+<kbd>M</kbd> / <kbd>⌘</kbd>+<kbd>F</kbd></td><td>新しいスライド / 検索・置換</td></tr>
+          <tr><td><kbd>⌘</kbd>+<kbd>M</kbd> / <kbd>⌘</kbd>+<kbd>F</kbd>（<kbd>⌘</kbd>+<kbd>H</kbd>）</td><td>新しいスライド / 検索・置換</td></tr>
           <tr><td>サムネイルで <kbd>Delete</kbd>・<kbd>⌘</kbd>+<kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd>・<kbd>⌘</kbd>+<kbd>D</kbd></td><td>スライドの削除・コピー／切り取り／貼り付け・複製（右クリックでメニュー）</td></tr>
           <tr><td><kbd>?</kbd></td><td>このヘルプ</td></tr>
         </table>
@@ -445,6 +462,7 @@
           <li>スライドはいつもウィンドウに合わせて全体が見えます。ステータス バーのスライダーと倍率で拡大・縮小、⤢でウィンドウに合わせる</li>
           <li>ステータス バーの「ノート」でスライドの下にノート欄。サムネイルと作業ウィンドウは境目をドラッグで幅を変え、閉じる・開くもできます</li>
           <li>表示タブの「ルーラー」で目盛り（cm）、「グレースケール」で白黒の見え方。挿入タブの「記号と特殊文字」「日付と時刻」、ホームの「文字の間隔」も使えます</li>
+          <li>ホームの「セクション」（サムネイルの右クリックでも）でスライドをまとめ、名前を押して折りたたみ。校閲の「新しいコメント」で確認や指摘を書き込み、スライド ショーの「リハーサル」で時間を計って自動の切り替えに。開発タブではスライドのJSONを直したり、HTMLを見たりできます</li>
         </ul>
         <h4>図形・文字・画像（自由配置）</h4>
         <table class="help-keys">

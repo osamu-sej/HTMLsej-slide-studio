@@ -8,6 +8,7 @@ import { createConverter } from "./editor/convert.mjs?v=__APP_VERSION__";
 import { resetDeckActions } from "./reset-actions.mjs?v=__APP_VERSION__";
 import { chromeOf, describeAdded, enhanceSlide } from "./editor/htmlfx.mjs?v=__APP_VERSION__";
 import { createShell } from "./editor/window.mjs?v=__APP_VERSION__";
+import { createComments } from "./editor/comments.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -544,6 +545,12 @@ function normalizeSlide(raw, index, total) {
     } else delete slide.sourceViewport;
   } else { delete slide.hideTitle; delete slide.master; }
   if (slide.hidden !== true) delete slide.hidden;
+  // PowerPoint's sections: the first slide of each carries the section's name.
+  if (typeof slide.section === "string" && slide.section.trim()) slide.section = slide.section.trim().slice(0, 40); else delete slide.section;
+  // Review comments on the slide (校閲 → 新しいコメント).
+  const comments = (Array.isArray(slide.comments) ? slide.comments : []).filter((c) => c && typeof c.text === "string" && c.text.trim()).slice(0, 200)
+    .map((c, i) => ({ id: /^[A-Za-z0-9_-]{1,32}$/.test(c.id || "") ? c.id : `c${Date.now().toString(36)}${i}`, text: c.text.trim().slice(0, 2000), ...(typeof c.at === "string" ? { at: c.at.slice(0, 40) } : {}), ...(c.done === true ? { done: true } : {}) }));
+  if (comments.length) slide.comments = comments; else delete slide.comments;
   // The first page is the cover: a title page, or a cover brought over from PowerPoint (a 白紙 page).
   if (index === 0 && total > 1 && type !== "title" && slide.master !== "source" && !(type === "blank" && slide.elements?.length)) return { type: "title", title: strip(slide.title) || "無題の資料" };
   return slide;
@@ -736,7 +743,7 @@ function extractUnits(slide) {
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "advance"]) {
+  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "advance", "hidden", "section", "comments"]) {
     if (slide[key] != null && slide[key] !== "" && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
@@ -1040,6 +1047,7 @@ function markChanged({ structural = false } = {}) {
     renderStage();
     renderInspector();
     if (state.panel === "anim") editorUi.renderAnimPane();
+    if (state.panel === "comment") comments.render();
   } else {
     // Typing: refresh the picture without rebuilding the form under the caret.
     clearTimeout(state.stageTimer);
@@ -1104,7 +1112,10 @@ function deleteSlide(index) {
   const count = story.parent[index] == null ? groupEnd(index, story) - index : 1;
   if (state.deck.slides.length - count < 2) return toast("スライドは2枚以上必要です");
   pushUndo();
+  // A section starting here goes on with the slide after the deleted ones (PowerPoint keeps the section).
+  const section = state.deck.slides[index].section;
   state.deck.slides.splice(index, count);
+  if (section && state.deck.slides[index] && !state.deck.slides[index].section && !state.deck.slides[index].drillOf) state.deck.slides[index].section = section;
   state.selected = Math.min(index, state.deck.slides.length - 1);
   markChanged({ structural: true });
   toast(count > 1 ? `${index + 1}枚目と、その深掘りページ${count - 1}枚を削除しました（⌘Zで元に戻せます）` : `${index + 1}枚目を削除しました（⌘Zで元に戻せます）`);
@@ -1142,8 +1153,9 @@ function groupEnd(index, story = storyOf()) {
 function copyOf(slide) {
   const copy = clone(slide);
   delete copy.drillOf;
-  // A copy is another slide: links to the original keep pointing at the original.
+  // A copy is another slide: links to the original keep pointing at the original; it joins the section it lands in.
   delete copy.sid;
+  delete copy.section;
   return copy;
 }
 
@@ -1153,9 +1165,13 @@ function select(index) {
   if (state.inline) finishInlineEdit(true);
   if (editor.typing) editor.stopTyping(true);
   state.selected = Math.max(0, Math.min(index, slideCount() - 1));
+  // A slide picked inside a folded section unfolds it.
+  const within = sectionList().find((sec) => state.selected >= sec.start && state.selected < sec.end);
+  if (within) state.collapsedSections?.delete(within.key);
   renderFilmstrip();
   renderStage();
   renderInspector();
+  if (state.panel === "comment") comments.render();
   document.querySelector(".film-item.selected")?.scrollIntoView({ block: "nearest" });
   renderChatContext();
 }
@@ -1679,6 +1695,8 @@ function renderFilmstrip() {
     const build = slide.animation || E.recommendedBuild(slide.type);
     if (build === "click") flags.push(h("span", { title: "クリックで順番に表示" }, "⋯"));
     if (slide.hidden) flags.push(h("span", { title: "非表示スライド（発表では飛ばします）" }, "非"));
+    const open = (slide.comments || []).filter((c) => !c.done).length;
+    if (open) flags.push(h("span", { class: "flag-comment", title: `コメント${open}件（校閲）` }, `💬${open}`));
     const item = h("div", {
       class: `film-item${index === state.selected ? " selected" : ""}${parent != null ? " is-drill" : ""}${slide.hidden ? " is-hidden" : ""}`,
       draggable: movable ? "true" : null,
@@ -1695,7 +1713,143 @@ function renderFilmstrip() {
     flags.length ? h("span", { class: "film-flags" }, flags) : null);
     return item;
   });
-  strip_.replaceChildren(...items, h("button", { class: "btn film-add", type: "button", onclick: () => openTypeDialog("insert") }, "＋ スライドを追加"));
+  // PowerPoint's sections: a header before the first slide of each, folding its slides away.
+  const sections = sectionList();
+  state.collapsedSections ||= new Set();
+  const out = [];
+  items.forEach((item, index) => {
+    const head = sections.find((sec) => sec.start === index);
+    if (head) out.push(sectionHeader(head));
+    const within = sections.find((sec) => index >= sec.start && index < sec.end);
+    if (!within || !state.collapsedSections.has(within.key)) out.push(item);
+  });
+  strip_.replaceChildren(...out, h("button", { class: "btn film-add", type: "button", onclick: () => openTypeDialog("insert") }, "＋ スライドを追加"));
+}
+
+// ---------------------------------------------------------------- sections (PowerPoint's, in the thumbnails)
+
+/** The deck's sections, [{ start, end, name, key, implicit }]: none until a slide starts one. */
+function sectionList(slides = state.deck?.slides || []) {
+  const starts = slides.map((slide, i) => (slide.section ? i : -1)).filter((i) => i >= 0);
+  if (!starts.length) return [];
+  const list = [];
+  if (starts[0] > 0) list.push({ start: 0, end: starts[0], name: "既定のセクション", implicit: true });
+  starts.forEach((start, k) => list.push({ start, end: starts[k + 1] ?? slides.length, name: slides[start].section }));
+  return list.map((sec) => ({ ...sec, key: `${sec.name}@${slides[sec.start].sid || sec.start}` }));
+}
+function sectionHeader(sec) {
+  const collapsed = state.collapsedSections.has(sec.key);
+  const count = sec.end - sec.start;
+  return h("div", { class: `film-section${collapsed ? " collapsed" : ""}`, role: "button", "aria-expanded": String(!collapsed),
+    title: `${sec.name}（${count}枚）：クリックで${collapsed ? "展開" : "折りたたむ"}・右クリックでメニュー`,
+    onclick: () => { if (collapsed) state.collapsedSections.delete(sec.key); else state.collapsedSections.add(sec.key); renderFilmstrip(); },
+    oncontextmenu: (event) => { event.preventDefault(); sectionMenu(sec, event.clientX, event.clientY); } },
+  h("span", { class: "film-section-caret", "aria-hidden": "true" }, collapsed ? "▸" : "▾"), h("b", {}, sec.name), h("small", {}, String(count)));
+}
+function sectionMenu(sec, x, y) {
+  editor.openMenu(x, y, [
+    !sec.implicit && { label: "セクション名の変更…", run: () => renameSection(sec.start) },
+    !sec.implicit && { label: "セクションの削除（スライドは残す）", run: () => removeSection(sec.start) },
+    { label: "セクションを上へ移動", run: () => moveSection(sec, -1) },
+    { label: "セクションを下へ移動", run: () => moveSection(sec, 1) },
+    "-",
+    { label: "すべて折りたたむ", run: () => { for (const s of sectionList()) state.collapsedSections.add(s.key); renderFilmstrip(); } },
+    { label: "すべて展開", run: () => { state.collapsedSections.clear(); renderFilmstrip(); } },
+  ].filter(Boolean));
+}
+/** A section starts at this slide (PowerPoint's セクションの追加). */
+async function addSection(index = state.selected) {
+  const slide = state.deck?.slides[index];
+  if (!slide) return;
+  if (slide.drillOf) return toast("深掘りページからはセクションを始められません（元のスライドで追加してください）");
+  const name = await askDialog("セクションの追加", "セクション名", slide.section || `セクション${sectionList().filter((sec) => !sec.implicit).length + 1}`);
+  if (name == null || !name.trim()) return;
+  pushUndo();
+  slide.section = name.trim().slice(0, 40);
+  markChanged({ structural: true });
+}
+async function renameSection(start) {
+  const slide = state.deck.slides[start];
+  const name = await askDialog("セクション名の変更", "セクション名", slide.section || "");
+  if (name == null || !name.trim()) return;
+  pushUndo();
+  slide.section = name.trim().slice(0, 40);
+  markChanged({ structural: true });
+}
+function removeSection(start) {
+  pushUndo();
+  delete state.deck.slides[start].section;
+  markChanged({ structural: true });
+}
+/**
+ * Swap a section with the one before or after it. The cover stays first (the section holding it stays in front) and
+ * the last slide stays last: a section ending with it moves without it.
+ */
+function moveSection(sec, dir) {
+  const list = sectionList();
+  const k = list.findIndex((x) => x.start === sec.start);
+  const other = list[k + dir];
+  if (!other) return toast("これ以上動かせません");
+  const slides = state.deck.slides;
+  const last = slides.length - 1;
+  const [a, b] = dir < 0 ? [other, sec] : [sec, other];
+  if (a.start === 0) return toast("表紙のあるセクションは先頭のままです");
+  const end = Math.min(b.end, last);
+  if (end <= b.start) return toast("これ以上動かせません");
+  pushUndo();
+  const first = slides.slice(a.start, a.end);
+  const second = slides.slice(b.start, end);
+  slides.splice(a.start, end - a.start, ...second, ...first);
+  state.selected = dir < 0 ? a.start : a.start + second.length;
+  markChanged({ structural: true });
+}
+
+// ---------------------------------------------------------------- 開発: the slide's code (JSON to edit, the HTML it becomes)
+
+/** 開発 → スライドのJSON / HTMLを表示: the slide on the stage as data (edited and checked before it applies) or as HTML. */
+function openCodeDialog(kind) {
+  const slide = state.deck?.slides[state.selected];
+  if (!slide) return;
+  if (state.inline) finishInlineEdit(true);
+  const json = kind === "json";
+  $("codeTitle").textContent = json ? `スライド ${state.selected + 1} のJSON（編集できます）` : `スライド ${state.selected + 1} のHTML`;
+  const text = $("codeText");
+  text.readOnly = !json;
+  text.value = json ? JSON.stringify(slide, null, 2) : prettyHtml(E.render(slide, renderOptions({ index: state.selected, mode: "present", fit: fitFor(state.selected) ?? undefined })).outerHTML);
+  $("codeApply").hidden = !json;
+  $("codeStatus").className = "hint";
+  $("codeStatus").textContent = json
+    ? "レイアウト（type）・文字・部品（elements）・アニメーション（timeline）・インタラクション（hover・action・loop）を直して「適用」。形式を確かめてから反映し、⌘Zで戻せます。"
+    : "エンジンが描くこのスライドのHTMLです。書き出したHTMLファイルでも、これがエンジンのCSSとJavaScriptで動きます。";
+  $("codeDialog").dataset.kind = kind;
+  $("codeDialog").showModal();
+}
+function applyCodeDialog() {
+  const index = state.selected;
+  const status = $("codeStatus");
+  let data;
+  try { data = JSON.parse($("codeText").value); } catch (error) { status.className = "hint error"; status.textContent = `JSONとして読めません：${error.message}`; return; }
+  if (!data || typeof data !== "object" || Array.isArray(data)) { status.className = "hint error"; status.textContent = "1枚のスライドのJSON（{ \"type\": … } のオブジェクト）にしてください"; return; }
+  const before = state.deck.slides[index];
+  if (!data.sid && before.sid) data.sid = before.sid;
+  let next;
+  try { next = normalizeSlide(data, index, state.deck.slides.length); } catch (error) { status.className = "hint error"; status.textContent = error.message; return; }
+  pushUndo();
+  state.deck.slides[index] = next;
+  markChanged({ structural: true });
+  $("codeDialog").close();
+  toast("JSONをスライドに反映しました（⌘Zで戻せます）");
+}
+/** Line breaks and indents for reading (the HTML itself is not changed). */
+function prettyHtml(html) {
+  const VOID = /^<(br|img|input|meta|link|hr|source|path|circle|rect|line|polyline|polygon|ellipse|stop|use|wbr)\b/i;
+  let depth = 0;
+  return html.replace(/></g, ">\n<").split("\n").map((line) => {
+    if (/^<\//.test(line)) depth = Math.max(0, depth - 1);
+    const out = `${"  ".repeat(depth)}${line}`;
+    if (/^<[a-zA-Z]/.test(line) && !VOID.test(line) && !/\/>$/.test(line) && !/<\/[^>]+>$/.test(line)) depth += 1;
+    return out;
+  }).join("\n");
 }
 
 // ---------------------------------------------------------------- the thumbnails' menu and keys (PowerPoint's)
@@ -1716,6 +1870,7 @@ function slideMenu(index, x, y) {
     { label: "スライドの削除", keys: "Delete", run: () => deleteSlide(index) },
     "-",
     index > 0 && { label: slide.hidden ? "非表示スライドを解除" : "非表示スライドに設定", run: () => toggleHiddenSlide() },
+    !slide.drillOf && { label: slide.section ? "セクション名の変更…" : "セクションの追加…", run: () => (slide.section ? renameSection(index) : addSection(index)) },
     { label: "レイアウトの変更…", run: () => openTypeDialog("change") },
     "-",
     { label: "このスライドから発表", keys: "⇧F5", run: () => openPresenter(index) },
@@ -1773,10 +1928,28 @@ function renderStage() {
   shell.renderStatus();
   if (state.view === "outline") return renderOutline(body);
   if (state.view === "grid") {
-    body.replaceChildren(h("div", { class: "stage-grid" }, deck.slides.map((slide, index) => h("div", {
-      class: `grid-item${index === state.selected ? " selected" : ""}`,
-      onclick: () => { setView("single"); select(index); },
-    }, thumb(index, "grid"), h("div", { class: "grid-label" }, h("span", {}, story.parent[index] != null ? `↳ ${story.parent[index] + 1}枚目の深掘り・${typeLabel(slide.type)}` : `${index + 1}. ${typeLabel(slide.type)}`), issuesFor(index).length ? h("span", { style: { color: "var(--warn)" } }, `注意${issuesFor(index).length}`) : null)))));
+    // スライド一覧 (PowerPoint's slide sorter): the sections' names over their slides; drag a slide to move it.
+    const sections = sectionList();
+    const last = deck.slides.length - 1;
+    const cells = [];
+    deck.slides.forEach((slide, index) => {
+      const head = sections.find((sec) => sec.start === index);
+      if (head) cells.push(h("div", { class: "grid-section" }, h("b", {}, head.name), h("small", {}, `${head.end - head.start}枚`)));
+      const movable = index > 0 && index < last && story.parent[index] == null;
+      const cell = h("div", {
+        class: `grid-item${index === state.selected ? " selected" : ""}${slide.hidden ? " is-hidden" : ""}`,
+        draggable: movable ? "true" : null,
+        onclick: () => { setView("single"); select(index); },
+        oncontextmenu: (event) => { event.preventDefault(); select(index); slideMenu(index, event.clientX, event.clientY); },
+        ondragstart: (event) => { dragFrom = index; event.dataTransfer.effectAllowed = "move"; cell.classList.add("dragging"); },
+        ondragend: () => { dragFrom = null; cell.classList.remove("dragging"); },
+        ondragover: (event) => { if (dragFrom != null && index > 0 && index <= last) { event.preventDefault(); cell.classList.add("drop-before"); } },
+        ondragleave: () => cell.classList.remove("drop-before"),
+        ondrop: (event) => { event.preventDefault(); cell.classList.remove("drop-before"); if (dragFrom != null) moveSlideBefore(dragFrom, index); },
+      }, thumb(index, "grid"), h("div", { class: "grid-label" }, h("span", {}, story.parent[index] != null ? `↳ ${story.parent[index] + 1}枚目の深掘り・${typeLabel(slide.type)}` : `${index + 1}. ${typeLabel(slide.type)}${slide.hidden ? "（非表示）" : ""}`), issuesFor(index).length ? h("span", { style: { color: "var(--warn)" } }, `注意${issuesFor(index).length}`) : null));
+      cells.push(cell);
+    });
+    body.replaceChildren(h("div", { class: "stage-grid" }, cells));
     return;
   }
   const index = state.selected;
@@ -1834,6 +2007,17 @@ function toggleHiddenSlide() {
   if (state.selected === 0) return toast("表紙は非表示にできません");
   setSlideFields({ hidden: slide.hidden ? null : true });
   toast(slide.hidden ? "このスライドを非表示にしました（発表では飛ばします。編集用に残ります）" : "このスライドを発表に戻しました");
+}
+
+/** The comments on a slide changed (comments.mjs): one undo step. */
+function setCommentsOf(index, list) {
+  const slide = state.deck?.slides[index];
+  if (!slide) return;
+  pushUndo();
+  const clean = list.filter((c) => c && String(c.text || "").trim()).map(({ done, ...c }) => (done ? { ...c, done: true } : c));
+  if (clean.length) slide.comments = clean; else delete slide.comments;
+  markChanged({ structural: true });
+  comments.render();
 }
 
 // スライド ショー →「発表者ツールを使用」: the presenter view opens with the slide show.
@@ -1961,6 +2145,7 @@ const editorApp = {
   openTypeDialog: (mode) => openTypeDialog(mode),
   setView: (view) => setView(view),
   openPanel: (panel, focus) => openFormatPanel(focus),
+  showPanel: (panel) => setPanel(panel),
   showTab: (tab, opts) => editorUi.showTab(tab, opts),
   editChart: (id) => editorUi.editChart(id),
   startCrop: (id) => editorUi.startCrop(id),
@@ -2000,6 +2185,24 @@ const editorApp = {
   setAutoMotion: (key, value) => setAutoMotion(key, value),
   autoHtml: () => autoHtmlOn(),
   setAutoHtml: (on) => setAutoHtml(on),
+  // 校閲 → コメント; ホーム・サムネイル → セクション; スライド ショー → リハーサル; 開発 (the slide's code).
+  newComment: () => { setPanel("comment"); comments.focusNew(); },
+  commentGo: (dir) => comments.go(dir),
+  addSection: () => addSection(),
+  rehearse: () => rehearse(),
+  designIdeas: () => { setPanel("chat"); requestVariants(state.selected); },
+  // ファイル (the ribbon's first menu).
+  goCreate: () => setMode("create"),
+  openLibrary: () => openLibrary(),
+  saveDeck: (opts) => saveToLibrary(opts),
+  openHistory: () => openHistory(),
+  openHelp: () => $("helpDialog").showModal(),
+  openSlideJson: () => openCodeDialog("json"),
+  openSlideHtml: () => openCodeDialog("html"),
+  exportHtml: () => exportHtml(),
+  saveJson: () => saveJsonFile(),
+  openJson: () => openJsonDialog(),
+  printPdf: () => printPdf(),
 };
 const converter = createConverter(editorApp);
 const editor = createCanvas(editorApp);
@@ -2014,6 +2217,8 @@ const shell = createShell({
   openZoomMenu: (anchor) => editorUi.openPop(anchor, editorUi.zoomMenu()),
   ribbonChanged: () => editorUi.renderRibbon(),
 });
+// Review comments (校閲, public/editor/comments.mjs).
+const comments = createComments({ h, deck: () => state.deck, index: () => state.selected, select: (i) => select(i), toast, setCommentsOf });
 // Read-only access for the browser checks (qa/studio-objects.mjs): the deck and the slide on the stage.
 window.__hsej = { deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection, typing: () => editor.state.typing?.cell ?? (editor.typing ? "text" : null), cellRange: () => editor.cellRange };
 
@@ -4071,12 +4276,15 @@ function setPanel(panel, { reveal = true } = {}) {
   $("inspector").hidden = panel !== "form";
   $("formatPane").hidden = panel !== "format";
   $("animPane").hidden = panel !== "anim";
+  $("commentPane").hidden = panel !== "comment";
   $("animTab").setAttribute("aria-selected", String(panel === "anim"));
+  $("commentTab").setAttribute("aria-selected", String(panel === "comment"));
   $("chatTab").setAttribute("aria-selected", String(panel === "chat"));
   $("formTab").setAttribute("aria-selected", String(panel === "form"));
   $("formatTab").setAttribute("aria-selected", String(panel === "format"));
   if (panel === "format") editorUi.renderPane();
   if (panel === "anim") editorUi.renderAnimPane();
+  if (panel === "comment") comments.render();
   // The animation order marks on the stage show while the animation pane is open.
   editor.draw();
   try { localStorage.setItem(STORAGE.panel, panel); } catch { /* optional */ }
@@ -4840,7 +5048,52 @@ async function openPresenter(start = state.selected) {
   if (presenterViewOn()) state.player.openPresenterView?.();
 }
 
+/**
+ * スライド ショー →「リハーサル」: present from the start timing each slide (a clock in the corner); at the end, the
+ * times can be kept as each slide's 自動で切り替え (slide.advance), as PowerPoint's rehearse timings.
+ */
+async function rehearse() {
+  if (!state.deck || state.player) return;
+  await openPresenter(0);
+  if (!state.player) return;
+  const times = new Map();
+  let at = state.player.index;
+  let since = Date.now();
+  const started = since;
+  const clock = h("div", { class: "rehearse-clock", role: "status" });
+  $("presenter").append(clock);
+  const fmt = (ms) => { const sec = Math.floor(ms / 1000); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; };
+  const tick = () => {
+    const player = state.player;
+    if (!player) return;
+    const now = Date.now();
+    if (player.index !== at) { times.set(at, (times.get(at) || 0) + now - since); at = player.index; since = now; }
+    clock.textContent = `リハーサル　このスライド ${fmt((times.get(at) || 0) + now - since)}　合計 ${fmt(now - started)}`;
+  };
+  state.rehearsal = { times, timer: setInterval(tick, 200), finish: () => { times.set(at, (times.get(at) || 0) + Date.now() - since); } };
+  tick();
+}
+function keepRehearsal(times) {
+  const total = [...times.values()].reduce((a, b) => a + b, 0);
+  if (total < 1000 || !state.deck) return;
+  const sec = Math.round(total / 1000);
+  if (!window.confirm(`リハーサルの時間（合計 ${Math.floor(sec / 60)}分${sec % 60}秒）を保存して、スライドを自動で切り替えるようにしますか？`)) return;
+  pushUndo();
+  let count = 0;
+  for (const [i, ms] of times) {
+    const slide = state.deck.slides[i];
+    if (!slide || ms < 500) continue;
+    slide.advance = Math.min(600, Math.round(ms / 100) / 10);
+    count += 1;
+  }
+  markChanged({ structural: true });
+  toast(`${count}枚のタイミングを保存しました（画面切り替えタブの「自動的に切り替え」で変えられます。⌘Zで戻せます）`);
+}
+
 function closePresenter(index) {
+  const rehearsal = state.rehearsal;
+  if (rehearsal) { clearInterval(rehearsal.timer); rehearsal.finish(); state.rehearsal = null; }
+  queueMicrotask(() => { if (rehearsal) keepRehearsal(rehearsal.times); });
   state.player = null;
   const host = $("presenter");
   host.classList.add("hidden");
@@ -5438,6 +5691,7 @@ function bind() {
   $("formTab").addEventListener("click", () => setPanel("form"));
   $("formatTab").addEventListener("click", () => setPanel("format"));
   $("animTab").addEventListener("click", () => setPanel("anim"));
+  $("commentTab").addEventListener("click", () => setPanel("comment"));
   // The clipboard: objects, pictures and text go onto the slide; copying objects copies them.
   document.addEventListener("copy", (event) => editor.onCopy(event));
   document.addEventListener("cut", (event) => editor.onCopy(event, true));
@@ -5476,6 +5730,8 @@ function bind() {
   $("deckTitleInput").addEventListener("input", (event) => { if (!state.deck) return; beginEdit(); state.deck.title = event.target.value; markChanged(); });
   $("designBtn").addEventListener("click", openDesignDialog);
   $("motionPreviewBtn").addEventListener("click", () => previewMotion());
+  $("codeApply").addEventListener("click", applyCodeDialog);
+  $("codeCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("codeText").value); toast("コピーしました"); } catch { $("codeText").select(); document.execCommand("copy"); toast("コピーしました"); } });
   $("transitionSelect").addEventListener("change", (event) => setDeckDesign({ transition: event.target.value }));
   $("entranceSelect").addEventListener("change", (event) => setDeckDesign({ motion: { entrance: event.target.value } }));
   $("hoverSelect").addEventListener("change", (event) => setDeckDesign({ motion: { hover: event.target.value } }));
@@ -5581,7 +5837,7 @@ function bind() {
     // PowerPoint's window keys: ⌘F1 folds the ribbon, ⌘F finds, ⌘0 / ⌘＋ / ⌘− zoom the slide.
     if (state.mode === "edit" && state.deck && !document.querySelector("dialog[open]")) {
       if (meta && event.key === "F1") { event.preventDefault(); editorUi.toggleRibbon(); return; }
-      if (meta && !event.shiftKey && event.key.toLowerCase() === "f" && !document.activeElement?.isContentEditable) { event.preventDefault(); openReplace(); return; }
+      if (meta && !event.shiftKey && ["f", "h"].includes(event.key.toLowerCase()) && !document.activeElement?.isContentEditable) { event.preventDefault(); openReplace(); return; }
       if (!typing && shell.zoomKey(event)) { event.preventDefault(); return; }
       if (meta && event.key.toLowerCase() === "m" && !typing) { event.preventDefault(); openTypeDialog("insert"); return; }
       if (document.activeElement === $("filmstrip") && filmKey(event)) { event.preventDefault(); return; }
@@ -5650,7 +5906,7 @@ window.addEventListener("error", (event) => reportClientError(event.message, `${
 window.addEventListener("unhandledrejection", (event) => reportClientError(String(event.reason?.message ?? event.reason), "promise"));
 
 bind();
-try { const saved = localStorage.getItem(STORAGE.panel); setPanel(["form", "format", "anim"].includes(saved) ? saved : "chat", { reveal: false }); } catch { setPanel("chat", { reveal: false }); }
+try { const saved = localStorage.getItem(STORAGE.panel); setPanel(["form", "format", "anim", "comment"].includes(saved) ? saved : "chat", { reveal: false }); } catch { setPanel("chat", { reveal: false }); }
 updateBriefCount();
 restore();
 updateTopbar();

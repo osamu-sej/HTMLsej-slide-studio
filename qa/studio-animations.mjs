@@ -74,7 +74,7 @@ await step("a blank slide with two shapes and a text box", async () => {
   await page.click("#sampleDeckBtn");
   await page.waitForSelector(".film-item");
   const tabs = await page.$$eval(".rb-tabs [role=tab]", (els) => els.map((el) => el.textContent));
-  assert(tabs.join() === "ホーム,挿入,デザイン,画面切り替え,アニメーション,インタラクション,スライド ショー,校閲,表示", `tabs: ${tabs}`);
+  assert(tabs.join() === "ホーム,挿入,デザイン,画面切り替え,アニメーション,インタラクション,スライド ショー,校閲,表示,開発", `tabs: ${tabs}`);
   await ribbon("新しいスライド");
   await menuItem("白紙");
   await page.waitForTimeout(400);

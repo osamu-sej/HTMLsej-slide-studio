@@ -12,6 +12,7 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 ## 編集画面（PowerPointと同じ配置）
 
 - 上からリボン（全幅）・メッセージバー（1行）・［サムネイル｜スライドとノート｜作業ウィンドウ］・ステータス バー。配置と境目・開閉・ノート・ステータス バーとズームは `public/editor/window.mjs`、リボンの表示オプション（常に表示・タブのみ・自動的に非表示、⌘F1）は `public/editor/ui.mjs`。スライドはウィンドウに合わせて全体が見えること（ズームの100%は1280px）。リボンやメッセージを増やすときもスライドを押し出さない。ルーラーは `public/editor/rulers.mjs`。変えたら `qa/studio-layout.mjs` を通す。
+- セクション（`slide.section`＝そのスライドから始まるセクション名）・コメント（`slide.comments`、`public/editor/comments.mjs`）・非表示（`hidden`）はユーザーだけの項目（`USER_ONLY_FIELDS`）。AIの変更のあとも `restoreUserFields`（server/chat.mjs）で残す。リハーサルは `slide.advance` に入れる。開発タブの「スライドのJSON」は `normalizeSlide` を通してから反映する。変えたら `qa/studio-powerpoint.mjs` を通す。
 - 動きのIDE：アニメーション ウィンドウ（`public/editor/anim.mjs`）はスライドで動くものを起きる順に並べる（スライドの自動の動き＝`autoMotionInfo()`（app.js）・アニメーション・インタラクション）。どれもその場で変えられ、1回のUndoで戻る。見た目どおりの取り込みにはHTMLの動き（おまかせ）を自動で付け（設定 `hsej-auto-html`、既定はオン）、メッセージバーから元に戻せる。取り込みの忠実度を見るQA（`studio-import.mjs`）は自動をオフにして走らせ、自動の流れは `qa/studio-motion-ide.mjs` で確かめる。
 
 ## 自由配置（PowerPoint風の編集）
@@ -40,6 +41,6 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 ## 確認
 
 - `npm test`（CodexとOllamaは偽物で代用）。
-- 画面にかかわる変更は、`npm start` のあと `qa/studio-smoke.mjs`・`studio-editing.mjs`・`studio-ai-mock.mjs`・`studio-motion.mjs`・`studio-drill.mjs`・`studio-interactive.mjs`・`studio-objects.mjs`・`studio-animations.mjs`・`studio-tables.mjs`・`studio-convert.mjs`・`studio-import.mjs`・`studio-interact.mjs`・`studio-layout.mjs`・`studio-motion-ide.mjs` を実際のブラウザで通す。リボンは狭い幅だとグループを1つのボタンに折りたたむので、QAでボタンを探すときは折りたたんだグループも開く。
+- 画面にかかわる変更は、`npm start` のあと `qa/studio-smoke.mjs`・`studio-editing.mjs`・`studio-ai-mock.mjs`・`studio-motion.mjs`・`studio-drill.mjs`・`studio-interactive.mjs`・`studio-objects.mjs`・`studio-animations.mjs`・`studio-tables.mjs`・`studio-convert.mjs`・`studio-import.mjs`・`studio-interact.mjs`・`studio-layout.mjs`・`studio-motion-ide.mjs`・`studio-powerpoint.mjs` を実際のブラウザで通す。リボンは狭い幅だとグループを1つのボタンに折りたたむので、QAでボタンを探すときは折りたたんだグループも開く。
 - 深掘りページ（`drillOf`）は元のスライドの直後に置く本編外のページ。本編の並び・番号は `E.storyMap`（engine.js）とサーバーの `drillParents`（server/chat.mjs）が同じ決まりで求める。
 - レイアウトの「見た目のグループ」と単調さのチェックは `public/layout-looks.mjs` にあり、サーバー（AIへの指示・自動の選び直し）とスタジオ（チェック・骨子の画面）が同じものを使う。

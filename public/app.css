@@ -259,6 +259,20 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: 1px solid
 .film-flags { position: absolute; left: 30px; bottom: 8px; z-index: 2; display: flex; gap: 3px; }
 .film-flags span { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 5px; background: rgba(20, 22, 28, .72); color: #fff; font-size: 9px; }
 .film-add { width: 100%; margin-top: 4px; }
+/* Sections (PowerPoint's): a header over each section's thumbnails, folding them away. */
+.film-section { display: flex; align-items: center; gap: 6px; margin: 4px 0 6px; padding: 4px 6px; border-radius: 6px; color: var(--ink-2); font-size: 11.5px; cursor: pointer; user-select: none; }
+.film-section:hover { background: var(--canvas); }
+.film-section b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-section small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.film-section-caret { width: 10px; color: var(--muted); }
+.film-section.collapsed { background: var(--canvas); }
+.film-flags .flag-comment { width: auto; padding: 0 4px; background: #a55a00; }
+.grid-section { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; padding: 6px 2px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.grid-section b { font-size: 13px; }
+.grid-section small { color: var(--muted); }
+.grid-item.dragging { opacity: .4; }
+.grid-item.is-hidden .hs-scaler { opacity: .55; }
+.grid-item.drop-before::before { content: ""; position: absolute; left: -11px; top: 0; bottom: 24px; width: 3px; border-radius: 2px; background: var(--accent); }
 
 .stage { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 /* The rulers (表示 → ルーラー, editor/rulers.mjs) sit over the stage's top and left edges; the slide keeps clear of them. */
@@ -368,8 +382,8 @@ body.resizing iframe, body.resizing .stage-body { pointer-events: none; }
 
 /* ------------------------------------------------------------------ side panel */
 .side-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); border-left: 1px solid var(--line); }
-.side-tabs { display: flex; gap: 4px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); flex: none; }
-.side-tab { flex: 1; height: 36px; border: 0; border-bottom: 2px solid transparent; background: none; font-size: 13px; font-weight: 800; color: var(--muted); white-space: nowrap; padding: 0 2px; min-width: 0; }
+.side-tabs { display: flex; gap: 2px; padding: 8px 6px 0; border-bottom: 1px solid var(--line); flex: none; }
+.side-tab { flex: 1 1 auto; height: 36px; border: 0; border-bottom: 2px solid transparent; background: none; font-size: 12.5px; font-weight: 800; color: var(--muted); white-space: nowrap; padding: 0 2px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .side-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
 #chatTab[aria-selected="true"] { border-image: var(--ai) 1; }
 .side-tab .badge-dot { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: #008738; vertical-align: middle; }
@@ -550,6 +564,26 @@ dialog[open] { animation: dialog-in .22s cubic-bezier(.16, 1, .3, 1); }
 .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--line); }
 .dialog-section { margin: 0 0 10px; font-size: 12px; font-weight: 800; color: var(--ink-2); letter-spacing: .04em; }
 .design-dialog { width: min(1060px, calc(100vw - 32px)); }
+/* 開発: the slide's JSON / HTML */
+.code-dialog { width: min(1080px, calc(100vw - 32px)); }
+.code-text { width: 100%; height: min(62vh, 640px); padding: 10px 12px; border-radius: 10px; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; tab-size: 2; resize: vertical; background: #fbfbfd; }
+.code-text[readonly] { background: var(--canvas); }
+#codeStatus.error { color: var(--danger); font-weight: 700; }
+/* 校閲 → コメント */
+.cm-all { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
+.cm-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cm-item { padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid #a55a00; border-radius: 8px; background: var(--surface); }
+.cm-item.done { border-left-color: var(--ok); opacity: .7; }
+.cm-meta { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.cm-slide { border: 0; background: transparent; padding: 0; color: var(--accent); font-size: 11px; font-weight: 700; cursor: pointer; }
+.cm-done { color: var(--ok); font-weight: 700; }
+.cm-text { margin: 4px 0 6px; font-size: 12.5px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+.cm-actions { display: flex; gap: 6px; }
+.cm-new { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.cm-input { font-size: 12.5px; }
+.cm-new-foot { display: flex; align-items: center; justify-content: space-between; }
+/* スライド ショー → リハーサル: the clock in the corner while presenting */
+.rehearse-clock { position: fixed; left: 16px; top: 14px; z-index: 3000; padding: 6px 12px; border-radius: 999px; background: rgba(20, 22, 28, .78); color: #fff; font: 700 12.5px/1.4 system-ui, sans-serif; font-variant-numeric: tabular-nums; pointer-events: none; }
 .theme-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
 .theme-card { display: grid; gap: 6px; padding: 6px 6px 8px; border: 1.5px solid var(--line); border-radius: 12px; background: #fff; text-align: left; transition: border-color .15s, box-shadow .15s, transform .15s; }
 .theme-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
@@ -705,6 +739,9 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .rb-tabs [role="tab"]:hover { color: var(--ink); background: var(--canvas); border-radius: 6px 6px 0 0; }
 .rb-tabs [role="tab"][aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
 .rb-tabs [role="tab"].contextual { color: #17804a; }
+/* ファイル: PowerPoint's first, coloured tab (a menu here) */
+.rb-file { align-self: center; height: 26px; margin: 0 6px 3px 0; padding: 0 14px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
+.rb-file:hover { filter: brightness(1.15); }
 .rb-tabs [role="tab"].contextual[aria-selected="true"] { border-bottom-color: #008738; color: #0b5f32; }
 .rb-spacer { flex: 1; }
 .rb-hint { align-self: center; color: var(--warn); font-size: 12px; font-weight: 700; padding-right: 8px; }
