@@ -10,6 +10,7 @@ import { chromeOf, describeAdded, enhanceSlide } from "./editor/htmlfx.mjs?v=__A
 import { createShell } from "./editor/window.mjs?v=__APP_VERSION__";
 import { createComments } from "./editor/comments.mjs?v=__APP_VERSION__";
 import { userName } from "./editor/people.mjs?v=__APP_VERSION__";
+import { createCoedit } from "./editor/coedit.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -853,6 +854,14 @@ async function putMedia(blob, name = "") {
   return src;
 }
 
+/** A file from a shared room, kept in this browser under the same id the deck uses. */
+async function putMediaAs(src, blob) {
+  if (!src?.startsWith("idb:")) return;
+  const id = src.slice(4);
+  await idb("readwrite", (store) => store.put({ id, blob, type: blob.type, name: "", size: blob.size, savedAt: Date.now() }), "media");
+  mediaUrls[src] = URL.createObjectURL(blob);
+}
+
 async function mediaBlob(src) {
   if (src?.startsWith("idb:")) return (await idb("readonly", (store) => store.get(src.slice(4)), "media"))?.blob ?? null;
   if (src?.startsWith("data:")) return dataUrlToBlob(src);
@@ -1043,6 +1052,8 @@ function slidePicture(slide, index, deck = state.deck) {
 // ---------------------------------------------------------------- deck lifecycle
 
 function loadDeck(deck, { source = "", keepUndo = false, imported = null, savedDeckId = null, selected = 0 } = {}) {
+  // Opening another deck leaves a shared one (its room keeps the shared deck for the others).
+  if (coedit?.active && source !== "共同編集") coedit.disconnect();
   if (autoImageRun) autoImageRun.cancelled = true;
   autoImageRun = null;
   stopMotionPreview({ render: false });
@@ -1069,6 +1080,7 @@ function loadDeck(deck, { source = "", keepUndo = false, imported = null, savedD
 
 function markChanged({ structural = false } = {}) {
   saveCurrent();
+  coedit?.changed();
   scheduleMeasure();
   scheduleVersion();
   if (structural) {
@@ -1203,6 +1215,7 @@ function select(index) {
   if (state.panel === "comment") comments.render();
   document.querySelector(".film-item.selected")?.scrollIntoView({ block: "nearest" });
   renderChatContext();
+  coedit?.sendPresence();
 }
 
 // ---------------------------------------------------------------- persistence
@@ -1677,7 +1690,7 @@ function setMode(mode) {
 
 function updateTopbar() {
   const editing = state.mode === "edit" && Boolean(state.deck);
-  for (const id of ["deckTitleInput", "saveDeckBtn", "undoBtn", "redoBtn", "presentBtn", "pdfBtn", "downloadBtn", "moreMenu"]) $(id).classList.toggle("hidden", !editing);
+  for (const id of ["deckTitleInput", "saveDeckBtn", "shareBtn", "undoBtn", "redoBtn", "presentBtn", "pdfBtn", "downloadBtn", "moreMenu"]) $(id).classList.toggle("hidden", !editing);
   $("saveDeckBtn").textContent = state.savedDeckId ? "上書き保存" : "資料を保存";
   $("deckReviseBtn").classList.toggle("hidden", !editing || !state.codexAuthorized);
   $("deckReviseBtn").disabled = state.aiBusy;
@@ -1728,6 +1741,7 @@ function renderFilmstrip() {
     const open = (slide.comments || []).filter((c) => !c.done).length;
     if (open) flags.push(h("span", { class: "flag-comment", title: `コメント${open}件（校閲）` }, `💬${open}`));
     const item = h("div", {
+      "data-index": String(index),
       class: `film-item${index === state.selected ? " selected" : ""}${parent != null ? " is-drill" : ""}${slide.hidden ? " is-hidden" : ""}`,
       draggable: movable ? "true" : null,
       title: `${index + 1}. ${parent != null ? `${parent + 1}枚目の深掘りページ：` : ""}${strip(slide.title) || typeLabel(slide.type)}${slide.hidden ? "（発表では非表示）" : ""}`,
@@ -1754,6 +1768,7 @@ function renderFilmstrip() {
     if (!within || !state.collapsedSections.has(within.key)) out.push(item);
   });
   strip_.replaceChildren(...out, h("button", { class: "btn film-add", type: "button", onclick: () => openTypeDialog("insert") }, "＋ スライドを追加"));
+  coedit?.decorateFilm(strip_.querySelectorAll(".film-item"));
 }
 
 // ---------------------------------------------------------------- sections (PowerPoint's, in the thumbnails)
@@ -1898,6 +1913,8 @@ function slideMenu(index, x, y) {
     { label: "白紙のスライドを追加", run: () => editorApp.insertBlankSlide() },
     index > 0 && index < last && { label: "スライドの複製", keys: "⌘D", run: () => editorApp.duplicateSlide() },
     { label: "スライドの削除", keys: "Delete", run: () => deleteSlide(index) },
+    { label: "上へ移動", keys: "⌘↑", run: () => moveSlideStep(index, -1) },
+    { label: "下へ移動", keys: "⌘↓", run: () => moveSlideStep(index, 1) },
     "-",
     index > 0 && { label: slide.hidden ? "非表示スライドを解除" : "非表示スライドに設定", run: () => toggleHiddenSlide() },
     !slide.drillOf && { label: slide.section ? "セクション名の変更…" : "セクションの追加…", run: () => (slide.section ? renameSection(index) : addSection(index)) },
@@ -1931,7 +1948,25 @@ function filmKey(event) {
   if (meta && key === "x") { cutSlide(state.selected); return true; }
   if (meta && key === "v") { pasteSlide(); return true; }
   if (meta && key === "d") { editorApp.duplicateSlide(); return true; }
+  // ⌘↑ / ⌘↓: move the slide (with its deep-dive pages) one place up or down, as in PowerPoint.
+  if (meta && (event.key === "ArrowUp" || event.key === "ArrowDown")) { moveSlideStep(state.selected, event.key === "ArrowUp" ? -1 : 1); return true; }
   return false;
+}
+
+/** One place up or down in the show (a deep-dive page moves with its slide; the cover and the last slide stay). */
+function moveSlideStep(index, dir) {
+  const story = storyOf();
+  const slides = state.deck.slides;
+  if (story.parent[index] != null) return;
+  if (dir < 0) {
+    let before = index - 1;
+    while (before > 0 && story.parent[before] != null) before -= 1;
+    moveSlideBefore(index, before);
+  } else {
+    const end = groupEnd(index, story);
+    if (end >= slides.length - 1) return;
+    moveSlideBefore(index, groupEnd(end, story));
+  }
 }
 
 function renderStage() {
@@ -2037,6 +2072,58 @@ function toggleHiddenSlide() {
   if (state.selected === 0) return toast("表紙は非表示にできません");
   setSlideFields({ hidden: slide.hidden ? null : true });
   toast(slide.hidden ? "このスライドを非表示にしました（発表では飛ばします。編集用に残ります）" : "このスライドを発表に戻しました");
+}
+
+/**
+ * Others' changes in a shared deck (coedit.mjs), already merged with ours: no undo step of their own, and the undo
+ * history learns them too, so ⌘Z takes back only what was done here.
+ */
+function applyRemote(next, { slides = new Map(), order = null, meta = null } = {}) {
+  if (!state.deck) return;
+  const selectedSid = state.deck.slides[state.selected]?.sid;
+  const theirs = new Set(slides.keys());
+  const n = next.slides.length;
+  const deck = { ...next, slides: next.slides.map((slide, i) => (theirs.has(slide.sid) ? normalizeSlide(clone(slide), i, n) : slide)) };
+  state.deck = deck;
+  const at = deck.slides.findIndex((slide) => slide.sid === selectedSid);
+  state.selected = at >= 0 ? at : Math.min(state.selected, deck.slides.length - 1);
+  const patch = (text) => {
+    try {
+      const snap = JSON.parse(text);
+      let list = snap.deck.slides.map((slide) => (slide.sid && slides.has(slide.sid) ? slides.get(slide.sid) : slide));
+      if (order) {
+        const bySid = new Map(list.map((slide) => [slide.sid, slide]));
+        for (const [sid, slide] of slides) if (!bySid.has(sid)) bySid.set(sid, slide);
+        const ordered = order.map((sid) => bySid.get(sid)).filter(Boolean);
+        // Slides only in this snapshot that the others never had (made here, then undone) keep their place.
+        const known = new Set(order);
+        list.forEach((slide, i) => { if (!slide.sid || (!known.has(slide.sid) && !bySid.has(slide.sid))) ordered.splice(Math.min(i, ordered.length), 0, slide); });
+        list = ordered;
+      }
+      snap.deck = { ...(meta ? { ...snap.deck, ...meta } : snap.deck), slides: list.length ? list : snap.deck.slides };
+      return JSON.stringify(snap);
+    } catch { return text; }
+  };
+  state.undo = state.undo.map(patch);
+  state.redo = state.redo.map(patch);
+  $("deckTitleInput").value = deck.title || "";
+  saveCurrent();
+  thumbCache.clear?.();
+  renderFilmstrip();
+  renderStage();
+  renderInspector();
+  if (state.panel === "anim") editorUi.renderAnimPane();
+  if (state.panel === "comment") comments.render();
+  scheduleMeasure();
+}
+
+/** The link to a shared deck, shown (and copied) when sharing starts. */
+function showShareLink(text, copied) {
+  const dialog = $("shareDialog");
+  $("shareLink").value = text;
+  $("shareStatus").textContent = copied ? "リンクをコピーしました。チャットやメールで送ってください。" : "リンクをコピーして、チャットやメールで送ってください。";
+  dialog.showModal();
+  $("shareLink").select();
 }
 
 /** The comments on a slide changed (comments.mjs): one undo step. */
@@ -2227,6 +2314,7 @@ const editorApp = {
   setCommentPins: (on) => comments.setShowPins(on),
   userName: () => userName(),
   changeUserName: () => comments.changeName(),
+  share: () => (coedit.active ? coedit.showMenu() : coedit.start()),
   addSection: () => addSection(),
   rehearse: () => rehearse(),
   designIdeas: () => { setPanel("chat"); requestVariants(state.selected); },
@@ -2264,8 +2352,26 @@ const comments = createComments({
   showPanel: (panel) => setPanel(panel, { reveal: true }), onSlide: () => state.view === "single",
   people: () => coedit?.names() || [], nameChanged: (name) => coedit?.rename(name),
 });
+// 共同編集 (public/editor/coedit.mjs): a room on the server, changes merged slide by slide, people shown.
+coedit = createCoedit({
+  h, E, toast, ask: askDialog, confirm: (message) => Promise.resolve(window.confirm(message)),
+  deck: () => state.deck, index: () => state.selected, select: (i) => select(i), selection: () => editor.selection,
+  ensureAllSids: () => state.deck?.slides.forEach((_, i) => ensureSid(i)),
+  loadShared: (deck) => loadDeck(deck, { source: "共同編集", selected: 0 }),
+  applyRemote: (next, info) => applyRemote(next, info),
+  busy: () => Boolean(editor.typing || state.inline || document.querySelector(".sa-pane input:focus, .cm-input:focus")),
+  redraw: () => { editor.draw(); renderFilmstrip(); },
+  mediaBlob: (src) => mediaBlob(src),
+  hasMedia: async (src) => Boolean(mediaUrls[src] || (await mediaBlob(src).catch(() => null))),
+  putMediaAs: (src, blob) => putMediaAs(src, blob),
+  mediaArrived: () => { mediaEpoch += 1; thumbCache.clear(); renderFilmstrip(); renderStage(); },
+  showLink: (text, copied) => showShareLink(text, copied),
+  openMenu: (anchor, items) => editorUi.popMenu(anchor, items),
+});
+editor.overlay((list, k) => coedit.overlay(list, k));
+editor.subscribe(() => coedit.sendPresence());
 // Read-only access for the browser checks (qa/studio-objects.mjs): the deck and the slide on the stage.
-window.__hsej = { deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection, typing: () => editor.state.typing?.cell ?? (editor.typing ? "text" : null), cellRange: () => editor.cellRange };
+window.__hsej = { coedit: () => coedit?.info(), deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection, typing: () => editor.state.typing?.cell ?? (editor.typing ? "text" : null), cellRange: () => editor.cellRange };
 
 /**
  * The objects of the slide on the stage changed (one undo step unless told otherwise). Their animations follow:
@@ -5835,6 +5941,8 @@ function bind() {
   });
   $("undoBtn").addEventListener("click", () => undoRedo("undo"));
   $("redoBtn").addEventListener("click", () => undoRedo("redo"));
+  $("shareBtn").addEventListener("click", () => (coedit.active ? coedit.showMenu() : coedit.start()));
+  $("shareCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("shareLink").value); $("shareStatus").textContent = "コピーしました"; } catch { $("shareLink").select(); document.execCommand("copy"); $("shareStatus").textContent = "コピーしました"; } });
   $("downloadBtn").addEventListener("click", () => exportHtml());
   $("fixAllBtn").addEventListener("click", fixAllOverflow);
   $("deckReviseBtn").addEventListener("click", () => openRewriteDialog());
@@ -6032,3 +6140,5 @@ updateBriefCount();
 restore();
 updateTopbar();
 checkCodexStatus();
+// A link to a shared deck (…?room=ID) joins the room.
+try { const room = new URL(location.href).searchParams.get("room"); if (room && /^[A-Za-z0-9_-]{16,40}$/.test(room)) coedit.join(room); } catch { /* file: */ }

@@ -41,6 +41,7 @@
         <button id="commandBtn" class="btn btn-ghost command-btn" type="button" title="コマンドを探す・AIに頼む（⌘K）"><span>検索・コマンド</span><kbd>⌘K</kbd></button>
         <button id="undoBtn" class="btn btn-icon btn-ghost hidden" type="button" title="元に戻す (⌘Z)" aria-label="元に戻す" disabled>↶</button>
         <button id="redoBtn" class="btn btn-icon btn-ghost hidden" type="button" title="やり直す (⌘Y・⇧⌘Z)" aria-label="やり直す" disabled>↷</button>
+        <button id="shareBtn" class="btn btn-ghost share-btn hidden" type="button" title="共同編集：リンクを知っている人と同時に編集します"><span>共有</span></button>
         <button id="presentBtn" class="btn btn-ghost hidden" type="button" title="全画面で発表・リハーサル（F5）">▶ 発表</button>
         <button id="pdfBtn" class="btn btn-ghost hidden" type="button" title="PDFとして保存・印刷">PDF</button>
         <button id="downloadBtn" class="btn btn-primary hidden" type="button" title="出力前にチェックし、動きごと1つのHTMLファイルに書き出します">HTML出力</button>
@@ -447,6 +448,7 @@
         <table class="help-keys">
           <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>前後のスライドへ</td></tr>
           <tr><td><kbd>⌘</kbd>+<kbd>Z</kbd> / <kbd>⌘</kbd>+<kbd>Y</kbd>（<kbd>⇧</kbd>+<kbd>⌘</kbd>+<kbd>Z</kbd>）</td><td>元に戻す / やり直す</td></tr>
+          <tr><td><kbd>⌘</kbd>+<kbd>↑</kbd> / <kbd>⌘</kbd>+<kbd>↓</kbd>（サムネイル）</td><td>スライドを上へ / 下へ移動</td></tr>
           <tr><td><kbd>F5</kbd>（<kbd>⇧</kbd>+<kbd>F5</kbd>）</td><td>最初から（今のスライドから）発表</td></tr>
           <tr><td><kbd>⌘</kbd>+<kbd>K</kbd></td><td>検索・コマンド（AIへの依頼もここから）</td></tr>
           <tr><td>文字の編集中 <kbd>Enter</kbd> / <kbd>Esc</kbd></td><td>確定 / 取り消し</td></tr>
@@ -507,6 +509,7 @@
         <ul>
           <li>リボンの「インタラクション」で、部品にマウスを乗せたときの反応（浮き上がる・拡大・光る・3Dで傾く・ほかを薄く）と説明、クリックしたときの操作（詳細を開く・拡大・裏返す・ほかの部品を表示/非表示・スポットライト）、ずっと動く動きを付けられます。PowerPointにはない動きです</li>
           <li>「アニメーション」→「HTMLの効果」に、タイプライター・デコード・カウントアップ・グラフが伸びる・線を描く・マーカー・スポットライトなど</li>
+          <li>上部の「共有」で共同編集のリンクを作り、相手に送ると同じ資料を同時に編集できます。相手の名前と色が、共有ボタン・サムネイル・選んでいる部品に出ます。⌘Zは自分の変更だけを戻します</li>
           <li>図形を2つ以上選んで、図形の書式 →「図形の結合」（接合・型抜き/合成・切り出し・重なり抽出・単純型抜き）。最初に選んだ図形の書式になります</li>
           <li>挿入 →「SmartArt」で図を入れ、横のテキスト ウィンドウで1行1項目（Tabでレベル）。「SmartArt のデザイン」タブでレイアウト・色・図形の追加、図形に変換。ホーム →「SmartArt に変換」でテキストを図に</li>
           <li>挿入 →「オーディオ」で音声（ファイル・この場で録音・URL）、「画面録画」で画面をビデオとして入れます。選ぶと「再生」タブ：トリミング・フェード・音量・開始（自動／クリック時／一連のクリック動作）・スライド切り替え後も再生・繰り返し・アイコンを隠す・巻き戻し・バックグラウンドで再生</li>
@@ -534,6 +537,16 @@
           <li>手で置いた図形・文字・画像は、AIに頼んで直しても消えません（AIには「自由配置」の要約だけを伝えます）。SEJの色以外を使うと「チェック」で知らせます</li>
         </ul>
       </div>
+    </dialog>
+
+    <dialog id="shareDialog" class="share-dialog">
+      <div class="dialog-head"><h3>共同編集のリンク</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
+      <div class="dialog-body">
+        <p class="hint">このリンクを開いた人は、同じ資料を同時に見て編集できます。誰がどのスライドにいるか・何を選んでいるかが色で表示されます。リンクは社内の人にだけ送ってください。</p>
+        <div class="share-row"><input id="shareLink" type="text" readonly aria-label="共同編集のリンク" /><button id="shareCopy" class="btn btn-primary" type="button">コピー</button></div>
+        <p id="shareStatus" class="hint" role="status"></p>
+      </div>
+      <div class="dialog-foot"><button class="btn" type="button" data-close>閉じる</button></div>
     </dialog>
 
     <dialog id="askDialog" class="ask-dialog" data-keeps-text>
