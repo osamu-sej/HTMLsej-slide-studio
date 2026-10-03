@@ -13,7 +13,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 /** Pages that are layouts of their own (the cover, chapters, closing, full-bleed pages) keep their layout. */
 export const KEEPS_LAYOUT = new Set(["title", "section", "closing", "hero", "statement", "blank"]);
 /** What a converted slide keeps; the layout's own fields (points, items, chart data…) go. */
-export const KEPT_FIELDS = ["title", "subhead", "takeaway", "source", "details", "drillOf", "notes", "sid", "transition", "transitionDur", "advance", "kinetic", "backdrop", "entrance", "emphasis"];
+export const KEPT_FIELDS = ["title", "subhead", "takeaway", "source", "details", "drillOf", "notes", "sid", "transition", "transitionDur", "transitionSound", "advance", "kinetic", "backdrop", "entrance", "emphasis"];
 
 // ---------------------------------------------------------------- colours
 

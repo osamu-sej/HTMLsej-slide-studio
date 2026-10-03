@@ -902,17 +902,20 @@ function roomAllowed(req, res) {
 }
 
 async function roomRoute(req, res, url) {
-  if (!roomAllowed(req, res)) return json(res, 403, { error: "チームのパスコードを入れると共同編集できます" });
   const parts = url.pathname.split("/").filter(Boolean); // api, rooms, id?, action?, mid?
+  const action = parts[3] || "";
+  // オンライン プレゼンテーション: anyone with the link may watch a show (its stream and its pictures), as in
+  // PowerPoint; making, editing and presenting still need the team passcode in team mode.
+  const watching = rooms.get(parts[2])?.kind === "show" && (((req.method === "GET" || req.method === "HEAD") && (!action || action === "media")) || action === "leave");
+  if (!watching && !roomAllowed(req, res)) return json(res, 403, { error: "チームのパスコードを入れると共同編集できます" });
   try {
     if (parts.length === 2 && req.method === "POST") {
       const body = await readJson(req, 25_000_000);
-      const room = rooms.create(body.deck, { id: typeof body.id === "string" ? body.id : null });
-      return json(res, 200, { id: room.id, version: room.version });
+      const room = rooms.create(body.deck, { id: typeof body.id === "string" ? body.id : null, show: body.show === true, key: typeof body.key === "string" ? body.key : null, fits: body.fits });
+      return json(res, 200, { id: room.id, version: room.version, ...(room.kind === "show" ? { key: room.key, show: room.show } : {}) });
     }
     const room = rooms.get(parts[2]);
     if (!room) return json(res, 404, { error: "共同編集の部屋が見つかりません（時間が経って閉じられたか、サーバーが再起動しました）", gone: true });
-    const action = parts[3] || "";
     if (!action && req.method === "GET") {
       res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
       const client = String(url.searchParams.get("client") || "");
@@ -923,6 +926,14 @@ async function roomRoute(req, res, url) {
     if (action === "ops" && req.method === "POST") {
       const body = await readJson(req, 25_000_000);
       return json(res, 200, { version: rooms.apply(room, String(body.client || ""), body.ops) });
+    }
+    if (action === "show" && req.method === "POST") {
+      const body = await readJson(req, 4_000);
+      return json(res, 200, { show: rooms.setShow(room, body.key, body) });
+    }
+    if (action === "deck" && req.method === "PUT") {
+      const body = await readJson(req, 25_000_000);
+      return json(res, 200, { version: rooms.replaceDeck(room, body.key, body.deck, body.fits) });
     }
     if (action === "presence" && req.method === "POST") {
       const body = await readJson(req, 20_000);

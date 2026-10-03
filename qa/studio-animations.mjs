@@ -286,6 +286,11 @@ await step("presenting: hidden until its click, the trigger plays the text, then
 });
 
 await step("export: the file carries the animations and plays them", async () => {
+  // Without the 2-second 自動的に切り替え (tested above), only the click shows the shape: nothing races the check.
+  await tab("画面切り替え");
+  await page.locator('.rb-body label:has-text("自動的に切り替え") input').uncheck();
+  await page.waitForTimeout(300);
+  assert((await slideNow()).advance == null, "no automatic advance on this slide");
   const [download] = await Promise.all([page.waitForEvent("download"), page.click("#downloadBtn").then(async () => { if (await page.isVisible("#exportCheckDialog[open]")) await page.click("#exportCheckGoBtn"); })]);
   const file = join(outDir, "anim-export.html");
   await download.saveAs(file);

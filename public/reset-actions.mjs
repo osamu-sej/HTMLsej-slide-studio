@@ -26,6 +26,7 @@ export function resetDeckActions(source) {
     delete slide.details;
     delete slide.drillOf;
     delete slide.transitionDur;
+    delete slide.transitionSound;
     delete slide.advance;
     slide.animation = "none";
     slide.photoMotion = "none";

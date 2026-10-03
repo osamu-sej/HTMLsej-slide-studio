@@ -20,6 +20,7 @@ import { createFileInfo, infoOf, strip as stripDeckData } from "./editor/fileinf
 import { createSlideTools } from "./editor/slidetools.mjs?v=__APP_VERSION__";
 import { createVideoExport } from "./editor/video.mjs?v=__APP_VERSION__";
 import { createCompare } from "./editor/compare.mjs?v=__APP_VERSION__";
+import { createOnline } from "./editor/online.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -547,6 +548,7 @@ function normalizeSlide(raw, index, total) {
   if (reading.length > 1) slide.readingOrder = reading; else delete slide.readingOrder;
   // 画面切り替え: how long the way in takes (ms) and moving on by itself after some seconds.
   if (Number(slide.transitionDur) >= 100 && Number(slide.transitionDur) <= 10000) slide.transitionDur = Math.round(Number(slide.transitionDur)); else delete slide.transitionDur;
+  if (!Object.hasOwn(E.TRANSITION_SOUNDS, slide.transitionSound)) delete slide.transitionSound;
   if (slide.advance != null && Number.isFinite(Number(slide.advance)) && Number(slide.advance) >= 0) slide.advance = Math.min(600, Math.round(Number(slide.advance) * 10) / 10); else delete slide.advance;
   if (!(typeof slide.sid === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(slide.sid))) delete slide.sid;
   // A page brought over from PowerPoint as it looked keeps its title as an object and may use the cover's master.
@@ -790,7 +792,7 @@ function extractUnits(slide) {
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "advance", "hidden", "section", "comments"]) {
+  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "transitionSound", "advance", "hidden", "section", "comments"]) {
     if (slide[key] != null && slide[key] !== "" && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
@@ -1596,7 +1598,7 @@ const PLACEHOLDERS = new Set([
   "工程", "項目", "補足", "説明", "伝えたいひと言", "写真に重ねて見せる補足の一文", "ポイント", "いちばん伝えたい**ひと言**を大きく",
 ]);
 const FULLWIDTH_NUMBER = /[０-９％．，]/;
-const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula", "elements", "timeline", "sid", "transitionDur", "advance"]);
+const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula", "elements", "timeline", "sid", "transitionDur", "transitionSound", "advance"]);
 
 function textEntries(value, path = [], out = []) {
   if (typeof value === "string") out.push([path, value]);
@@ -2414,6 +2416,8 @@ const editorApp = {
   openJson: () => openJsonDialog(),
   printPdf: () => printPdf(),
   printSlidesNow: () => printSlidesNow(),
+  openNotesView: () => printer.notesView(),
+  setNotes: (value) => setNotes(value),
   version: APP_VERSION,
   // 校閲 → スペル チェック・表記ゆれ; ファイル → 情報・ドキュメント検査.
   spellcheck: () => spellcheckOn(),
@@ -2436,6 +2440,17 @@ const editorApp = {
   openVideoExport: () => videoExport.openDialog(),
   showOrder: () => showSlides(state.deck, showOf(state.deck?.show) || {}) || E.storyMap(state.deck.slides).order.filter((i) => !state.deck.slides[i].hidden),
   presentForVideo: (extra) => openPresenter(0, { extra }),
+  // オンライン プレゼンテーション (public/editor/online.mjs).
+  openPresenter: (start, options) => openPresenter(start, options),
+  openOnline: () => online.open(),
+  onlineActive: () => online.active,
+  fitsForShow: async () => { await measureAll(); return state.deck.slides.map((_, i) => { const fit = fitFor(i); return fit ? { fs: fit.fs, ts: fit.ts, ...(fit.objs ? { objs: fit.objs } : {}) } : null; }); },
+  setMediaUrl: (src, url) => { mediaUrls[src] = url; },
+  openViewer: (deck, options) => openViewer(deck, options),
+  openViewerMessage: (text) => openViewerMessage(text),
+  ensureAllSids: () => state.deck?.slides.forEach((_, i) => ensureSid(i)),
+  mediaBlob: (src) => mediaBlob(src),
+  refreshRibbon: () => editorUi.renderRibbon(),
   player: () => state.player,
   animBusy: () => { const el = [...document.querySelectorAll("#presenter .hs-player-slide .hs-slide")].pop(); return Boolean(el && E.animBusy?.(el)); },
   closeShow: () => state.player?.close?.(),
@@ -2469,6 +2484,8 @@ const slideTools = createSlideTools(editorApp);
 const videoExport = createVideoExport(editorApp);
 // 校閲 → 比較 (public/editor/compare.mjs).
 const compareTool = createCompare(editorApp);
+// スライド ショー → オンライン プレゼンテーション (public/editor/online.mjs).
+const online = createOnline(editorApp);
 const editor = createCanvas(editorApp);
 const editorUi = createEditorUi(editor, editorApp);
 // The window around the slide: splitters, notes, message bar, status bar (public/editor/window.mjs).
@@ -4534,7 +4551,7 @@ function restoreImages(slides, previous) {
     if (source?.imagePlacement && slide.customImage === source.customImage && !slide.imagePlacement) slide.imagePlacement = source.imagePlacement;
     // What people placed by hand stays: a 白紙 page comes back as it was, objects stay with their slide.
     if (source?.type === "blank") { slides[index] = clone(source); return; }
-    for (const key of ["elements", "timeline", "sid", "transitionDur", "advance"]) if (source?.[key] != null && slide[key] == null) slide[key] = clone(source[key]);
+    for (const key of ["elements", "timeline", "sid", "transitionDur", "transitionSound", "advance"]) if (source?.[key] != null && slide[key] == null) slide[key] = clone(source[key]);
   });
   // A slide with objects that found no place in the new deck is kept (before the close), so no work is lost.
   const placed = new Set(slides.flatMap((slide) => (slide.elements || []).map((o) => o.id)));
@@ -5180,7 +5197,7 @@ function chooseVariant(id, variant) {
   saveVersion("別案を採用する前");
   const original = state.deck.slides[set.index];
   const chosen = clone(variant.slide);
-  for (const key of ["elements", "timeline", "sid", "transitionDur", "advance"]) if (original?.[key] != null && chosen[key] == null) chosen[key] = clone(original[key]);
+  for (const key of ["elements", "timeline", "sid", "transitionDur", "transitionSound", "advance"]) if (original?.[key] != null && chosen[key] == null) chosen[key] = clone(original[key]);
   replaceSlide(set.index, chosen);
   message.variants.status = "chosen";
   message.variants.chosen = variant.label;
@@ -5488,8 +5505,11 @@ async function openCheckDialog(forExport) {
 
 // ---------------------------------------------------------------- presenting
 
-async function openPresenter(start = state.selected, { custom = null, extra = null } = {}) {
+async function openPresenter(start = state.selected, { custom = null, extra = null, onClosed = null } = {}) {
   if (!state.deck || state.player) return;
+  // While presenting online, every slide show goes to the viewers too.
+  if (online?.active && !extra && !onClosed) return online.present(start, { custom });
+  if (onClosed) state.onShowClosed = onClosed;
   // スライド ショーの設定: which slides (a range or a custom show) and how the show runs.
   const settings = showOf(state.deck.show) || {};
   const only = showSlides(state.deck, settings, custom);
@@ -5645,7 +5665,7 @@ function keepRehearsal(times) {
 function closePresenter(index, { ink = [], sidsAtStart = null } = {}) {
   const closed = state.onShowClosed;
   state.onShowClosed = null;
-  closed?.();
+  closed?.(index);
   const rehearsal = state.rehearsal;
   if (rehearsal) { clearInterval(rehearsal.timer); rehearsal.finish(); state.rehearsal = null; }
   const recording = state.recording;
@@ -5657,6 +5677,38 @@ function closePresenter(index, { ink = [], sidsAtStart = null } = {}) {
   host.replaceChildren();
   if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   if (Number.isInteger(index)) select(index);
+}
+
+/**
+ * オンライン プレゼンテーション, the viewer's side (public/editor/online.mjs): someone else's deck fills the window
+ * and follows its presenter. This browser's own deck is not touched.
+ */
+function openViewer(deck, { fits = null, start = 0, step = 0, label = null } = {}) {
+  state.player?.destroy?.();
+  document.body.classList.add("is-viewer");
+  const host = $("presenter");
+  host.classList.remove("hidden");
+  host.replaceChildren();
+  useFonts([deck.theme]);
+  const first = Math.max(0, Math.min(Number(start) || 0, deck.slides.length - 1));
+  state.player = E.createPlayer(host, {
+    deck,
+    start: first,
+    fitFor: (i) => fits?.[i] || undefined,
+    renderOptions: { assetBase: "/assets/", mediaUrls },
+    fullscreenTarget: host,
+    viewer: true,
+    viewerLabel: label,
+    closable: false,
+  });
+  if (step) state.player.follow(first, step);
+  return state.player;
+}
+function openViewerMessage(text) {
+  document.body.classList.add("is-viewer");
+  const host = $("presenter");
+  host.classList.remove("hidden");
+  host.replaceChildren(h("div", { class: "op-message" }, h("p", {}, text), h("a", { class: "btn", href: location.pathname }, "スタジオを開く")));
 }
 
 /** PowerPoint asks, after a show with ink: keep the annotations? They become ink objects on their slides (one undo). */
@@ -6507,5 +6559,6 @@ updateBriefCount();
 restore();
 updateTopbar();
 checkCodexStatus();
-// A link to a shared deck (…?room=ID) joins the room.
+// A link to a shared deck (…?room=ID) joins the room; a link to an online presentation (…?watch=ID) watches it.
 try { const room = new URL(location.href).searchParams.get("room"); if (room && /^[A-Za-z0-9_-]{16,40}$/.test(room)) coedit.join(room); } catch { /* file: */ }
+try { const watch = new URL(location.href).searchParams.get("watch"); if (watch && /^[A-Za-z0-9_-]{16,40}$/.test(watch)) window.__hsejWatch = online.watch(watch); } catch { /* file: */ }

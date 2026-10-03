@@ -254,6 +254,46 @@ export function createExtras(editor, app, kit) {
     app.toast("音声入力：話すと文字になります（もう一度押すと終わります）");
   }
 
+  // ---------------------------------------------------------------- フォントの置換
+
+  /** The fonts the deck's text uses: [{ key, label, count }] (a key is "font:<name>" or "face:<name>"). */
+  function fontsInUse() {
+    const counts = new Map();
+    for (const slide of app.deck()?.slides || []) for (const o of slide.elements || []) {
+      if (!["shape", "text"].includes(o.kind) || !o.text) continue;
+      const key = o.fontFace ? `face:${o.fontFace}` : `font:${o.font || "body"}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return [...counts].map(([key, count]) => ({ key, count, label: key.startsWith("face:") ? key.slice(5) : (E.FONTS[key.slice(5)]?.[0] || key.slice(5)) }));
+  }
+  /** フォントの置換: every text in one font set in another (an SEJ font). */
+  function fontReplaceDialog() {
+    const used = fontsInUse();
+    if (!used.length) { app.toast("文字の入った図形・テキスト ボックスがありません"); return; }
+    const from = h("select", { "aria-label": "置換前のフォント" }, used.map((f) => h("option", { value: f.key }, `${f.label}（${f.count}か所）`)));
+    const to = h("select", { "aria-label": "置換後のフォント" }, Object.entries(E.FONTS).map(([key, [label]]) => h("option", { value: key }, label)));
+    const dialog = h("dialog", { class: "font-dialog", "aria-label": "フォントの置換" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "フォントの置換"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body fr-body" }, h("label", {}, "置換前のフォント", from), h("label", {}, "置換後のフォント", to),
+        h("p", { class: "hint" }, "資料のすべての図形・テキスト ボックスの文字を置き換えます（⌘Zで戻せます）。")),
+      h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "閉じる"),
+        h("button", { type: "button", class: "btn btn-primary fr-ok", onclick: () => {
+          const changes = [];
+          (app.deck()?.slides || []).forEach((slide, i) => (slide.elements || []).forEach((o) => {
+            if (!["shape", "text"].includes(o.kind) || !o.text) return;
+            const key = o.fontFace ? `face:${o.fontFace}` : `font:${o.font || "body"}`;
+            if (key === from.value) changes.push({ slide: i, id: o.id, patch: { font: to.value === "body" ? undefined : to.value, fontFace: undefined } });
+          }));
+          if (!changes.length || from.value === `font:${to.value}`) { app.toast("置き換える文字がありません"); return; }
+          app.patchObjects(changes);
+          dialog.close();
+          app.toast(`${changes.length}か所のフォントを「${E.FONTS[to.value][0]}」に置き換えました（⌘Zで戻せます）`);
+        } }, "置換")));
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => dialog.remove());
+    dialog.showModal();
+  }
+
   // ---------------------------------------------------------------- menus used by the ribbon
 
   const zoomMenu = (anchor) => menu([
@@ -273,6 +313,6 @@ export function createExtras(editor, app, kit) {
 
   return {
     zoomTab, zoomMenu, isZoom: () => Boolean(zoomSel()), insertCamera, insertScreenshot, equationDialog, wordArtMenu, fieldMenu, columnsMenu, caseMenu,
-    toggleDictation, get dictating() { return Boolean(dictation); }, escapeText, insertSlideZoom, insertSummaryZoom,
+    toggleDictation, get dictating() { return Boolean(dictation); }, escapeText, insertSlideZoom, insertSummaryZoom, fontReplaceDialog, fontsInUse,
   };
 }

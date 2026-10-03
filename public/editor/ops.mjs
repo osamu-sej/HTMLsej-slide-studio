@@ -757,3 +757,30 @@ export function tableFromText(text) {
   const cols = Math.max(...rows.map((row) => row.length), 1);
   return rows.map((row) => Array.from({ length: cols }, (_, c) => (row[c] ? { text: `<p>${row[c].replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[ch])}</p>` } : {})));
 }
+
+/** The colour of `list` nearest to `hex` (RGB distance). */
+export function nearestColor(hex, list) {
+  const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [r, g, b] = rgb(hex);
+  let best = list[0];
+  let d = Infinity;
+  for (const c of list) { const [x, y, z] = rgb(c); const e = (r - x) ** 2 + (g - y) ** 2 + (b - z) ** 2; if (e < d) { d = e; best = c; } }
+  return best;
+}
+
+/** 貼り付け先のスタイルを使用: an object's colours moved to the nearest of the SEJ palette (fills, lines, words, markers). */
+export function snapToPalette(o, P) {
+  const hex = (c) => typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c);
+  const pick = (c, key) => nearestColor(c.toLowerCase(), P[key].map(([x]) => x));
+  const out = { ...o };
+  if (hex(out.fill)) out.fill = pick(out.fill, "fill");
+  if (hex(out.stroke)) out.stroke = pick(out.stroke, "line");
+  if (hex(out.color)) out.color = pick(out.color, out.kind === "icon" ? "line" : "text");
+  if (out.gradient?.stops) out.gradient = { ...out.gradient, stops: out.gradient.stops.map((s) => (hex(s.color) ? { ...s, color: pick(s.color, "fill") } : s)) };
+  if (typeof out.text === "string") {
+    out.text = out.text
+      .replace(/background-color:\s*(#[0-9a-f]{6})/gi, (_, c) => `background-color: ${pick(c, "highlight")}`)
+      .replace(/(^|[^-])color:\s*(#[0-9a-f]{6})/gi, (_, pre, c) => `${pre}color: ${pick(c, "text")}`);
+  }
+  return out;
+}
