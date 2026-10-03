@@ -28,12 +28,14 @@ import { imageBrief } from "./server/image-brief.mjs";
 import { extractText, importDeck } from "./server/extract.mjs";
 import { varietyIssues } from "./public/layout-looks.mjs";
 import { createRooms } from "./server/rooms.mjs";
+import { buildTranslatePrompt, checkTranslation, translateRequestSchema, translateResultSchema } from "./server/translate.mjs";
 import {
   chatRequestSchema,
   chatResultSchema,
   codexChatSchema,
   codexDeckSchema,
   codexNotesSchema,
+  toCodexSchema,
   codexOutlineSchema,
   codexVariantsSchema,
   variantsRequestSchema,
@@ -549,6 +551,21 @@ function startVariantsJob(session, request) {
   return job;
 }
 
+function startTranslateJob(session, request) {
+  const job = newJob("translate", session, { to: request.to, count: request.texts.length });
+  codex.runJob(job, {
+    prompt: buildTranslatePrompt(request),
+    outputSchema: toCodexSchema(translateResultSchema),
+    maxAttempts: 2,
+    effort: "low",
+    async finalize(candidate) {
+      const texts = checkTranslation(request, omitNullObjectValues(candidate));
+      return { result: { texts }, detail: `${texts.length}か所を訳しました。` };
+    },
+  }).catch((error) => codex.failJob(job.id, error));
+  return job;
+}
+
 function startNotesJob(session, request) {
   const job = newJob("notes", session, request);
   const total = request.deck.slides.length;
@@ -787,6 +804,9 @@ const httpServer = createServer(async (req, res) => {
     });
   }
 
+  if (url.pathname === "/api/decks/translate" && req.method === "POST") {
+    return aiRoute((session, body) => startTranslateJob(session, translateRequestSchema.parse(body)));
+  }
   if (url.pathname === "/api/decks/notes" && req.method === "POST") {
     return aiRoute((session, body) => startNotesJob(session, notesRequestSchema.parse(body)));
   }

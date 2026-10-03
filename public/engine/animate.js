@@ -823,7 +823,7 @@
       bars.forEach((bar, i) => {
         const horizontal = bar.classList.contains("h");
         bar.style.transformBox = "fill-box";
-        bar.style.transformOrigin = horizontal ? (bar.dataset.neg ? "100% 50%" : "0% 50%") : (bar.dataset.neg ? "50% 0%" : "50% 100%");
+        bar.style.transformOrigin = bar.dataset.center != null ? "50% 50%" : horizontal ? (bar.dataset.neg ? "100% 50%" : "0% 50%") : (bar.dataset.neg ? "50% 0%" : "50% 100%");
         at(bar, [{ transform: horizontal ? "scale(0, 1)" : "scale(1, 0)" }, { transform: "scale(1, 1)" }], i / n);
       });
       for (const line of node.querySelectorAll(".hs-oline, .hs-draw")) {

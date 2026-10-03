@@ -17,6 +17,8 @@ import { createA11y } from "./editor/a11y.mjs?v=__APP_VERSION__";
 import { createPrinter } from "./editor/print.mjs?v=__APP_VERSION__";
 import { createProofing } from "./editor/proof.mjs?v=__APP_VERSION__";
 import { createFileInfo, infoOf, strip as stripDeckData } from "./editor/fileinfo.mjs?v=__APP_VERSION__";
+import { createSlideTools } from "./editor/slidetools.mjs?v=__APP_VERSION__";
+import { createVideoExport } from "./editor/video.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -1160,6 +1162,29 @@ function insertSlide(index, slide) {
   state.selected = index;
   markChanged({ structural: true });
   return index;
+}
+
+/** Several slides after the current one in one undo step (スライドの再利用・アウトライン・フォト アルバム). */
+function insertSlides(raw) {
+  if (!state.deck || !raw?.length) return;
+  if (state.deck.slides.length + raw.length > 500) { toast("スライドは500枚までです"); return; }
+  let at = Math.min(state.selected + 1, state.deck.slides.length - 1);
+  const story = storyOf();
+  while (story.parent[at] != null) at += 1;
+  const slides = raw.map((slide, k) => normalizeSlide(slide, at + k, state.deck.slides.length + raw.length));
+  pushUndo();
+  state.deck.slides.splice(at, 0, ...slides);
+  state.selected = at;
+  markChanged({ structural: true });
+}
+/** A deck to take slides from: a JSON file, or a PowerPoint file brought over as it looks. */
+async function deckFromFile(file) {
+  if (/\.json$/i.test(file.name) || file.type === "application/json") return adoptDeckMedia(normalizeDeck(JSON.parse(await file.text())));
+  if (file.size > 30_000_000) throw new Error("ファイルが大きすぎます（30MBまで）");
+  const response = await fetch(`/api/import?name=${encodeURIComponent(file.name)}&mode=exact`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: file });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  return adoptDeckMedia(normalizeDeck(result));
 }
 
 /** Deleting a slide deletes its deep-dive pages with it. */
@@ -2378,6 +2403,25 @@ const editorApp = {
   allTexts: () => { const out = []; if (state.deck) { eachText(state.deck.slides, (t) => { out.push(t); return t; }); eachObjectText(state.deck.slides, (t) => { out.push(t); return t; }); } return out; },
   transformAllText: (fn) => transformAllText(fn),
   openFileInfo: () => fileInfo.open(),
+  // スライドの再利用・アウトラインからスライド・フォト アルバム.
+  translate: (to, scope) => translateDeck(to, scope),
+  // ビデオの作成: the show played once by itself while the tab is recorded.
+  openVideoExport: () => videoExport.openDialog(),
+  showOrder: () => showSlides(state.deck, showOf(state.deck?.show) || {}) || E.storyMap(state.deck.slides).order.filter((i) => !state.deck.slides[i].hidden),
+  presentForVideo: (extra) => openPresenter(0, { extra }),
+  player: () => state.player,
+  animBusy: () => { const el = [...document.querySelectorAll("#presenter .hs-player-slide .hs-slide")].pop(); return Boolean(el && E.animBusy?.(el)); },
+  closeShow: () => state.player?.close?.(),
+  onShowClosed: (fn) => { state.onShowClosed = fn; },
+  download: (blob, name) => downloadBlob(blob, name),
+  openReuse: () => slideTools.openReuse(),
+  openOutlineSlides: () => slideTools.openOutline(),
+  openPhotoAlbum: () => slideTools.openPhotoAlbum(),
+  savedDecks: () => listSavedDecks(),
+  savedDeck: (id) => getSavedDeck(id),
+  deckFromFile: (file) => deckFromFile(file),
+  insertSlides: (slides) => insertSlides(slides),
+  storePicture: async (file) => { const blob = /gif|svg/.test(file.type) ? file : await downscaleImage(file, 2400, /png|webp/.test(file.type) ? "image/png" : "image/jpeg"); const src = await putMedia(blob, file.name); const [w, hh] = await naturalSize(mediaUrls[src]); return { src, w, h: hh }; },
   stripDeck: (what) => { if (!state.deck) return; pushUndo(); stripDeckData(state.deck, what, E.W, E.H); if (state.selected >= state.deck.slides.length) state.selected = state.deck.slides.length - 1; markChanged({ structural: true }); toast("削除しました（⌘Zで戻せます）"); },
   renderSlide: (index) => E.render(state.deck.slides[index], renderOptions({ index, mode: "print", fit: fitFor(index) ?? undefined })),
   beforePrint: () => measureAll(),
@@ -2392,6 +2436,10 @@ const printer = createPrinter(editorApp);
 // 校閲 → 表記ゆれチェック; ファイル → 情報 (public/editor/proof.mjs, fileinfo.mjs).
 const proofing = createProofing(editorApp);
 const fileInfo = createFileInfo(editorApp);
+// スライドの再利用・アウトラインからスライド・フォト アルバム (public/editor/slidetools.mjs).
+const slideTools = createSlideTools(editorApp);
+// ファイル → エクスポート → ビデオの作成 (public/editor/video.mjs).
+const videoExport = createVideoExport(editorApp);
 const editor = createCanvas(editorApp);
 const editorUi = createEditorUi(editor, editorApp);
 // The window around the slide: splitters, notes, message bar, status bar (public/editor/window.mjs).
@@ -3077,6 +3125,44 @@ function aiNotes(indices, { seconds = 60, tone = "丁寧" } = {}, onStatus = () 
       }))
       .catch((error) => { setAiBusy(false); onStatus(`作成できませんでした：${error.message}`); resolve(false); });
   });
+}
+
+/** 校閲 → 翻訳: the words of this slide (or of the whole deck) in another language, put back in one undo step. */
+function translateDeck(to, scope = "slide") {
+  if (!state.deck) return;
+  if (!state.codexAuthorized) { toast("翻訳にはCodexへの接続が必要です（作成画面の上部から接続）"); return; }
+  if (state.aiBusy) return;
+  const indices = scope === "deck" ? state.deck.slides.map((_, i) => i) : [state.selected];
+  const wanted = (t) => typeof t === "string" && t.trim() && /\p{L}/u.test(t);
+  const found = new Set();
+  const collect = (t) => { if (wanted(t)) found.add(t); return t; };
+  const targets = indices.map((i) => state.deck.slides[i]);
+  eachText(targets, collect);
+  eachObjectText(clone(targets), collect);
+  if (scope === "deck") collect(state.deck.title || "");
+  const texts = [...found].slice(0, 600);
+  if (!texts.length) { toast("訳す文字がありません"); return; }
+  const name = { en: "英語", zh: "中国語", ko: "韓国語", ja: "日本語" }[to];
+  setAiBusy(true);
+  toast(`${scope === "deck" ? "資料全体" : "このスライド"}を${name}に翻訳しています…`);
+  jsonFetch("/api/decks/translate", { method: "POST", body: JSON.stringify({ texts, to }) })
+    .then(({ jobId }) => watchJob(jobId, {
+      onProgress: () => {},
+      onDone: (job) => {
+        setAiBusy(false);
+        const map = new Map(texts.map((t, i) => [t, job.texts?.[i] ?? t]));
+        const swap = (t) => map.get(t) ?? t;
+        pushUndo();
+        const next = eachText(indices.map((i) => state.deck.slides[i]), swap);
+        indices.forEach((i, k) => { state.deck.slides[i] = next[k]; });
+        eachObjectText(indices.map((i) => state.deck.slides[i]), swap);
+        if (scope === "deck" && map.has(state.deck.title)) { state.deck.title = map.get(state.deck.title); $("deckTitleInput").value = state.deck.title; }
+        markChanged({ structural: true });
+        toast(`${name}に翻訳しました（${texts.length}か所。⌘Zで戻せます）`);
+      },
+      onFail: (job) => { setAiBusy(false); toast(`翻訳できませんでした：${job.error || job.detail}`); },
+    }))
+    .catch((error) => { setAiBusy(false); toast(`翻訳できませんでした：${error.message}`); });
 }
 
 function openNotesDialog() {
@@ -5358,7 +5444,7 @@ async function openCheckDialog(forExport) {
 
 // ---------------------------------------------------------------- presenting
 
-async function openPresenter(start = state.selected, { custom = null } = {}) {
+async function openPresenter(start = state.selected, { custom = null, extra = null } = {}) {
   if (!state.deck || state.player) return;
   // スライド ショーの設定: which slides (a range or a custom show) and how the show runs.
   const settings = showOf(state.deck.show) || {};
@@ -5382,6 +5468,7 @@ async function openPresenter(start = state.selected, { custom = null } = {}) {
     fullscreenTarget: host,
     ...playerOptions(settings),
     only,
+    ...(extra || {}),
     onClose: ({ index, ink }) => closePresenter(index, { ink, sidsAtStart }),
   });
   if (presenterViewOn()) state.player.openPresenterView?.();
@@ -5512,6 +5599,9 @@ function keepRehearsal(times) {
 }
 
 function closePresenter(index, { ink = [], sidsAtStart = null } = {}) {
+  const closed = state.onShowClosed;
+  state.onShowClosed = null;
+  closed?.();
   const rehearsal = state.rehearsal;
   if (rehearsal) { clearInterval(rehearsal.timer); rehearsal.finish(); state.rehearsal = null; }
   const recording = state.recording;
