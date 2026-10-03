@@ -29,7 +29,7 @@ function titleOf(slide, list, E) {
 }
 
 /** What makes an object the same on another slide: its kind, box and content. */
-function signature(o) {
+export function signature(o) {
   const box = [o.x, o.y, o.w, o.h, o.x1, o.y1, o.x2, o.y2].map((v) => (v == null ? "" : Math.round(Number(v)))).join(",");
   const content = o.kind === "image" ? `${String(o.src || "").length}:${String(o.src || "").slice(-48)}` : String(o.text || o.icon || o.shape || "");
   return `${o.kind}|${box}|${content}`;

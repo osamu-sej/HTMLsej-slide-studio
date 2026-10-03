@@ -13,6 +13,10 @@ import { userName } from "./editor/people.mjs?v=__APP_VERSION__";
 import { createCoedit } from "./editor/coedit.mjs?v=__APP_VERSION__";
 import { inkObject } from "./editor/ink.mjs?v=__APP_VERSION__";
 import { createShowTools, customShowsOf, keptInk, playerOptions, showOf, showSlides } from "./editor/show.mjs?v=__APP_VERSION__";
+import { createA11y } from "./editor/a11y.mjs?v=__APP_VERSION__";
+import { createPrinter } from "./editor/print.mjs?v=__APP_VERSION__";
+import { createProofing } from "./editor/proof.mjs?v=__APP_VERSION__";
+import { createFileInfo, infoOf, strip as stripDeckData } from "./editor/fileinfo.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -535,6 +539,9 @@ function normalizeSlide(raw, index, total) {
   if (objects.length) slide.elements = objects; else delete slide.elements;
   const timeline = E.normalizeTimeline(slide.timeline, slide).slice(0, 5000);
   if (timeline.length) slide.timeline = timeline; else delete slide.timeline;
+  // 読み取り順序: only ids of objects that exist, each once (none set means the stacking order).
+  const reading = Array.isArray(slide.readingOrder) && objects.length ? [...new Set(slide.readingOrder.filter((id) => objects.some((o) => o.id === id)))] : [];
+  if (reading.length > 1) slide.readingOrder = reading; else delete slide.readingOrder;
   // 画面切り替え: how long the way in takes (ms) and moving on by itself after some seconds.
   if (Number(slide.transitionDur) >= 100 && Number(slide.transitionDur) <= 10000) slide.transitionDur = Math.round(Number(slide.transitionDur)); else delete slide.transitionDur;
   if (slide.advance != null && Number.isFinite(Number(slide.advance)) && Number(slide.advance) >= 0) slide.advance = Math.min(600, Math.round(Number(slide.advance) * 10) / 10); else delete slide.advance;
@@ -634,6 +641,8 @@ function normalizeDeck(value, base = null) {
     // スライド ショーの設定・目的別スライド ショー.
     ...(showOf(meta.show ?? base?.show) ? { show: showOf(meta.show ?? base?.show) } : {}),
     ...(customShowsOf(meta.customShows ?? base?.customShows) ? { customShows: customShowsOf(meta.customShows ?? base?.customShows) } : {}),
+    // ファイル → 情報: the deck's properties.
+    ...(infoOf(meta.info ?? base?.info) ? { info: infoOf(meta.info ?? base?.info) } : {}),
     slides: normalized,
   });
 }
@@ -1094,6 +1103,7 @@ function markChanged({ structural = false } = {}) {
     renderInspector();
     if (state.panel === "anim") editorUi.renderAnimPane();
     if (state.panel === "comment") comments.render();
+    if (state.panel === "a11y") a11y.render();
   } else {
     // Typing: refresh the picture without rebuilding the form under the caret.
     clearTimeout(state.stageTimer);
@@ -1218,6 +1228,7 @@ function select(index) {
   renderStage();
   renderInspector();
   if (state.panel === "comment") comments.render();
+  if (state.panel === "a11y") a11y.render();
   document.querySelector(".film-item.selected")?.scrollIntoView({ block: "nearest" });
   renderChatContext();
   coedit?.sendPresence();
@@ -1556,7 +1567,7 @@ function eachText(value, visit, key = "") {
   if (typeof value === "string") return NON_TEXT_KEYS.has(key) && key !== "notes" || value.startsWith("data:") || value.startsWith("idb:") ? value : visit(value);
   if (Array.isArray(value)) return value.map((item) => eachText(item, visit, key));
   // Objects keep their words in rich text: they are visited by eachObjectText, never as markup.
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, ["media", "elements", "timeline", "sid"].includes(k) ? v : eachText(v, visit, k)]));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, ["media", "elements", "timeline", "sid", "readingOrder"].includes(k) ? v : eachText(v, visit, k)]));
   return value;
 }
 
@@ -2119,6 +2130,7 @@ function applyRemote(next, { slides = new Map(), order = null, meta = null } = {
   renderInspector();
   if (state.panel === "anim") editorUi.renderAnimPane();
   if (state.panel === "comment") comments.render();
+  if (state.panel === "a11y") a11y.render();
   scheduleMeasure();
 }
 
@@ -2298,6 +2310,13 @@ const editorApp = {
   openShowSettings: () => showTools.openSettings(),
   openCustomShows: (id) => showTools.openCustomShows(id),
   setDeckFields: (patch) => setDeckFields(patch),
+  // アクセシビリティ: fixes made from the checker (each one undo step).
+  openAccessibility: () => setPanel("a11y"),
+  editAlt: (id) => a11y.editAlt(state.selected, id),
+  selectObjects: (ids) => editor.select(ids),
+  setObjectFields: (index, id, patch) => setObjectFields(index, id, patch),
+  setSlideTitle: (index, text) => { const slide = state.deck?.slides[index]; if (!slide) return; pushUndo(); slide.title = text; markChanged({ structural: true }); },
+  setReadingOrder: (index, ids) => { const slide = state.deck?.slides[index]; if (!slide) return; pushUndo(); if (ids?.length > 1) slide.readingOrder = [...ids]; else delete slide.readingOrder; markChanged({ structural: true }); },
   toggleHiddenSlide: () => toggleHiddenSlide(),
   presenterView: () => presenterViewOn(),
   setPresenterView: (on) => setPresenterViewOn(on),
@@ -2335,6 +2354,8 @@ const editorApp = {
   share: () => (coedit.active ? coedit.showMenu() : coedit.start()),
   addSection: () => addSection(),
   rehearse: () => rehearse(),
+  recordShow: (from) => recordShow(from),
+  clearRecording: (what, scope) => clearRecording(what, scope),
   designIdeas: () => { setPanel("chat"); requestVariants(state.selected); },
   // ファイル (the ribbon's first menu).
   goCreate: () => setMode("create"),
@@ -2348,10 +2369,29 @@ const editorApp = {
   saveJson: () => saveJsonFile(),
   openJson: () => openJsonDialog(),
   printPdf: () => printPdf(),
+  printSlidesNow: () => printSlidesNow(),
+  version: APP_VERSION,
+  // 校閲 → スペル チェック・表記ゆれ; ファイル → 情報・ドキュメント検査.
+  spellcheck: () => spellcheckOn(),
+  setSpellcheck: (on) => { try { localStorage.setItem("hsej-spellcheck", on ? "1" : "0"); } catch { /* private window */ } editorUi.renderRibbon(); toast(on ? "スペル チェック：オン（入力中の文字に赤い波線が出ます。ブラウザの辞書を使います）" : "スペル チェック：オフ"); },
+  openProofing: () => proofing.open(),
+  allTexts: () => { const out = []; if (state.deck) { eachText(state.deck.slides, (t) => { out.push(t); return t; }); eachObjectText(state.deck.slides, (t) => { out.push(t); return t; }); } return out; },
+  transformAllText: (fn) => transformAllText(fn),
+  openFileInfo: () => fileInfo.open(),
+  stripDeck: (what) => { if (!state.deck) return; pushUndo(); stripDeckData(state.deck, what, E.W, E.H); if (state.selected >= state.deck.slides.length) state.selected = state.deck.slides.length - 1; markChanged({ structural: true }); toast("削除しました（⌘Zで戻せます）"); },
+  renderSlide: (index) => E.render(state.deck.slides[index], renderOptions({ index, mode: "print", fit: fitFor(index) ?? undefined })),
+  beforePrint: () => measureAll(),
 };
 const converter = createConverter(editorApp);
 // スライド ショーの設定・目的別スライド ショー (public/editor/show.mjs).
 const showTools = createShowTools(editorApp);
+// 校閲 → アクセシビリティ チェック・読み取り順序・代替テキスト (public/editor/a11y.mjs).
+const a11y = createA11y(editorApp);
+// ファイル → 印刷 (public/editor/print.mjs).
+const printer = createPrinter(editorApp);
+// 校閲 → 表記ゆれチェック; ファイル → 情報 (public/editor/proof.mjs, fileinfo.mjs).
+const proofing = createProofing(editorApp);
+const fileInfo = createFileInfo(editorApp);
 const editor = createCanvas(editorApp);
 const editorUi = createEditorUi(editor, editorApp);
 // The window around the slide: splitters, notes, message bar, status bar (public/editor/window.mjs).
@@ -3086,6 +3126,16 @@ function updateFindCount() {
   $("findCount").textContent = needle ? `${count}か所見つかりました` : "資料タイトル・本文・ノート・詳細を対象にします。";
   $("replaceAllBtn").disabled = !count;
 }
+
+/** Every word of the deck (slides, objects, notes, details) through `fn`: one undo step. */
+function transformAllText(fn) {
+  if (!state.deck) return;
+  pushUndo();
+  state.deck.slides = eachText(state.deck.slides, fn);
+  eachObjectText(state.deck.slides, fn);
+  markChanged({ structural: true });
+}
+const spellcheckOn = () => { try { return localStorage.getItem("hsej-spellcheck") === "1"; } catch { return false; } };
 
 function replaceAll() {
   const needle = $("findInput").value;
@@ -3933,6 +3983,18 @@ function openDesignDialog() {
   $("designDialog").showModal();
 }
 
+/** One object's fields on any slide (undefined removes a field): one undo step. */
+function setObjectFields(index, id, patch) {
+  const slide = state.deck?.slides[index];
+  const at = slide?.elements?.findIndex((o) => o.id === id) ?? -1;
+  if (at < 0) return;
+  pushUndo();
+  const next = { ...slide.elements[at] };
+  for (const [key, value] of Object.entries(patch)) { if (value === undefined) delete next[key]; else next[key] = value; }
+  slide.elements[at] = E.normalizeObject(next) || slide.elements[at];
+  markChanged({ structural: true });
+}
+
 /** Deck settings that are not slides (the show's settings, custom shows): one undo step; null removes one. */
 function setDeckFields(patch) {
   if (!state.deck) return;
@@ -4518,6 +4580,10 @@ function setPanel(panel, { reveal = true } = {}) {
   $("formatPane").hidden = panel !== "format";
   $("animPane").hidden = panel !== "anim";
   $("commentPane").hidden = panel !== "comment";
+  $("a11yPane").hidden = panel !== "a11y";
+  // The アクセシビリティ tab shows once the checker has been opened (as PowerPoint's task pane).
+  if (panel === "a11y") $("a11yTab").hidden = false;
+  $("a11yTab").setAttribute("aria-selected", String(panel === "a11y"));
   $("animTab").setAttribute("aria-selected", String(panel === "anim"));
   $("commentTab").setAttribute("aria-selected", String(panel === "comment"));
   $("chatTab").setAttribute("aria-selected", String(panel === "chat"));
@@ -4526,6 +4592,7 @@ function setPanel(panel, { reveal = true } = {}) {
   if (panel === "format") editorUi.renderPane();
   if (panel === "anim") editorUi.renderAnimPane();
   if (panel === "comment") comments.render();
+  if (panel === "a11y") a11y.render();
   // The animation order marks on the stage show while the animation pane is open.
   editor.draw();
   try { localStorage.setItem(STORAGE.panel, panel); } catch { /* optional */ }
@@ -5345,6 +5412,88 @@ async function rehearse() {
   state.rehearsal = { times, timer: setInterval(tick, 200), finish: () => { times.set(at, (times.get(at) || 0) + Date.now() - since); } };
   tick();
 }
+/**
+ * スライド ショー →「記録」: present while the microphone records; each slide gets its own narration (the last take
+ * of it) and its time. At the end both can be kept: the narration as a hidden sound that plays with the slide
+ * (slide.elements, narration: true) and the time as the slide's 自動で切り替え.
+ */
+async function recordShow(start = 0) {
+  if (!state.deck || state.player) return;
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") { toast("このブラウザでは録音できません"); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { toast("マイクを使えません（ブラウザでマイクを許可してください）"); return; }
+  await openPresenter(start);
+  if (!state.player) { stream.getTracks().forEach((t) => t.stop()); return; }
+  const takes = new Map();
+  const times = new Map();
+  let at = state.player.index;
+  let since = Date.now();
+  const started = since;
+  let current = null;
+  const begin = (index) => {
+    const chunks = [];
+    const rec = new MediaRecorder(stream);
+    const done = new Promise((resolve) => { rec.onstop = () => { if (chunks.length) takes.set(index, new Blob(chunks, { type: rec.mimeType || "audio/webm" })); resolve(); }; });
+    rec.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
+    rec.start();
+    current = { rec, done };
+  };
+  const end = () => { const c = current; current = null; if (c && c.rec.state !== "inactive") c.rec.stop(); return c?.done || Promise.resolve(); };
+  begin(at);
+  const clock = h("div", { class: "rehearse-clock recording", role: "status" });
+  $("presenter").append(clock);
+  const fmt = (ms) => { const sec = Math.floor(ms / 1000); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; };
+  const tick = () => {
+    const player = state.player;
+    if (!player) return;
+    const now = Date.now();
+    if (player.index !== at) { times.set(at, (times.get(at) || 0) + now - since); end(); at = player.index; since = now; begin(at); }
+    clock.textContent = `● 記録中　このスライド ${fmt((times.get(at) || 0) + now - since)}　合計 ${fmt(now - started)}`;
+  };
+  state.recording = { timer: setInterval(tick, 200), finish: async () => { times.set(at, (times.get(at) || 0) + Date.now() - since); await end(); stream.getTracks().forEach((t) => t.stop()); return { times, takes }; } };
+  tick();
+}
+async function keepRecording({ times, takes }) {
+  if (!state.deck || (!takes.size && !times.size)) return;
+  const sec = Math.round([...times.values()].reduce((a, b) => a + b, 0) / 1000);
+  if (!window.confirm(`記録したナレーション（${takes.size}枚）とタイミング（合計 ${Math.floor(sec / 60)}分${sec % 60}秒）を保存しますか？\n保存すると、発表でスライドごとにナレーションが流れ、その時間で自動的に切り替わります。`)) return;
+  const sids = new Map([...new Set([...takes.keys(), ...times.keys()])].map((i) => [i, state.deck.slides[i]?.sid || null]));
+  const media = new Map();
+  for (const [i, blob] of takes) if (blob.size > 800) media.set(i, await putMedia(blob, `ナレーション ${i + 1}.webm`));
+  pushUndo();
+  let count = 0;
+  for (const [i, sid] of sids) {
+    const at = sid ? state.deck.slides.findIndex((slide) => slide.sid === sid) : i;
+    const slide = state.deck.slides[at];
+    if (!slide) continue;
+    const ms = times.get(i) || 0;
+    if (ms >= 500) slide.advance = Math.min(600, Math.round(ms / 100) / 10);
+    const src = media.get(i);
+    if (!src) continue;
+    // A new take replaces the slide's narration.
+    const size = 96;
+    const sound = { ...audioObject(src, "ナレーション"), x: E.W - size - 40, y: E.H - size - 150, w: size, h: size, narration: true, autoplay: true, hideIcon: true };
+    slide.elements = [...(slide.elements || []).filter((o) => !o.narration), E.normalizeObject(sound)].filter(Boolean);
+    count += 1;
+  }
+  markChanged({ structural: true });
+  toast(`${count}枚のナレーションとタイミングを保存しました（スライド ショー →「ナレーションの再生」でオン・オフ。⌘Zで戻せます）`);
+}
+/** 記録 → クリア: the timings or the narration of this slide or of all slides. */
+function clearRecording(what, scope) {
+  if (!state.deck) return;
+  const targets = scope === "all" ? state.deck.slides : [state.deck.slides[state.selected]].filter(Boolean);
+  const has = targets.some((slide) => (what === "timings" ? slide.advance != null : (slide.elements || []).some((o) => o.narration)));
+  if (!has) { toast(what === "timings" ? "消すタイミングはありません" : "消すナレーションはありません"); return; }
+  pushUndo();
+  for (const slide of targets) {
+    if (what === "timings") delete slide.advance;
+    else { slide.elements = (slide.elements || []).filter((o) => !o.narration); if (!slide.elements.length) delete slide.elements; }
+  }
+  markChanged({ structural: true });
+  toast(`${scope === "all" ? "すべてのスライド" : "このスライド"}の${what === "timings" ? "タイミング" : "ナレーション"}を消しました（⌘Zで戻せます）`);
+}
+
 function keepRehearsal(times) {
   const total = [...times.values()].reduce((a, b) => a + b, 0);
   if (total < 1000 || !state.deck) return;
@@ -5365,6 +5514,8 @@ function keepRehearsal(times) {
 function closePresenter(index, { ink = [], sidsAtStart = null } = {}) {
   const rehearsal = state.rehearsal;
   if (rehearsal) { clearInterval(rehearsal.timer); rehearsal.finish(); state.rehearsal = null; }
+  const recording = state.recording;
+  if (recording) { clearInterval(recording.timer); state.recording = null; recording.finish().then((result) => setTimeout(() => keepRecording(result), 0)); }
   queueMicrotask(() => { if (rehearsal) keepRehearsal(rehearsal.times); if (ink?.length) keepShowInk(ink, sidsAtStart); });
   state.player = null;
   const host = $("presenter");
@@ -5387,7 +5538,15 @@ function keepShowInk(ink, sidsAtStart) {
   toast(`${made.size}枚のスライドにインクを残しました（描画タブで消しゴム・図形に変換。⌘Zで戻せます）`);
 }
 
+/** ファイル → 印刷: the print dialog (layouts, range, preview); public/editor/print.mjs. */
 async function printPdf() {
+  if (!state.deck) return;
+  await measureAll();
+  printer.openDialog();
+}
+
+/** Every slide at full size straight to the browser's print dialog (kept for callers that want no dialog). */
+async function printSlidesNow() {
   if (!state.deck) return;
   await measureAll();
   const root = $("printRoot");
@@ -5482,6 +5641,7 @@ async function standaloneHtml({ title, body, boot, data, background = "#07080c",
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="HTML SEJ Slide Studio ${APP_VERSION}">
+${data.deck.info?.author ? `<meta name="author" content="${esc(data.deck.info.author)}">` : ""}${data.deck.info?.subject ? `<meta name="description" content="${esc(data.deck.info.subject)}">` : ""}${data.deck.info?.keywords ? `<meta name="keywords" content="${esc(data.deck.info.keywords)}">` : ""}
 <title>${esc(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -5983,6 +6143,7 @@ function bind() {
   $("formatTab").addEventListener("click", () => setPanel("format"));
   $("animTab").addEventListener("click", () => setPanel("anim"));
   $("commentTab").addEventListener("click", () => setPanel("comment"));
+  $("a11yTab").addEventListener("click", () => setPanel("a11y"));
   // The clipboard: objects, pictures and text go onto the slide; copying objects copies them.
   document.addEventListener("copy", (event) => editor.onCopy(event));
   document.addEventListener("cut", (event) => editor.onCopy(event, true));
@@ -6147,6 +6308,8 @@ function bind() {
       return;
     }
     if (!typing && event.key === "?") { event.preventDefault(); $("helpDialog").showModal(); return; }
+    // ⌘P: the print dialog (layouts, range, preview), as PowerPoint's File → Print.
+    if (meta && !event.shiftKey && event.key.toLowerCase() === "p" && state.deck && !state.player) { event.preventDefault(); printPdf(); return; }
     if (meta && event.key.toLowerCase() === "s") {
       event.preventDefault();
       if (state.deck) saveToLibrary();
@@ -6205,7 +6368,7 @@ window.addEventListener("error", (event) => reportClientError(event.message, `${
 window.addEventListener("unhandledrejection", (event) => reportClientError(String(event.reason?.message ?? event.reason), "promise"));
 
 bind();
-try { const saved = localStorage.getItem(STORAGE.panel); setPanel(["form", "format", "anim", "comment"].includes(saved) ? saved : "chat", { reveal: false }); } catch { setPanel("chat", { reveal: false }); }
+try { const saved = localStorage.getItem(STORAGE.panel); setPanel(["form", "format", "anim", "comment", "a11y"].includes(saved) ? saved : "chat", { reveal: false }); } catch { setPanel("chat", { reveal: false }); }
 updateBriefCount();
 restore();
 updateTopbar();

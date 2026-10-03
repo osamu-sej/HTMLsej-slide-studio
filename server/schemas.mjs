@@ -104,6 +104,8 @@ const shared = {
   // 画面切り替え set by hand: the way in's length (ms) and moving on by itself after some seconds.
   transitionDur: z.number().min(100).max(10000).optional(),
   advance: z.number().min(0).max(600).optional(),
+  // 読み取り順序 (校閲 → アクセシビリティ): the objects' ids in the order a screen reader reads them.
+  readingOrder: z.array(z.string().max(32)).max(5000).optional(),
 };
 export const titledShape = {
   title: z.string().min(1).max(90),
@@ -253,6 +255,8 @@ export const deckShape = z.object({
   // スライド ショーの設定 and 目的別スライド ショー (checked again by the studio: public/editor/show.mjs).
   show: z.record(z.string(), z.unknown()).optional(),
   customShows: z.array(z.object({ id: z.string().max(32), name: z.string().max(60), sids: z.array(z.string().max(32)).max(500) })).max(30).optional(),
+  // ファイル → 情報 (author, subject, keywords…; checked by the studio: public/editor/fileinfo.mjs).
+  info: z.record(z.string(), z.string().max(1000)).optional(),
   slides: z.array(slideSchema).min(1).max(500),
 });
 export const reviseRequestSchema = z.object({
@@ -302,7 +306,7 @@ export const chatResultSchema = z.object({
 });
 
 // Fields only people set (uploaded photos and videos, hand placement) are hidden from the AI's output schema.
-const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "advance", "hideTitle", "master", "sourceViewport", "hidden", "section", "comments"]);
+const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "advance", "hideTitle", "master", "sourceViewport", "hidden", "section", "comments", "readingOrder"]);
 function withoutUserFields(node) {
   if (Array.isArray(node)) return node.map(withoutUserFields);
   if (!node || typeof node !== "object") return node;

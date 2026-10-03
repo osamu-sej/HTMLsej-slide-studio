@@ -336,7 +336,7 @@
 
   // ---------------------------------------------------------------- media
 
-  function playMedia(slide, { sound = false, skip = null } = {}) {
+  function playMedia(slide, { sound = false, skip = null, noNarration = false } = {}) {
     for (const video of slide.querySelectorAll("video[data-autoplay]")) {
       video.muted = !sound || video.hasAttribute("data-muted");
       if (E.mediaPlay) E.mediaPlay(video, { fromStart: true });
@@ -345,6 +345,7 @@
     // Sounds that start with the slide (再生 →「自動」); one still playing from an earlier slide is not doubled.
     for (const audio of slide.querySelectorAll("audio[data-autoplay]")) {
       if (skip?.has(audio.closest("[data-el]")?.dataset.el)) continue;
+      if (noNarration && audio.hasAttribute("data-narration")) continue;
       E.mediaPlay?.(audio, { fromStart: true });
     }
     for (const frame of slide.querySelectorAll("iframe[data-autoplay]")) {
@@ -1034,7 +1035,7 @@
         const wayIn = type === "none" || type === "morph" ? 0 : Math.round((trMs ?? TRANSITION_MS[type] ?? 620) * 0.85);
         play(slide, { step, animate: atStep == null && !still, delay: wayIn });
         interaction = activate(slide, { details: [...(slides[i]?.details || []), ...(E.objectDetails?.(slides[i]) || [])], elements: slides[i]?.elements || [], onDrill: back ? null : (to, el) => openDrill(to, el) });
-        playMedia(slide, { sound: gesture, skip: playing });
+        playMedia(slide, { sound: gesture, skip: playing, noNarration: opts.narration === false });
         scheduleAdvance(slide, i);
         drawInk();
         startCameras(slide);

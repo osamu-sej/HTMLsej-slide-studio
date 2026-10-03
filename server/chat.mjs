@@ -28,7 +28,7 @@ function restoreUserFields(content, original) {
   // that links point at) always stays with the slide.
   if (original?.media && !slide.media) slide.media = original.media;
   // So do the slide's place in the show (hidden), its section and the review comments on it.
-  for (const key of ["elements", "timeline", "sid", "transitionDur", "advance", "hidden", "section", "comments"]) if (original?.[key] != null && slide[key] == null) slide[key] = original[key];
+  for (const key of ["elements", "timeline", "sid", "transitionDur", "advance", "hidden", "section", "comments", "readingOrder"]) if (original?.[key] != null && slide[key] == null) slide[key] = original[key];
   if (original?.imagePlacement && slide.customImage === original.customImage && !slide.imagePlacement) slide.imagePlacement = original.imagePlacement;
   for (const key of ["animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "hideTitle", "master", "sourceViewport"]) {
     if (original?.[key] && slide[key] == null && slide.type === original.type) slide[key] = original[key];

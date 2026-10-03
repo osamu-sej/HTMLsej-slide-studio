@@ -383,13 +383,14 @@ export function createEditorUi(editor, app) {
       { label: "名前を付けて保存（別の資料として）", icon: "duplicate", run: () => app.saveDeck({ asNew: true }) },
       "-", { head: "書き出し" },
       { label: "HTMLファイル（動きごと）", icon: "play", run: () => app.exportHtml() },
-      { label: "PDF・印刷", icon: "slide", run: () => app.printPdf() },
+      { label: "PDF・印刷（配布資料・ノート）…", icon: "print", keys: "⌘P", run: () => app.printPdf() },
       { label: "JSONで保存", icon: "down", run: () => app.saveJson() },
       { label: "レビュー用ファイル", icon: "review", run: () => app.exportReview() },
       "-",
       { label: "JSONを読み込む…", icon: "up", run: () => app.openJson() },
       { label: "版の履歴・過去の資料…", icon: "clock", run: () => app.openHistory() },
-      "-", { label: "共有（共同編集）…", icon: "share", run: () => app.share() },
+      "-", { label: "情報（プロパティ・ドキュメント検査）…", icon: "info", run: () => app.openFileInfo() },
+      { label: "共有（共同編集）…", icon: "share", run: () => app.share() },
       "-", { head: "オプション" },
       { label: `ユーザー名：${app.userName() || "未設定"}…`, icon: "people", run: () => app.changeUserName() },
       { label: "使い方とショートカット", icon: "tip", keys: "?", run: () => app.openHelp() },
@@ -464,7 +465,7 @@ export function createEditorUi(editor, app) {
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
   const GROUP_ICONS = { グラフィックの作成: "smartart", "SmartArt のスタイル": "fill", 文字: "font", リセット: "reset", プレビュー: "play", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
     図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane",
-    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review", 描画ツール: "pen", 変換: "inkShape", 再生: "play", 音声: "mic", ズームのオプション: "zoomSlide", ズームのスタイル: "outline", 数式と記号: "equation", モニター: "presenter", キャプションと字幕: "subtitles" };
+    プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review", 描画ツール: "pen", 変換: "inkShape", 再生: "play", 音声: "mic", ズームのオプション: "zoomSlide", ズームのスタイル: "outline", 数式と記号: "equation", モニター: "presenter", キャプションと字幕: "subtitles", 文章校正: "spell" };
   function fold(g) {
     const items = g.querySelector(":scope > .rb-items");
     const label = g.querySelector(":scope > .rb-label")?.textContent || "";
@@ -626,6 +627,16 @@ export function createEditorUi(editor, app) {
         btn("presenter", "スライド ショー|の設定", "種類（自動プレゼンテーション）・繰り返し・発表するスライド（範囲・目的別）・タイミング・アニメーションなし・ペンの色", () => app.openShowSettings(), { big: true }),
         btn("hideSlide", "非表示スライド|に設定", "発表ではこのスライドを飛ばす（編集用に残ります。もう一度で戻す）", () => app.toggleHiddenSlide(), { big: true, pressed: () => Boolean(app.slide()?.hidden), enabled: () => app.index() > 0 }),
         btn("clock", "リハーサル", "最初から発表して1枚ずつの時間を計り、終わったらその時間で自動的に切り替えるようにできます", () => app.rehearse(), { big: true }),
+        drop("record", "記録", "スライド ショーの記録：発表しながらマイクでナレーションを録り、スライドごとのナレーションとタイミングにする", () => menu([
+          { head: "スライド ショーの記録" },
+          { label: "先頭から記録", icon: "record", run: () => app.recordShow(0) },
+          { label: "現在のスライドから記録", icon: "record", run: () => app.recordShow(app.index()) },
+          "-", { head: "クリア" },
+          { label: "現在のスライドのタイミングをクリア", icon: "clock", run: () => app.clearRecording("timings", "slide") },
+          { label: "すべてのスライドのタイミングをクリア", icon: "clock", run: () => app.clearRecording("timings", "all") },
+          { label: "現在のスライドのナレーションをクリア", icon: "audio", run: () => app.clearRecording("narration", "slide") },
+          { label: "すべてのスライドのナレーションをクリア", icon: "audio", run: () => app.clearRecording("narration", "all") },
+        ]), { big: true }),
         col(btn("check", "タイミングを使用", "リハーサル・自動で切り替えの時間で進める（オフにするとクリックで進む）", () => app.setShowSettings({ useTimings: show().useTimings === false }), { pressed: () => show().useTimings !== false }),
           btn("audio", "ナレーションの再生", "記録したナレーションを発表で流す", () => app.setShowSettings({ noNarration: !show().noNarration }), { pressed: () => !show().noNarration }),
           btn("previewPlay", "動きを確認", "閲覧表示：このスライドの動きをこの画面で再生する", () => app.previewMotion()))),
@@ -657,7 +668,12 @@ export function createEditorUi(editor, app) {
         btn("people", "ユーザー名", "コメントと共同編集で表示するあなたの名前", () => app.changeUserName(), { big: true })),
       group("チェック",
         btn("check", "チェック", "構成・文字のあふれ・SEJブランドを確かめる", () => app.openCheck(), { big: true }),
+        btn("accessibility", "アクセシビリティ|チェック", "代替テキスト・スライド タイトル・表の見出し・リンクの文字・コントラスト・読み取り順序を確かめる（作業ウィンドウに一覧）", () => app.openAccessibility(), { big: true }),
+        btn("textbox", "代替|テキスト", "選んだ部品の代替テキスト（画面読み上げが読む説明）・装飾用", () => { const o = one(); if (o) app.editAlt(o.id); else app.toast("部品を1つ選んでください"); }, { big: true, enabled: () => Boolean(one()) }),
         btn("magic", "あふれを|AIで直す", "文字が収まらないスライドをAIで順番に直す", () => app.fixOverflow(), { big: true, enabled: () => app.canFixOverflow() })),
+      group("文章校正",
+        btn("spell", "スペル|チェック", "入力中の文字のスペルを確かめる（ブラウザの辞書。間違いに赤い波線）", () => app.setSpellcheck(!app.spellcheck()), { big: true, pressed: () => app.spellcheck() }),
+        btn("textCase", "表記ゆれ|チェック", "全角・半角（ＡＩ／AI）、長音（ユーザ／ユーザー）、送り仮名（行う／行なう）のゆれを見つけて統一する", () => app.openProofing(), { big: true })),
       group("検索", btn("find", "検索・|置換", "資料全体の文字を検索・置換（⌘F）", () => app.openReplace(), { big: true })),
       group("ノート", btn("notes", "ノートを|作成", "スピーカーノートをまとめて作る（簡易・AI）", () => app.openNotes(), { big: true })),
       group("AI", btn("magic", "AIで全体を|見直す", "指示を出して資料全体をAIに見直してもらう（Codexに接続しているとき）", () => app.reviseDeck(), { big: true, enabled: () => app.canAi() })),

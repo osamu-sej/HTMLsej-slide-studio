@@ -844,7 +844,8 @@ export function createCanvas(app) {
     if (!tx.innerHTML.trim()) tx.innerHTML = "<p><br></p>";
     if (replaceWith != null) tx.innerHTML = `<p>${replaceWith.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]) || "<br>"}</p>`;
     tx.setAttribute("contenteditable", "true");
-    tx.spellcheck = false;
+    // 校閲 → スペル チェック: the browser's own dictionary underlines while typing.
+    tx.spellcheck = Boolean(app.spellcheck?.());
     tx.classList.add("ed-typing-tx");
     node.classList.add("ed-typing");
     try { document.execCommand("defaultParagraphSeparator", false, "p"); document.execCommand("styleWithCSS", false, true); } catch { /* old browser */ }
@@ -1447,6 +1448,7 @@ export function createCanvas(app) {
       selected().some((o) => o.group) && { label: "グループ解除", keys: "⇧⌘G", run: ungroupSelection },
       any && { label: locked ? "ロックを解除" : "ロック（動かないようにする）", run: () => setLocked(!locked) },
       any && { label: "図形の書式設定…", run: () => app.openPanel("format") },
+      one && { label: "代替テキストを編集…", run: () => app.editAlt?.(one.id) },
       one && { label: "リンク・動作の設定…", run: () => app.openPanel("format", "action") },
       any && { label: "アニメーション…", run: () => { app.showTab("animation", { open: true }); app.openAnimationPane(); } },
       one?.kind === "shape" && one.shape === "custom" && !one.locked && { label: "頂点の編集", run: () => app.editPoints?.(one.id) },

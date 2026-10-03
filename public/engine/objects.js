@@ -1532,6 +1532,8 @@
         for (const key of ["autoplay", "loop", "muted"]) if (typeof raw[key] === "boolean") o[key] = raw[key];
       }
       if (o.kind === "video" || o.kind === "audio") Object.assign(o, normalizePlayback(raw, o.kind));
+      // スライド ショーの記録: the slide's narration (played with the slide unless 「ナレーションを付けない」).
+      if (o.kind === "audio" && raw.narration === true) o.narration = true;
     }
     if (o.kind === "zoom") {
       // スライド ズーム: a live picture of another slide; clicking it in the show goes there (and back).
@@ -2564,7 +2566,7 @@
     box.append(icon);
     const url = ctx.live ? E.resolveSrc(o.src, ctx) : "";
     if (ctx.live && url) {
-      const audio = h("audio", { src: url, preload: "auto", loop: o.loop && !o.trimEnd ? true : null, "data-autoplay": o.autoplay ? "" : null, "data-loop": o.loop ? "" : null });
+      const audio = h("audio", { src: url, preload: "auto", loop: o.loop && !o.trimEnd ? true : null, "data-autoplay": o.autoplay ? "" : null, "data-loop": o.loop ? "" : null, "data-narration": o.narration ? "" : null });
       playbackData(audio, o);
       box.append(audio, h("div", { class: "hs-audio-bar" },
         h("button", { type: "button", class: "hs-audio-play", "aria-label": "再生・一時停止", title: "再生・一時停止" }),
@@ -3118,7 +3120,8 @@
     const ys = route.pts.map((p) => p[1]);
     const [minX, minY] = [Math.min(...xs), Math.min(...ys)];
     const [w, hh] = [Math.max(1, Math.max(...xs) - minX), Math.max(1, Math.max(...ys) - minY)];
-    const el = h("div", { class: "hs-obj hs-obj-line", "data-el": o.id, "data-kind": "line", "data-stroke": sw ? o.stroke : "none", "data-bbox": [minX, minY, w, hh].map(r2).join(","), style: { left: `${r2(minX)}px`, top: `${r2(minY)}px`, width: `${r2(w)}px`, height: `${r2(hh)}px` } });
+    // A line says nothing to a screen reader unless it has alternative text.
+    const el = h("div", { class: "hs-obj hs-obj-line", "data-el": o.id, "data-kind": "line", "data-stroke": sw ? o.stroke : "none", "data-bbox": [minX, minY, w, hh].map(r2).join(","), "aria-hidden": o.decorative || !o.alt ? "true" : null, role: !o.decorative && o.alt ? "img" : null, "aria-label": !o.decorative && o.alt ? o.alt : null, style: { left: `${r2(minX)}px`, top: `${r2(minY)}px`, width: `${r2(w)}px`, height: `${r2(hh)}px` } });
     const svg = s("svg", { class: "hs-obj-geom", width: r2(w), height: r2(hh), viewBox: `${r2(minX)} ${r2(minY)} ${r2(w)} ${r2(hh)}`, overflow: "visible", "aria-hidden": "true" });
     const [p1, p2] = [route.pts[0], route.pts[route.pts.length - 1]];
     // Pull the line in under filled heads so a thick line does not poke through their tips.
@@ -3253,15 +3256,34 @@
       }
     }
     const live = { ...ctx, groupBoxes };
-    for (const o of list) {
-      if (!o || o.hidden || !KINDS.includes(o.kind)) continue;
+    // 読み取り順序 (what a screen reader reads first) may differ from the stacking order: the nodes then follow the
+    // reading order and each keeps its place in the stack with a z-index.
+    const reading = Array.isArray(slide.readingOrder) && slide.readingOrder.length ? readingOrderOf(slide) : null;
+    const nodes = [];
+    list.forEach((o, stack) => {
+      if (!o || o.hidden || !KINDS.includes(o.kind)) return;
       try {
         const node = objectNode(o, live, list, scales[o.id]);
         if (node && waiting.has(o.id)) node.classList.add("hs-ix-wait");
-        if (node) layer.append(node);
+        if (node && reading) node.style.zIndex = String(stack + 1);
+        if (node) nodes.push([o.id, node]);
       } catch { /* a broken object never takes the slide down */ }
-    }
+    });
+    if (reading) { const at = new Map(reading.map((id, i) => [id, i])); nodes.sort((a, b) => (at.get(a[0]) ?? 1e6) - (at.get(b[0]) ?? 1e6)); }
+    for (const [, node] of nodes) layer.append(node);
     return layer;
+  }
+
+  /**
+   * The slide's objects in reading order: the ids of slide.readingOrder that still exist, then the others in the
+   * stacking order (the order of slide.elements, which is also the reading order when none is set).
+   */
+  function readingOrderOf(slide) {
+    const ids = (Array.isArray(slide?.elements) ? slide.elements : []).map((o) => o?.id).filter(Boolean);
+    const known = new Set(ids);
+    const first = [...new Set((Array.isArray(slide?.readingOrder) ? slide.readingOrder : []).filter((id) => known.has(id)))];
+    const picked = new Set(first);
+    return [...first, ...ids.filter((id) => !picked.has(id))];
   }
 
   /** The cards a slide's objects open on a click (「詳細を開く」), as the player's details: [{ target: "obj:<id>", … }]. */
@@ -3307,7 +3329,7 @@
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
     TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
-    corners, bounds, sites, lineEnds, linePath, objectLayer, objectNode, fitObjects, objectText, objectName,
+    corners, bounds, sites, lineEnds, linePath, objectLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,
     normalizeStrokes, inkPath, INK_COLORS, texToMathML,
