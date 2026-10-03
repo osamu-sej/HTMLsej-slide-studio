@@ -7,6 +7,7 @@ import * as ops from "./editor/ops.mjs?v=__APP_VERSION__";
 import { createConverter } from "./editor/convert.mjs?v=__APP_VERSION__";
 import { resetDeckActions } from "./reset-actions.mjs?v=__APP_VERSION__";
 import { chromeOf, describeAdded, enhanceSlide } from "./editor/htmlfx.mjs?v=__APP_VERSION__";
+import { createShell } from "./editor/window.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -1631,7 +1632,7 @@ function setMode(mode) {
 
 function updateTopbar() {
   const editing = state.mode === "edit" && Boolean(state.deck);
-  for (const id of ["deckTitleInput", "saveDeckBtn", "undoBtn", "redoBtn", "presentBtn", "pdfBtn", "downloadBtn"]) $(id).classList.toggle("hidden", !editing);
+  for (const id of ["deckTitleInput", "saveDeckBtn", "undoBtn", "redoBtn", "presentBtn", "pdfBtn", "downloadBtn", "moreMenu"]) $(id).classList.toggle("hidden", !editing);
   $("saveDeckBtn").textContent = state.savedDeckId ? "上書き保存" : "資料を保存";
   $("deckReviseBtn").classList.toggle("hidden", !editing || !state.codexAuthorized);
   $("deckReviseBtn").disabled = state.aiBusy;
@@ -1677,12 +1678,13 @@ function renderFilmstrip() {
     if (story.drills[index]?.length) flags.push(h("span", { title: `クリックで移る深掘りページ ${story.drills[index].length}枚` }, `↗${story.drills[index].length}`));
     const build = slide.animation || E.recommendedBuild(slide.type);
     if (build === "click") flags.push(h("span", { title: "クリックで順番に表示" }, "⋯"));
-    if (slide.hidden) flags.push(h("span", { title: "発表では表示しない元のスライド" }, "非"));
+    if (slide.hidden) flags.push(h("span", { title: "非表示スライド（発表では飛ばします）" }, "非"));
     const item = h("div", {
       class: `film-item${index === state.selected ? " selected" : ""}${parent != null ? " is-drill" : ""}${slide.hidden ? " is-hidden" : ""}`,
       draggable: movable ? "true" : null,
       title: `${index + 1}. ${parent != null ? `${parent + 1}枚目の深掘りページ：` : ""}${strip(slide.title) || typeLabel(slide.type)}${slide.hidden ? "（発表では非表示）" : ""}`,
-      onclick: () => select(index),
+      onclick: () => { select(index); $("filmstrip").focus({ preventScroll: true }); },
+      oncontextmenu: (event) => { event.preventDefault(); select(index); slideMenu(index, event.clientX, event.clientY); },
       ondragstart: (event) => { dragFrom = index; event.dataTransfer.effectAllowed = "move"; item.classList.add("dragging"); },
       ondragend: () => { dragFrom = null; item.classList.remove("dragging"); strip_.querySelectorAll(".drop-before").forEach((el) => el.classList.remove("drop-before")); },
       ondragover: (event) => { if (dragFrom != null && index > 0 && index <= last) { event.preventDefault(); item.classList.add("drop-before"); } },
@@ -1694,6 +1696,57 @@ function renderFilmstrip() {
     return item;
   });
   strip_.replaceChildren(...items, h("button", { class: "btn film-add", type: "button", onclick: () => openTypeDialog("insert") }, "＋ スライドを追加"));
+}
+
+// ---------------------------------------------------------------- the thumbnails' menu and keys (PowerPoint's)
+
+/** Right-click on a thumbnail: what PowerPoint offers there. */
+function slideMenu(index, x, y) {
+  const slide = state.deck?.slides[index];
+  if (!slide) return;
+  const last = state.deck.slides.length - 1;
+  editor.openMenu(x, y, [
+    { label: "切り取り", keys: "⌘X", run: () => cutSlide(index) },
+    { label: "コピー", keys: "⌘C", run: () => copySlide(index) },
+    state.slideClipboard && { label: "貼り付け", keys: "⌘V", run: () => pasteSlide(index) },
+    "-",
+    { label: "新しいスライド…", keys: "⌘M", run: () => openTypeDialog("insert") },
+    { label: "白紙のスライドを追加", run: () => editorApp.insertBlankSlide() },
+    index > 0 && index < last && { label: "スライドの複製", keys: "⌘D", run: () => editorApp.duplicateSlide() },
+    { label: "スライドの削除", keys: "Delete", run: () => deleteSlide(index) },
+    "-",
+    index > 0 && { label: slide.hidden ? "非表示スライドを解除" : "非表示スライドに設定", run: () => toggleHiddenSlide() },
+    { label: "レイアウトの変更…", run: () => openTypeDialog("change") },
+    "-",
+    { label: "このスライドから発表", keys: "⇧F5", run: () => openPresenter(index) },
+    { label: "動きを確認", run: () => { setView("single"); previewMotion(); } },
+  ].filter(Boolean));
+}
+function copySlide(index) {
+  state.slideClipboard = clone(state.deck.slides[index]);
+  toast(`${index + 1}枚目をコピーしました（サムネイルで ⌘V で貼り付け）`);
+}
+function cutSlide(index) {
+  state.slideClipboard = clone(state.deck.slides[index]);
+  deleteSlide(index);
+}
+/** Pastes the copied slide after `index` (a copy is a slide of its own: links to the original stay with it). */
+function pasteSlide(index = state.selected) {
+  if (!state.slideClipboard) return toast("貼り付けるスライドがありません（サムネイルで ⌘C でコピーします）");
+  const at = Math.min(index + 1, state.deck.slides.length - 1);
+  insertSlide(at, normalizeSlide(copyOf(state.slideClipboard), at, state.deck.slides.length + 1));
+}
+/** Keys on the thumbnails (when they have the focus), as in PowerPoint. Returns true when taken. */
+function filmKey(event) {
+  const meta = event.metaKey || event.ctrlKey;
+  const key = event.key.toLowerCase();
+  if (!meta && (event.key === "Delete" || event.key === "Backspace")) { deleteSlide(state.selected); return true; }
+  if (!meta && event.key === "Enter") { openTypeDialog("insert"); return true; }
+  if (meta && key === "c") { copySlide(state.selected); return true; }
+  if (meta && key === "x") { cutSlide(state.selected); return true; }
+  if (meta && key === "v") { pasteSlide(); return true; }
+  if (meta && key === "d") { editorApp.duplicateSlide(); return true; }
+  return false;
 }
 
 function renderStage() {
@@ -1716,6 +1769,8 @@ function renderStage() {
   const drillCount = Object.keys(story.parent).length;
   const hiddenCount = deck.slides.filter((slide) => slide.hidden).length;
   $("deckMeta").textContent = [deck.audience && `対象：${deck.audience}`, `${story.order.length}枚${drillCount ? `＋深掘り${drillCount}枚` : ""}${hiddenCount ? `＋非表示${hiddenCount}枚` : ""}`, `${types}種類のレイアウト`, videos ? `動画${videos}本` : "", lotties ? `アニメーション${lotties}個` : "", details ? `詳細${details}か所` : ""].filter(Boolean).join(" ・ ");
+  shell.renderMessage(importCallout());
+  shell.renderStatus();
   if (state.view === "outline") return renderOutline(body);
   if (state.view === "grid") {
     body.replaceChildren(h("div", { class: "stage-grid" }, deck.slides.map((slide, index) => h("div", {
@@ -1729,16 +1784,8 @@ function renderStage() {
   const el = E.render(slide, renderOptions({ index, mode: "edit", fit: fitFor(index) ?? undefined }));
   el.classList.add("hs-static");
   const wrap = h("div", { class: "slide-wrap", ondragover: onStageDragOver, ondrop: onStageDrop }, E.mount(el));
-  const build = slide.animation || E.recommendedBuild(slide.type);
-  body.replaceChildren(importCallout() || "", h("div", { class: "stage-single" },
-    wrap,
-    h("div", { class: "stage-caption" },
-      h("span", {}, `${index + 1} / ${deck.slides.length}　${story.parent[index] != null ? `${story.parent[index] + 1}枚目の深掘りページ　・　` : ""}${typeLabel(slide.type)}　・　動き：${BUILD_INFO[build]?.[0] ?? build}${slide.details?.length ? `　・　詳細${slide.details.length}か所` : ""}${story.drills[index]?.length ? `　・　深掘り${story.drills[index].length}枚` : ""}`),
-      h("span", { class: "stage-nav" },
-        h("button", { class: "btn", type: "button", title: "このスライドの動きを確認（編集画面では静止しています）", onclick: () => previewMotion() }, "▶ 動きを確認"),
-        h("button", { class: "btn", type: "button", disabled: index === 0, onclick: () => select(index - 1) }, "← 前へ"),
-        h("button", { class: "btn", type: "button", disabled: index === deck.slides.length - 1, onclick: () => select(index + 1) }, "次へ →"))),
-    slide.notes ? h("div", { class: "notes-preview" }, h("b", {}, "スピーカーノート"), slide.notes) : null));
+  // The slide alone in the middle of the stage; where it is, its notes and the zoom are around it (shell.mjs).
+  body.replaceChildren(h("div", { class: "stage-single" }, wrap));
   // Mark what does not fit on the slide itself (red dashed outline) and keep the measurement in step.
   if (body.offsetParent) {
     const result = E.fit(el);
@@ -1749,6 +1796,52 @@ function renderStage() {
   // The editor stays still: a Lottie animation shows one frame from its middle.
   E.mountLottie(el, { play: false, frame: 0.5 });
   editor.attach(wrap, el, index);
+}
+
+/** The status bar's 「スライド 3 / 15」 and what the slide is (a deep-dive page, hidden, its layout and build). */
+function slideStatus(index = state.selected) {
+  const deck = state.deck;
+  const slide = deck?.slides[index];
+  if (!slide) return null;
+  const story = storyOf();
+  const build = slide.animation || E.recommendedBuild(slide.type);
+  const detail = [
+    story.parent[index] != null ? `${story.parent[index] + 1}枚目の深掘りページ` : null,
+    slide.hidden ? "非表示スライド" : null,
+    typeLabel(slide.type),
+    `動き：${BUILD_INFO[build]?.[0] ?? build}`,
+    slide.details?.length ? `詳細${slide.details.length}か所` : null,
+    story.drills[index]?.length ? `深掘り${story.drills[index].length}枚` : null,
+  ].filter(Boolean).join("・");
+  return { pos: `スライド ${index + 1} / ${deck.slides.length}`, detail };
+}
+
+/** The notes pane under the slide (shell.mjs): typing is one undo step per burst, as in the 編集 tab. */
+function setNotes(value) {
+  const slide = state.deck?.slides[state.selected];
+  if (!slide) return;
+  beginEdit();
+  setPath(slide, ["notes"], value);
+  const field = document.querySelector('#inspector [data-path="notes"]');
+  if (field && field !== document.activeElement) field.value = value;
+  markChanged();
+}
+
+/** スライド ショー →「非表示スライドに設定」: the slide stays for editing and is skipped while presenting. */
+function toggleHiddenSlide() {
+  const slide = state.deck?.slides[state.selected];
+  if (!slide) return;
+  if (state.selected === 0) return toast("表紙は非表示にできません");
+  setSlideFields({ hidden: slide.hidden ? null : true });
+  toast(slide.hidden ? "このスライドを非表示にしました（発表では飛ばします。編集用に残ります）" : "このスライドを発表に戻しました");
+}
+
+// スライド ショー →「発表者ツールを使用」: the presenter view opens with the slide show.
+const presenterViewOn = () => { try { return localStorage.getItem("hsej-presenter-view") === "1"; } catch { return false; } };
+function setPresenterViewOn(on) {
+  try { localStorage.setItem("hsej-presenter-view", on ? "1" : "0"); } catch { /* private window */ }
+  toast(on ? "発表を始めると発表者ビュー（ノート・次のスライド・経過時間）を別ウィンドウで開きます" : "発表者ビューは発表中に P キーで開けます");
+  editorUi.renderRibbon();
 }
 
 // Second text line shown in the outline for each kind of slide.
@@ -1789,6 +1882,7 @@ function renderOutline(body) {
 
 function setView(view) {
   state.view = view;
+  shell.viewChanged();
   const radio = document.querySelector(`input[name=view][value=${view}]`);
   if (radio) radio.checked = true;
   stopMotionPreview({ render: false });
@@ -1867,7 +1961,7 @@ const editorApp = {
   openTypeDialog: (mode) => openTypeDialog(mode),
   setView: (view) => setView(view),
   openPanel: (panel, focus) => openFormatPanel(focus),
-  showTab: (tab) => editorUi.showTab(tab),
+  showTab: (tab, opts) => editorUi.showTab(tab, opts),
   editChart: (id) => editorUi.editChart(id),
   startCrop: (id) => editorUi.startCrop(id),
   editPoints: (id) => editorUi.editPoints(id),
@@ -1876,10 +1970,50 @@ const editorApp = {
   enhance: (scope) => enhanceDeck(scope),
   present: () => openPresenter(state.selected),
   canConvert: () => !converter.refusal(state.deck?.slides[state.selected]),
+  // デザイン: the deck's motion; スライド ショー; 校閲 (the ribbon's tabs around the slide).
+  deckMotion: () => (state.deck ? { transition: state.deck.transition || "fade", ...normalizeMotion(state.deck.motion || DEFAULT_MOTION) } : null),
+  setDeckDesign: (patch) => setDeckDesign(patch),
+  openDesign: () => openDesignDialog(),
+  presentFrom: (index) => openPresenter(index),
+  toggleHiddenSlide: () => toggleHiddenSlide(),
+  presenterView: () => presenterViewOn(),
+  setPresenterView: (on) => setPresenterViewOn(on),
+  openCheck: () => openCheckDialog(false),
+  fixOverflow: () => fixAllOverflow(),
+  canFixOverflow: () => !$("fixAllBtn").classList.contains("hidden") && !state.aiBusy,
+  openReplace: () => openReplace(),
+  openNotes: () => openNotesDialog(),
+  reviseDeck: () => openRewriteDialog(),
+  canAi: () => Boolean(state.codexAuthorized) && !state.aiBusy,
+  exportReview: () => exportReviewFile(),
+  importReview: () => $("reviewImportFile").click(),
+  // The window (public/editor/window.mjs): the notes under the slide, the thumbnails and the task pane, the zoom.
+  toggleNotes: () => shell.toggleNotes(),
+  notesShown: () => shell.notesShown(),
+  togglePane: (which) => shell.togglePane(which),
+  toggleRulers: () => shell.toggleRulers(),
+  rulersShown: () => shell.rulersShown(),
+  paneOpen: (which) => shell.paneOpen(which),
+  zoomChanged: () => shell?.renderZoom(),
+  // The motion IDE: the slide's automatic motion (one row each in the animation pane), HTML motion on import.
+  autoMotion: () => autoMotionInfo(),
+  setAutoMotion: (key, value) => setAutoMotion(key, value),
+  autoHtml: () => autoHtmlOn(),
+  setAutoHtml: (on) => setAutoHtml(on),
 };
 const converter = createConverter(editorApp);
 const editor = createCanvas(editorApp);
 const editorUi = createEditorUi(editor, editorApp);
+// The window around the slide: splitters, notes, message bar, status bar (public/editor/window.mjs).
+const shell = createShell({
+  E, h, editor,
+  slide: () => editorApp.slide(),
+  view: () => state.view,
+  setNotes,
+  slideStatus,
+  openZoomMenu: (anchor) => editorUi.openPop(anchor, editorUi.zoomMenu()),
+  ribbonChanged: () => editorUi.renderRibbon(),
+});
 // Read-only access for the browser checks (qa/studio-objects.mjs): the deck and the slide on the stage.
 window.__hsej = { deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection, typing: () => editor.state.typing?.cell ?? (editor.typing ? "text" : null), cellRange: () => editor.cellRange };
 
@@ -1902,8 +2036,8 @@ function setObjects(list, { undo = true, timeline = undefined } = {}) {
  * HTMLの動きをおまかせで付ける (editor/htmlfx.mjs): on the slide on the stage, or on every slide, in one undo step.
  * What a slide already has (its own animations, actions, hovers) stays.
  */
-function enhanceDeck(scope = "slide") {
-  if (!state.deck) return;
+function enhanceDeck(scope = "slide", { quiet = false } = {}) {
+  if (!state.deck) return null;
   const indices = scope === "all" ? state.deck.slides.map((_, i) => i).filter((i) => !state.deck.slides[i].hidden) : [state.selected];
   // The template's furniture repeated on slide after slide (a logo, 秘（B）, a slogan) is left alone.
   const chrome = chromeOf(state.deck.slides);
@@ -1922,11 +2056,33 @@ function enhanceDeck(scope = "slide") {
     for (const [key, n] of Object.entries(out.added)) totals[key] = (totals[key] || 0) + n;
   }
   if (!count) {
-    toast(scope === "all" ? "付けられる部品が見つかりませんでした（すでに動きがあるか、部品のないスライドです）" : "このスライドには付けられる部品がありません（すでに動きがあるか、部品がありません）");
-    return;
+    if (!quiet) toast(scope === "all" ? "付けられる部品が見つかりませんでした（すでに動きがあるか、部品のないスライドです）" : "このスライドには付けられる部品がありません（すでに動きがあるか、部品がありません）");
+    return null;
   }
+  const summary = describeAdded(totals);
+  // On a deck just brought over, the message bar says what was added and offers to take it back.
+  if (scope === "all" && state.imported?.fidelity === "exact") state.imported.auto = { count, summary, undoDepth: state.undo.length };
   markChanged({ structural: true });
-  toast(`HTMLならではの動きを${count}か所に付けました（${describeAdded(totals)}）。⌘Zで元に戻せます`);
+  if (!quiet) toast(`HTMLならではの動きを${count}か所に付けました（${summary}）。⌘Zで元に戻せます`);
+  return { count, summary };
+}
+
+// HTMLの動きを自動で付ける: a deck brought over as it looks gets HTML's moves at once (one undo step takes them back).
+const autoHtmlOn = () => { try { return localStorage.getItem("hsej-auto-html") !== "0"; } catch { return true; } };
+function setAutoHtml(on) {
+  try { localStorage.setItem("hsej-auto-html", on ? "1" : "0"); } catch { /* private window */ }
+  toast(on ? "PowerPointを見た目どおりに取り込んだら、HTMLの動きを自動で付けます" : "取り込んだときに自動では付けません（「おまかせ」でいつでも付けられます）");
+  editorUi.renderRibbon();
+  renderStage();
+}
+/** The message bar's 「元に戻す」: the deck as it came from PowerPoint (the step おまかせ added, undone). */
+function undoAutoHtml() {
+  const auto = state.imported?.auto;
+  if (!auto) return;
+  if (state.undo.length === auto.undoDepth) undoRedo("undo");
+  else toast("その後に編集があるため、⌘Zで順に戻してください");
+  if (state.imported) state.imported.auto = null;
+  renderStage();
 }
 
 /** The animations of the slide on the stage changed (the animation pane and ribbon). */
@@ -2994,6 +3150,45 @@ function motionSection(slide, index) {
     h("button", { class: "btn btn-ghost btn-sm", type: "button", style: { "margin-top": "6px", padding: "0" }, onclick: () => openDesignDialog() }, "切り替え・登場のしかた・マウスを乗せたときの動き（資料全体）→"));
 }
 
+// ---- the motion IDE: what moves on its own on the slide on the stage, one row each in the animation pane
+
+/**
+ * The slide's automatic motion as editable rows ({ key, label, options: [[value, label]], value, now }): the
+ * transition into it, how it comes in, how its content builds, its title / big words, its background, its
+ * emphasis. "auto" follows the deck (the design tab) or the layout. A page brought over as it looks keeps its own
+ * look: only its transition moves on its own (its objects move by their animations and interactions).
+ */
+function autoMotionInfo() {
+  const slide = state.deck?.slides[state.selected];
+  if (!slide) return null;
+  const deckMotion = normalizeMotion(state.deck.motion || DEFAULT_MOTION);
+  const source = slide.master === "source";
+  const titled = TITLED(slide.type);
+  const deckWord = (label) => `資料の設定（${String(label || "なし").replace(/（.*）/, "")}）`;
+  const opts = (info, autoLabel) => Object.entries(info).map(([value, label]) => [value, value === "auto" ? autoLabel : String(Array.isArray(label) ? label[0] : label).replace(/（.*）/, "")]);
+  const rows = [
+    { key: "transition", label: "画面切り替え", options: opts(SLIDE_TRANSITION_INFO, deckWord(E.TRANSITIONS[state.deck.transition || "fade"])), value: slide.transition || "auto" },
+  ];
+  if (!source) {
+    const kinetic = E.kineticOf(slide, slide.type, deckMotion);
+    const backdrop = E.backdropOf(slide, slide.type, deckMotion);
+    const recommended = E.recommendedBuild(slide.type);
+    // A blank slide has no layout content to build or emphasise (its objects move by their animations).
+    const blank = slide.type === "blank";
+    const title = !(blank && slide.hideTitle);
+    if (title) rows.push({ key: "entrance", label: "登場のしかた", options: opts(ENTRANCE_INFO, deckWord(deckMotion.entrance === "none" ? "動かさない" : E.ENTRANCES[deckMotion.entrance])), value: slide.entrance || "auto" });
+    if (titled && !blank) rows.push({ key: "animation", label: "中身の出し方", options: opts(BUILD_INFO, `おまかせ（${BUILD_INFO[recommended][0]}）`), value: slide.animation || "auto" });
+    if (title) rows.push({ key: "kinetic", label: titled ? "タイトルの動き" : "大きな文字の動き", options: opts(KINETIC_INFO, `おまかせ（${kinetic ? E.KINETIC[kinetic].replace(/（.*）/, "") : "動かさない"}）`), value: slide.kinetic || "auto" });
+    rows.push({ key: "backdrop", label: "背景の動き", options: opts(BACKDROP_INFO, `おまかせ（${backdrop ? E.BACKDROPS[backdrop] : "なし"}）`), value: slide.backdrop || "auto" });
+    if (!blank) rows.push({ key: "emphasis", label: "強調（**語句**）", options: opts(EMPHASIS_INFO, deckWord(E.EMPHASES[deckMotion.emphasis])), value: slide.emphasis || "auto" });
+  }
+  return { source, rows };
+}
+function setAutoMotion(key, value) {
+  if (!["transition", "entrance", "animation", "kinetic", "backdrop", "emphasis"].includes(key)) return;
+  setSlideFields({ [key]: value === "auto" ? null : value });
+}
+
 // ---- motion graphics for one slide (the deck's defaults live in the design dialog)
 
 function motionGraphicsSection(slide) {
@@ -3867,8 +4062,10 @@ function saveChat() {
   } catch { /* the conversation is a convenience; the deck itself is saved elsewhere */ }
 }
 
-function setPanel(panel) {
+/** Shows a task pane (reopening the closed task pane, unless `reveal` is false: the one remembered at startup). */
+function setPanel(panel, { reveal = true } = {}) {
   state.panel = panel;
+  if (reveal && !shell.paneOpen("side")) shell.setPane("side", true);
   if (panel === "chat") $("chatTab").textContent = "✦ AIと話す";
   $("chatPane").hidden = panel !== "chat";
   $("inspector").hidden = panel !== "form";
@@ -4640,6 +4837,7 @@ async function openPresenter(start = state.selected) {
     fullscreenTarget: host,
     onClose: ({ index }) => closePresenter(index),
   });
+  if (presenterViewOn()) state.player.openPresenterView?.();
 }
 
 function closePresenter(index) {
@@ -4986,6 +5184,7 @@ async function importExistingDeck(file, mode = null) {
     state.historyId = null;
     const deck = await adoptDeckMedia(normalizeDeck(result));
     loadDeck(deck, { imported: { name: file.name, fidelity: result.fidelity, stats: result.stats } });
+    if (result.fidelity === "exact" && autoHtmlOn()) enhanceDeck("all", { quiet: true });
     const s = result.stats || {};
     const kept = result.fidelity === "exact"
       ? [s.pictures && `写真${s.pictures}`, s.tables && `表${s.tables}`, s.charts && `グラフ${s.charts}`, s.animations && `アニメーション${s.animations}`].filter(Boolean).join("・")
@@ -5005,14 +5204,28 @@ function importCallout() {
   if (fidelity === "exact") {
     const s = state.imported.stats || {};
     const notes = [s.hidden && `非表示のスライド${s.hidden}枚も編集用に保持しています`, s.unsupported && `再現できない要素が${s.unsupported}個あります。原本との照合が必要です`].filter(Boolean);
+    const auto = state.imported.auto;
+    const editAnimations = h("button", { class: "btn btn-ghost", type: "button", title: "動き（自動の動き・アニメーション・インタラクション）をアニメーション ウィンドウで見る・直す", onclick: () => { if (state.view !== "single") setView("single"); editorUi.showTab("animation", { open: true }); setPanel("anim"); } }, "アニメーションを編集");
+    if (auto) {
+      return h("div", { class: "callout" },
+        h("div", { class: "text" },
+          h("b", {}, `「${name}」を見た目どおりに取り込み、HTMLの動きを自動で付けました`),
+          `${auto.summary}に${auto.count}か所。${s.animations ? `PowerPointのアニメーション${s.animations}件はそのまま残し、その前に入ります。` : ""}動きはアニメーション ウィンドウで1つずつ変えたり外したりできます。`,
+          notes.length ? h("span", { class: "callout-note" }, `${notes.join("。")}。`) : null),
+        h("button", { class: "btn btn-ai", type: "button", title: "この取り込みのスライドを最初から、動きごと確認する", onclick: () => { setView("single"); select(0); previewMotion(); } }, "▶ 動きを見る"),
+        editAnimations,
+        h("button", { class: "btn", type: "button", title: "自動で付けた動きを外して、PowerPointのままに戻す（⌘Zと同じ）", onclick: () => undoAutoHtml() }, "元に戻す"),
+        h("button", { class: "btn btn-ghost", type: "button", title: "次からPowerPointを取り込んでも自動では付けない（インタラクション タブで戻せます）", onclick: () => setAutoHtml(false) }, "次から自動にしない"),
+        close);
+    }
     return h("div", { class: "callout" },
       h("div", { class: "text" },
         h("b", {}, `「${name}」を見た目どおりに取り込みました`),
         `元の配置・色・文字のまま、図形・表・グラフ・写真を1つずつ動かして直せます。${s.animations ? `PowerPointのアニメーション${s.animations}件も引き継いでいます。` : ""}HTMLにした今は、PowerPointにはない動き（マウスを乗せると浮く・説明が出る、クリックで詳細・拡大・裏返す・タブ切り替え、数字のカウントアップ、グラフが伸びて値をなぞれる）を付けられます。`,
         notes.length ? h("span", { class: "callout-note" }, `${notes.join("。")}。`) : null),
       h("button", { class: "btn btn-ai", type: "button", title: "すべてのスライドに、HTMLならではの動きをおまかせで付けます（⌘Zで戻せます）", onclick: () => enhanceDeck("all") }, "✦ HTMLの動きをおまかせで付ける"),
-      h("button", { class: "btn", type: "button", title: "リボンの「インタラクション」で、マウスの反応・クリックの操作・ずっと動く動きを部品に付けます", onclick: () => { if (state.view !== "single") setView("single"); editorUi.showTab("interact"); } }, "自分で付ける"),
-      h("button", { class: "btn btn-ghost", type: "button", title: "引き継いだPowerPointのアニメーションをアニメーション ウィンドウで見る・直す", onclick: () => { if (state.view !== "single") setView("single"); editorUi.showTab("animation"); setPanel("anim"); } }, "アニメーションを編集"),
+      h("button", { class: "btn", type: "button", title: "リボンの「インタラクション」で、マウスの反応・クリックの操作・ずっと動く動きを部品に付けます", onclick: () => { if (state.view !== "single") setView("single"); editorUi.showTab("interact", { open: true }); } }, "自分で付ける"),
+      editAnimations,
       close);
   }
   return h("div", { class: "callout" },
@@ -5262,6 +5475,7 @@ function bind() {
   $("issueSummary").addEventListener("click", () => openCheckDialog(false));
   $("deckTitleInput").addEventListener("input", (event) => { if (!state.deck) return; beginEdit(); state.deck.title = event.target.value; markChanged(); });
   $("designBtn").addEventListener("click", openDesignDialog);
+  $("motionPreviewBtn").addEventListener("click", () => previewMotion());
   $("transitionSelect").addEventListener("change", (event) => setDeckDesign({ transition: event.target.value }));
   $("entranceSelect").addEventListener("change", (event) => setDeckDesign({ motion: { entrance: event.target.value } }));
   $("hoverSelect").addEventListener("change", (event) => setDeckDesign({ motion: { hover: event.target.value } }));
@@ -5348,6 +5562,8 @@ function bind() {
     if (onStage) { event.preventDefault(); event.stopPropagation(); }
     requestAnimationFrame(() => { if (!state.motionPreview) renderStage(); });
   }, true);
+  // The thumbnails keep the keys (Delete, ⌘C…) only while they have the focus: a click anywhere else takes it.
+  document.addEventListener("pointerdown", (event) => { if (document.activeElement === $("filmstrip") && !event.target.closest?.("#filmstrip")) $("filmstrip").blur(); }, true);
   document.addEventListener("keydown", (event) => {
     if (state.player) return; // the player has its own keys
     if (state.motionPreview?.brief && !["Shift", "Control", "Meta", "Alt"].includes(event.key)) stopMotionPreview();
@@ -5362,6 +5578,14 @@ function bind() {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable || document.querySelector("dialog[open]");
     const meta = event.metaKey || event.ctrlKey;
     if (meta && event.key.toLowerCase() === "k") { event.preventDefault(); openCommandPalette(); return; }
+    // PowerPoint's window keys: ⌘F1 folds the ribbon, ⌘F finds, ⌘0 / ⌘＋ / ⌘− zoom the slide.
+    if (state.mode === "edit" && state.deck && !document.querySelector("dialog[open]")) {
+      if (meta && event.key === "F1") { event.preventDefault(); editorUi.toggleRibbon(); return; }
+      if (meta && !event.shiftKey && event.key.toLowerCase() === "f" && !document.activeElement?.isContentEditable) { event.preventDefault(); openReplace(); return; }
+      if (!typing && shell.zoomKey(event)) { event.preventDefault(); return; }
+      if (meta && event.key.toLowerCase() === "m" && !typing) { event.preventDefault(); openTypeDialog("insert"); return; }
+      if (document.activeElement === $("filmstrip") && filmKey(event)) { event.preventDefault(); return; }
+    }
     if (meta && event.key.toLowerCase() === "z" && state.mode === "edit" && !typing) {
       event.preventDefault();
       undoRedo(event.shiftKey ? "redo" : "undo");
@@ -5426,7 +5650,7 @@ window.addEventListener("error", (event) => reportClientError(event.message, `${
 window.addEventListener("unhandledrejection", (event) => reportClientError(String(event.reason?.message ?? event.reason), "promise"));
 
 bind();
-try { const saved = localStorage.getItem(STORAGE.panel); setPanel(["form", "format", "anim"].includes(saved) ? saved : "chat"); } catch { setPanel("chat"); }
+try { const saved = localStorage.getItem(STORAGE.panel); setPanel(["form", "format", "anim"].includes(saved) ? saved : "chat", { reveal: false }); } catch { setPanel("chat", { reveal: false }); }
 updateBriefCount();
 restore();
 updateTopbar();

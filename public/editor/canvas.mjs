@@ -128,23 +128,46 @@ export function createCanvas(app) {
 
   // ---------------------------------------------------------------- zoom
 
+  // Zoom as PowerPoint's: a percentage of the slide's real size (13.33 inches at 96 dpi = 1280 px wide), or "fit"
+  // (現在のウィンドウ サイズに合わせる): the whole slide in the room the stage has, as large as it fits.
+  const REAL_W = 1280;
+  const ZOOM_MIN = 10;
+  const ZOOM_MAX = 400;
+  // An older studio stored the zoom as a share of the 1920 px slide (0.5 … 2).
+  ed.zoom = ed.zoom === "fit" ? "fit" : Number(ed.zoom) > 0 ? Math.round(Number(ed.zoom) <= 4 ? Number(ed.zoom) * (E.W / REAL_W) * 100 : Number(ed.zoom)) : "fit";
+  // The room inside the stage's padding (app.css .stage-body; more on the top and left when the rulers show).
+  function fitWidth(body) {
+    const st = getComputedStyle(body);
+    const padX = parseFloat(st.paddingLeft) + parseFloat(st.paddingRight);
+    const padY = parseFloat(st.paddingTop) + parseFloat(st.paddingBottom);
+    return Math.max(160, Math.min(body.clientWidth - padX, (body.clientHeight - padY) * (E.W / E.H)));
+  }
   function applyZoom() {
     const single = ed.wrap?.closest(".stage-single");
     const body = ed.wrap?.closest(".stage-body");
     if (!single || !body) return;
-    if (ed.zoom === "fit") {
-      const width = Math.max(320, Math.min(body.clientWidth - 56, (body.clientHeight - 96) * (16 / 9)));
-      single.style.width = `${Math.round(width)}px`;
-      single.style.maxWidth = "none";
-    } else {
-      single.style.width = `${Math.round(E.W * ed.zoom)}px`;
-      single.style.maxWidth = "none";
-    }
+    const width = ed.zoom === "fit" ? fitWidth(body) : REAL_W * ed.zoom / 100;
+    single.style.width = `${Math.round(width)}px`;
+    single.style.maxWidth = "none";
+    app.zoomChanged?.();
   }
+  /** "fit" or a percentage (10–400). The slide rescales in place: no redraw of the stage. */
   function setZoom(zoom) {
-    ed.zoom = zoom;
-    store("zoom", zoom);
-    app.rerender();
+    ed.zoom = zoom === "fit" ? "fit" : Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Number(zoom) || 100)));
+    store("zoom", ed.zoom);
+    if (ed.wrap?.isConnected) { applyZoom(); requestAnimationFrame(() => draw()); } else app.zoomChanged?.();
+  }
+  /** The percentage shown now (in "fit", what the fitted slide comes to). */
+  function zoomPercent() {
+    if (ed.zoom !== "fit") return ed.zoom;
+    const w = ed.wrap?.getBoundingClientRect().width;
+    return w ? Math.round((w / REAL_W) * 100) : 100;
+  }
+  /** One step in or out (the status bar's − / ＋, ⌘＋ホイール), from what is shown now. */
+  function zoomStep(direction) {
+    const now = zoomPercent();
+    const next = direction > 0 ? Math.min(ZOOM_MAX, Math.round(now * 1.1 + 1)) : Math.max(ZOOM_MIN, Math.round(now / 1.1 - 1));
+    setZoom(next);
   }
 
   // ---------------------------------------------------------------- the overlay (selection, handles, guides)
@@ -922,6 +945,8 @@ export function createCanvas(app) {
     if (ed.typing) return false;
     const active = document.activeElement;
     if (active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable) && !active.closest?.(".ed-wrap")) return false;
+    // A pane with keys of its own (the thumbnails: Delete deletes the slide there).
+    if (active?.closest?.("[data-own-keys]")) return false;
     if (key === "Escape") {
       if (ed.menu) { closeMenu(); return true; }
       if (ed.tool) { setTool(null); return true; }
@@ -1341,7 +1366,7 @@ export function createCanvas(app) {
       any && { label: locked ? "ロックを解除" : "ロック（動かないようにする）", run: () => setLocked(!locked) },
       any && { label: "図形の書式設定…", run: () => app.openPanel("format") },
       one && { label: "リンク・動作の設定…", run: () => app.openPanel("format", "action") },
-      any && { label: "アニメーション…", run: () => { app.showTab("animation"); app.openAnimationPane(); } },
+      any && { label: "アニメーション…", run: () => { app.showTab("animation", { open: true }); app.openAnimationPane(); } },
       one?.kind === "shape" && one.shape === "custom" && !one.locked && { label: "頂点の編集", run: () => app.editPoints?.(one.id) },
       one?.kind === "image" && !one.locked && { label: "トリミング", run: () => app.startCrop?.(one.id) },
       one?.kind === "chart" && { label: "データの編集…", run: () => app.editChart?.(one.id) },
@@ -1425,7 +1450,7 @@ export function createCanvas(app) {
     removeSelection, duplicateSelection, groupSelection, ungroupSelection, order, alignSelection, distributeSelection, rotateSelection, flipSelection,
     setLocked, setHidden, rename, moveInOrder, copyFormat, pasteFormat,
     get painter() { return ed.painter; },
-    setZoom, get zoom() { return ed.zoom; }, setView, applyZoom,
+    setZoom, zoomPercent, zoomStep, get zoom() { return ed.zoom; }, setView, applyZoom, openMenu,
     FONT_SIZES, closeMenu,
   };
 }

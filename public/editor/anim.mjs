@@ -400,15 +400,20 @@ export function createAnimations(editor, app, kit) {
     const keepScroll = pane.querySelector(".fp-body")?.scrollTop ?? 0;
     const head = h("div", { class: "fp-head an-pane-head" }, h("b", {}, "アニメーション ウィンドウ"));
     const body = h("div", { class: "fp-body" });
-    body.append(h("div", { class: "an-reset-actions" },
-      h("p", { class: "hint" }, "全ページの動きとクリック動作をゼロにできます。文字・図形・画像とスライドは残り、⌘Zで復元できます。"),
-      h("button", { type: "button", class: "btn btn-sm", onclick: () => app.resetAllActions() }, "全ページの動き・操作を削除"),
-      h("button", { type: "button", class: "btn btn-sm", onclick: () => app.prepareActionPlanPrompt() }, "✦ AIにHTML演出を相談")));
+    // The whole deck at once (at the end of the pane, below what moves on this slide).
+    const deckBox = h("div", { class: "an-sec" }, h("div", { class: "an-sec-head" }, ico("slide", 14), h("b", {}, "資料全体")),
+      h("div", { class: "an-reset-actions" },
+        h("p", { class: "hint" }, "全ページの動きとクリック動作をゼロにできます。文字・図形・画像とスライドは残り、⌘Zで復元できます。"),
+        h("button", { type: "button", class: "btn btn-sm", onclick: () => app.resetAllActions() }, "全ページの動き・操作を削除"),
+        h("button", { type: "button", class: "btn btn-sm", onclick: () => app.prepareActionPlanPrompt() }, "✦ AIにHTML演出を相談")));
     if (!onSlide()) {
-      body.append(h("p", { class: "hint" }, "1枚表示（標準）で、図形・文字・画像やレイアウトの部品にアニメーションを付けられます。"));
+      body.append(h("p", { class: "hint" }, "1枚表示（標準）で、図形・文字・画像やレイアウトの部品にアニメーションを付けられます。"), deckBox);
       pane.replaceChildren(head, body);
       return;
     }
+    // Everything that moves on this slide, in the order it happens: on its own as it arrives, the animations
+    // (clicks, with, after, triggers), then what answers the mouse (HTML) — each editable right here.
+    body.append(autoSection(), h("div", { class: "an-sec-head an-sec-gap" }, ico("star", 14), h("b", {}, "アニメーション"), h("small", {}, "クリックの順・タイミング")));
     const p = plan();
     head.append(h("span", { class: "an-pane-btns" },
       h("button", { type: "button", class: "btn btn-sm", title: "このスライドのアニメーションを最初から再生", onclick: () => app.previewMotion() }, "▶ すべて再生"),
@@ -438,8 +443,51 @@ export function createAnimations(editor, app, kit) {
       h("button", { type: "button", class: "btn btn-sm", onclick: (event) => openPop(event.currentTarget, layoutMenu()) }, "＋ レイアウトの部品")));
     const chosen = timeline().filter((e) => picked.includes(e.id));
     if (chosen.length) body.append(details(chosen));
+    body.append(interactionSection(), deckBox);
     pane.replaceChildren(head, body);
     body.scrollTop = keepScroll;
+  }
+
+  /** What moves on its own as the slide arrives (the layout's and the deck's motion): one row each, changed here. */
+  function autoSection() {
+    const info = app.autoMotion?.();
+    const sec = h("div", { class: "an-sec an-auto" }, h("div", { class: "an-sec-head" }, ico("magic", 14), h("b", {}, "スライドの自動の動き"), h("small", {}, "おまかせ＝資料・レイアウトの設定")));
+    if (!info) return sec;
+    for (const item of info.rows) {
+      sec.append(h("label", { class: "an-auto-row" }, h("span", {}, item.label),
+        h("select", { "data-auto": item.key, "aria-label": item.label, onchange: (event) => app.setAutoMotion(item.key, event.target.value) },
+          item.options.map(([value, text]) => h("option", { value, selected: value === item.value || null }, text)))));
+    }
+    if (info.source) sec.append(h("p", { class: "hint" }, "PowerPointから見た目どおりに取り込んだページは、元の見た目を守るため、レイアウトの自動の動き（登場・背景・文字）を付けません。部品の動きは下のアニメーションとインタラクションで付けます。"));
+    return sec;
+  }
+
+  const ACTION_WORDS = { next: "次のスライド", prev: "前のスライド", first: "最初のスライド", last: "最後のスライド", end: "スライドショーの終了", slide: "スライドへ移動", url: "Webページを開く" };
+  /** The objects that answer the mouse, a click or keep moving (HTML only): each setting a chip, × takes it off. */
+  function interactionSection() {
+    const list = objects().filter((o) => !o.hidden && (o.hover || o.tip || o.loop || o.action));
+    const sec = h("div", { class: "an-sec an-ix" }, h("div", { class: "an-sec-head" }, ico("hover", 14), h("b", {}, "インタラクション（HTML）"), h("small", {}, "マウス・クリック・ずっと動く")));
+    if (!list.length) {
+      sec.append(h("p", { class: "hint" }, "マウスを乗せたとき・クリックしたとき・ずっと動く動きは、まだありません。"),
+        h("div", { class: "an-sec-btns" },
+          h("button", { type: "button", class: "btn btn-sm", title: "このスライドの部品に、種類に合うHTMLの動きを付ける（⌘Zで戻せます）", onclick: () => app.enhance("slide") }, "✦ おまかせで付ける"),
+          h("button", { type: "button", class: "btn btn-sm", onclick: () => app.showTab("interact", { open: true }) }, "インタラクション タブ")));
+      return sec;
+    }
+    const ul = h("ul", { class: "an-ix-list" });
+    for (const o of list) {
+      const chips = [];
+      if (o.hover) chips.push(["hover", `マウス：${E.IX_HOVERS[o.hover]}`, { hover: undefined }]);
+      if (o.tip) chips.push(["tip", `説明「${o.tip.length > 10 ? `${o.tip.slice(0, 10)}…` : o.tip}」`, { tip: undefined }]);
+      if (o.action) chips.push(["click", `クリック：${E.IX_CLICKS[o.action.type] || ACTION_WORDS[o.action.type] || o.action.type}`, { action: undefined }]);
+      if (o.loop) chips.push(["loop", `ずっと：${E.IX_LOOPS[o.loop]}`, { loop: undefined }]);
+      ul.append(h("li", { class: ["an-ix-row", editor.selection.includes(o.id) ? "on" : ""], "data-id": o.id },
+        h("button", { type: "button", class: "an-ix-name", title: "選んで、リボンの「インタラクション」で変える", onclick: () => { editor.select([o.id]); app.showTab("interact"); } }, E.objectName(o, objects().indexOf(o))),
+        h("span", { class: "an-ix-chips" }, chips.map(([kind, text, patch]) => h("span", { class: `an-ix-chip an-ix-${kind}` }, h("span", {}, text),
+          h("button", { type: "button", title: "外す", "aria-label": `${text}を外す`, onclick: () => editor.apply(patch, { ids: [o.id] }) }, "×"))))));
+    }
+    sec.append(ul);
+    return sec;
   }
 
   function rowEl(item, { number, scale, seq }) {
