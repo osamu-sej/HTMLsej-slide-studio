@@ -372,7 +372,7 @@ export function createCanvas(app) {
   function onPointerDown(event) {
     if (event.button === 2) return;
     if (event.button !== 0 || !ed.slideEl || app.busy()) return;
-    if (event.target.closest(".inline-tools, .ph-handle, .hs-placed, .ed-menu, .motion-banner")) return;
+    if (event.target.closest(".inline-tools, .ph-handle, .hs-placed, .ed-menu, .motion-banner, .ed-comment-pin")) return;
     closeMenu();
     const guide = event.target.closest?.(".ed-cguide");
     if (guide) { dragGuide(event, guide.dataset.axis, Number(guide.dataset.i)); return; }
@@ -529,7 +529,7 @@ export function createCanvas(app) {
     if (chosen.length === 1) {
       const o = chosen[0];
       // Pictures (and objects set to keep their proportions) keep them from the corners; Shift does it for any.
-      const keep = event.shiftKey || (drag.handle.length === 2 && (o.lockRatio || ["image", "icon", "video", "lottie"].includes(o.kind)));
+      const keep = event.shiftKey || (drag.handle.length === 2 && (o.lockRatio || ["image", "icon", "video", "audio", "lottie"].includes(o.kind)));
       let next = ops.resizeBox(o, drag.handle, p, { keepRatio: keep, fromCenter });
       let lines = [];
       // Upright boxes snap their moving edges to other objects and the guides.

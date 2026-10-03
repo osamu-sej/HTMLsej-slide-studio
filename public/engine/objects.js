@@ -1167,8 +1167,10 @@
 
   // ---------------------------------------------------------------- objects: kinds, defaults, normalization
 
-  const KINDS = ["shape", "text", "image", "line", "icon", "video", "lottie", "table", "chart"];
-  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", lottie: "アニメーション", table: "表", chart: "グラフ" };
+  const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart"];
+  const KIND_LABELS = { shape: "図形", text: "テキスト ボックス", image: "図", line: "直線", icon: "アイコン", video: "ビデオ", audio: "オーディオ", lottie: "アニメーション", table: "表", chart: "グラフ" };
+  // Media playback (PowerPoint's 再生 tab): how loud, and where the sound sits on the slides.
+  const VOLUMES = { 0: "ミュート", 0.33: "小", 0.66: "中", 1: "大" };
   // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
   const TABLE_STYLES = { sej: "罫線（SEJ）", rows: "淡い横線", grid: "格子", lines: "横線だけ", plain: "線なし", brown: "淡茶の見出し" };
   const CHART_KINDS = { bar: "縦棒", "clustered-bar": "集合縦棒", "stacked-bar": "積み上げ縦棒", "100-stacked-bar": "100%積み上げ縦棒", line: "折れ線", "multi-line": "折れ線（複数）", donut: "ドーナツ", combo: "複合（棒と折れ線）" };
@@ -1193,6 +1195,7 @@
     line: { stroke: "#1f3864", strokeW: 4, dash: "solid", head: "none", tail: "none", route: "straight", headSize: 2, tailSize: 2 },
     icon: { color: "#1f3864", strokeW: 1.75 },
     video: { fit: "cover", autoplay: false, loop: false, muted: false },
+    audio: { autoplay: false, loop: false, color: "#1f3864" },
     lottie: { fit: "contain", autoplay: true, loop: true },
     table: { style: "sej", header: true, banded: true, firstCol: false, lastRow: false, fs: 28, color: "#1a1a1a", lh: 1.35 },
     chart: {},
@@ -1207,6 +1210,34 @@
   const colorOrNone = (value) => (value === "none" ? "none" : hexColor(value));
   let idSeed = 0;
   const newId = () => `o${Date.now().toString(36).slice(-5)}${(idSeed++).toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+
+  /**
+   * Playback of a video or a sound (PowerPoint's 再生 tab): trimmed start and end, fades, volume, back to the start
+   * when done; a sound may play on across slides (a number of slides, 999 = to the end), hide its icon during the
+   * show, and take a colour for its icon; a video may play full screen or show only while playing.
+   */
+  function normalizePlayback(raw, kind) {
+    const o = {};
+    const start = num(raw.trimStart, 0, 86400);
+    if (start) o.trimStart = start;
+    const end = num(raw.trimEnd, 0, 86400);
+    if (end && end > (start || 0) + 0.1) o.trimEnd = end;
+    for (const key of ["fadeIn", "fadeOut"]) { const v = num(raw[key], 0, 60); if (v) o[key] = v; }
+    const volume = num(raw.volume, 0, 1);
+    if (volume != null && volume !== 1) o.volume = volume;
+    if (raw.rewind === true) o.rewind = true;
+    if (kind === "audio") {
+      const across = raw.across === "all" ? 999 : Math.round(num(raw.across, 0, 999, 0));
+      if (across > 1) o.across = across;
+      if (raw.hideIcon === true) o.hideIcon = true;
+      const color = hexColor(raw.color);
+      if (color) o.color = color;
+    } else {
+      if (raw.fullscreen === true) o.fullscreen = true;
+      if (raw.hideIdle === true) o.hideIdle = true;
+    }
+    return o;
+  }
 
   /** One object, as kept in a deck: unknown fields go, numbers are clamped, text is made safe. Null if unusable. */
   function normalizeObject(raw) {
@@ -1295,9 +1326,9 @@
       if (AUTOFIT[raw.autofit]) o.autofit = raw.autofit;
     }
     // Pictures, videos, animations
-    if (["image", "video", "lottie"].includes(o.kind)) {
+    if (["image", "video", "audio", "lottie"].includes(o.kind)) {
       const src = typeof raw.src === "string" ? raw.src.trim() : "";
-      if (!/^(data:(image|video|application\/json)|idb:|asset:|https?:\/\/|blob:)/i.test(src) || src.length > 50_000_000) return null;
+      if (!/^(data:(image|video|audio|application\/json)|idb:|asset:|https?:\/\/|blob:)/i.test(src) || src.length > 80_000_000) return null;
       o.src = src;
       if (typeof raw.alt === "string" && raw.alt.trim()) o.alt = raw.alt.trim().slice(0, 200);
       if (typeof raw.fileName === "string" && raw.fileName.trim()) o.fileName = raw.fileName.trim().slice(0, 200);
@@ -1316,6 +1347,7 @@
       } else {
         for (const key of ["autoplay", "loop", "muted"]) if (typeof raw[key] === "boolean") o[key] = raw[key];
       }
+      if (o.kind === "video" || o.kind === "audio") Object.assign(o, normalizePlayback(raw, o.kind));
     }
     if (o.kind === "table") {
       const table = normalizeTable(raw);
@@ -2281,6 +2313,117 @@
     rotEl.append(box);
   }
 
+  /** The trim, fades, volume and the rest on a media element, for the player (mediaPlay) to follow. */
+  function playbackData(el, o) {
+    const set = (key, value) => { if (value != null && value !== false) el.setAttribute(`data-${key}`, value === true ? "" : String(value)); };
+    set("trim-start", o.trimStart);
+    set("trim-end", o.trimEnd);
+    set("fade-in", o.fadeIn);
+    set("fade-out", o.fadeOut);
+    set("volume", o.volume);
+    set("rewind", o.rewind);
+    set("across", o.across);
+    set("fullscreen", o.fullscreen);
+  }
+
+  const SPEAKER = '<path d="M5 9.5h3.6L13.5 5v14L8.6 14.5H5z" fill="currentColor" stroke="none"/><path d="M16.2 9a4.2 4.2 0 0 1 0 6M18.8 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>';
+  /**
+   * A sound on the slide (挿入 → オーディオ): a speaker icon; while presenting, the sound itself and a small bar to
+   * play and pause it, as PowerPoint shows when the pointer is over the icon.
+   */
+  function audioBody(o, rotEl, ctx) {
+    const box = h("div", { class: "hs-audio", "data-hide-icon": ctx.live && o.hideIcon ? "" : null });
+    const icon = s("svg", { class: "hs-audio-icon", viewBox: "0 0 24 24", "aria-hidden": "true" });
+    icon.innerHTML = SPEAKER;
+    icon.style.color = o.color || DEFAULTS.audio.color;
+    box.append(icon);
+    const url = ctx.live ? E.resolveSrc(o.src, ctx) : "";
+    if (ctx.live && url) {
+      const audio = h("audio", { src: url, preload: "auto", loop: o.loop && !o.trimEnd ? true : null, "data-autoplay": o.autoplay ? "" : null, "data-loop": o.loop ? "" : null });
+      playbackData(audio, o);
+      box.append(audio, h("div", { class: "hs-audio-bar" },
+        h("button", { type: "button", class: "hs-audio-play", "aria-label": "再生・一時停止", title: "再生・一時停止" }),
+        h("span", { class: "hs-audio-track" }, h("i")),
+        h("span", { class: "hs-audio-time" }, "0:00")));
+    } else if (ctx.mode !== "thumb" && o.fileName) box.title = o.fileName;
+    rotEl.append(box);
+  }
+
+  // ---------------------------------------------------------------- playing media (video and sound)
+
+  const mediaNum = (el, key) => { const v = Number(el.getAttribute(`data-${key}`)); return el.hasAttribute(`data-${key}`) && Number.isFinite(v) ? v : null; };
+  /** Where a media element's trimmed part begins and ends (seconds). */
+  function mediaSpan(el) {
+    const start = mediaNum(el, "trim-start") || 0;
+    const dur = Number.isFinite(el.duration) ? el.duration : Infinity;
+    const end = Math.min(mediaNum(el, "trim-end") || dur, dur);
+    return [start, end > start ? end : dur];
+  }
+  /** Volume at this moment: the set volume, faded in after the start and out before the end. */
+  function mediaVolume(el) {
+    const base = mediaNum(el, "volume") ?? 1;
+    const [start, end] = mediaSpan(el);
+    const t = el.currentTime;
+    let k = 1;
+    const fin = mediaNum(el, "fade-in");
+    const fout = mediaNum(el, "fade-out");
+    if (fin) k = Math.min(k, Math.max(0, (t - start) / fin));
+    if (fout && Number.isFinite(end)) k = Math.min(k, Math.max(0, (end - t) / fout));
+    return Math.max(0, Math.min(1, base * k));
+  }
+  /** Watches a media element once: the trimmed end, looping inside the trim, fades, rewinding, the bar. */
+  function mediaWatch(el) {
+    if (el.hsWatch) return;
+    el.hsWatch = true;
+    let raf = 0;
+    const box = el.closest(".hs-audio");
+    const tick = () => {
+      raf = 0;
+      const [start, end] = mediaSpan(el);
+      if (Number.isFinite(end) && el.currentTime >= end - 0.03) {
+        if (el.hasAttribute("data-loop")) el.currentTime = start;
+        else { el.pause(); if (el.hasAttribute("data-rewind")) el.currentTime = start; }
+      }
+      el.volume = mediaVolume(el);
+      if (box) {
+        const span = Number.isFinite(end) ? end - start : 0;
+        const at = Math.max(0, el.currentTime - start);
+        const bar = box.querySelector(".hs-audio-track i");
+        if (bar) bar.style.width = `${span ? Math.min(100, (at / span) * 100) : 0}%`;
+        const time = box.querySelector(".hs-audio-time");
+        if (time) time.textContent = `${Math.floor(at / 60)}:${String(Math.floor(at % 60)).padStart(2, "0")}`;
+      }
+      if (!el.paused) raf = requestAnimationFrame(tick);
+    };
+    el.addEventListener("play", () => { box?.classList.add("playing"); el.closest(".hs-hide-idle")?.classList.add("playing"); if (!raf) raf = requestAnimationFrame(tick); });
+    el.addEventListener("pause", () => { box?.classList.remove("playing"); el.closest(".hs-hide-idle")?.classList.remove("playing"); tick(); });
+    el.addEventListener("ended", () => { if (el.hasAttribute("data-rewind")) el.currentTime = mediaSpan(el)[0]; });
+    el.addEventListener("seeked", tick);
+  }
+  /** Play a video or a sound from where it was (or the trimmed start), with its fades and volume. */
+  function mediaPlay(el, { fromStart = false } = {}) {
+    if (!el) return Promise.resolve();
+    mediaWatch(el);
+    const begin = () => {
+      const [start, end] = mediaSpan(el);
+      if (fromStart || el.currentTime < start || el.currentTime >= end - 0.05) el.currentTime = start;
+      el.volume = mediaVolume(el);
+    };
+    if (el.readyState >= 1) begin(); else el.addEventListener("loadedmetadata", begin, { once: true });
+    if (el.tagName === "VIDEO" && el.hasAttribute("data-fullscreen") && !document.fullscreenElement) el.requestFullscreen?.().catch(() => {});
+    return el.play().catch(() => {
+      // A browser that refuses sound without a click plays a video silently instead.
+      if (el.tagName === "VIDEO") { el.muted = true; return el.play().catch(() => {}); }
+      return null;
+    });
+  }
+  function mediaPause(el, { stop = false } = {}) {
+    if (!el) return;
+    try { el.pause(); } catch { /* detached */ }
+    if (stop || el.hasAttribute("data-rewind")) { try { el.currentTime = mediaSpan(el)[0]; } catch { /* not loaded */ } }
+  }
+  const mediaToggle = (el) => (el.paused ? mediaPlay(el) : mediaPause(el));
+
   function imageBody(o, rotEl, ctx) {
     const url = E.resolveSrc(o.src, ctx);
     const frame = h("div", { class: "hs-obj-img" });
@@ -2384,8 +2527,12 @@
       const yt = E.youtubeId(o.src);
       const desc = { kind: yt ? "youtube" : o.kind, src: o.src, yt, motion: "none", fit: o.fit === "contain" ? "contain" : "cover", autoplay: o.autoplay !== false, loop: o.loop !== false, muted: o.muted !== false, name: o.fileName || "" };
       if (o.kind === "lottie") desc.fit = o.fit === "cover" ? "cover" : "contain";
-      rot.append(E.mediaEl(desc, ctx, "hs-obj-media"));
-    }
+      const media = E.mediaEl(desc, ctx, "hs-obj-media");
+      const video = media.querySelector("video");
+      if (video) playbackData(video, o);
+      if (video && ctx.live && o.hideIdle) media.classList.add("hs-hide-idle");
+      rot.append(media);
+    } else if (o.kind === "audio") audioBody(o, rot, ctx);
     if (o.action?.type === "flip") {
       // A card that turns over on a click: the front and the back share one 3D turn (the back is its mirror).
       const flip = h("div", { class: "hs-obj-flip" });
@@ -2490,5 +2637,6 @@
     TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, objectNode, fitObjects, objectText, objectName,
+    VOLUMES, normalizePlayback, mediaPlay, mediaPause, mediaToggle, mediaSpan,
   });
 })(typeof window !== "undefined" ? window : globalThis);

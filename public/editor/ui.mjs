@@ -9,6 +9,7 @@ import { createInteractions } from "./interact.mjs";
 import { createTableUi } from "./tables.mjs";
 import { createCrop } from "./crop.mjs";
 import { createFreeform } from "./freeform.mjs";
+import { createMedia } from "./media.mjs";
 
 const SIZES_PT = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const LINE_WIDTHS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 8, 12];
@@ -342,6 +343,7 @@ export function createEditorUi(editor, app) {
     { id: "tableDesign", label: "テーブル デザイン", contextual: () => tables.isTable() },
     { id: "tableLayout", label: "レイアウト", contextual: () => tables.isTable() },
     { id: "chartDesign", label: "グラフのデザイン", contextual: () => tables.isChart() },
+    { id: "playback", label: "再生", contextual: () => media.has() },
   ];
 
   function signature() {
@@ -379,6 +381,8 @@ export function createEditorUi(editor, app) {
       "-",
       { label: "JSONを読み込む…", icon: "up", run: () => app.openJson() },
       { label: "版の履歴・過去の資料…", icon: "clock", run: () => app.openHistory() },
+      "-", { head: "オプション" },
+      { label: `ユーザー名：${app.userName() || "未設定"}…`, icon: "people", run: () => app.changeUserName() },
       { label: "使い方とショートカット", icon: "tip", keys: "?", run: () => app.openHelp() },
     ]);
   }
@@ -449,7 +453,7 @@ export function createEditorUi(editor, app) {
   // A narrow window squeezes the ribbon as PowerPoint does, from the right-hand groups first: small buttons
   // lose their words (the tooltip keeps them), then whole groups fold into one button that opens them;
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
-  const GROUP_ICONS = { スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
+  const GROUP_ICONS = { プレビュー: "play", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
     図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane",
     プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review" };
   function fold(g) {
@@ -606,10 +610,18 @@ export function createEditorUi(editor, app) {
   function reviewTab() {
     return [
       group("コメント",
-        btn("comment", "新しい|コメント", "このスライドにコメントを付ける（右の作業ウィンドウ「コメント」）", () => app.newComment(), { big: true }),
+        btn("comment", "新しい|コメント", "このスライド（図形を選んでいればその図形）にコメントを付ける", () => app.newComment(), { big: true }),
+        drop("trash", "削除", "コメントを削除", () => menu([
+          { label: "このスライドのコメントをすべて削除", icon: "trash", run: () => app.clearComments("slide") },
+          { label: "資料のすべてのコメントを削除", icon: "trash", run: () => app.clearComments("deck") },
+        ]), { big: true }),
         col(btn("up", "前へ", "前のコメントのあるスライドへ", () => app.commentGo(-1)),
           btn("down", "次へ", "次のコメントのあるスライドへ", () => app.commentGo(1)),
-          btn("eye", "コメントの表示", "コメントの作業ウィンドウを開く", () => app.showPanel("comment"), { pressed: () => app.panel() === "comment" }))),
+          drop("eye", "コメントの表示", "スライド上のコメントとコメント ウィンドウ", () => menu([
+            { label: "スライド上にコメントを表示", icon: "comment", on: app.commentPins(), run: () => app.setCommentPins(!app.commentPins()) },
+            { label: "コメント ウィンドウ", icon: "taskPane", on: app.panel() === "comment", run: () => app.showPanel("comment") },
+          ]))),
+        btn("people", "ユーザー名", "コメントと共同編集で表示するあなたの名前", () => app.changeUserName(), { big: true })),
       group("チェック",
         btn("check", "チェック", "構成・文字のあふれ・SEJブランドを確かめる", () => app.openCheck(), { big: true }),
         btn("magic", "あふれを|AIで直す", "文字が収まらないスライドをAIで順番に直す", () => app.fixOverflow(), { big: true, enabled: () => app.canFixOverflow() })),
@@ -652,7 +664,9 @@ export function createEditorUi(editor, app) {
         drop("video", "ビデオ", "動画・アニメーションを入れる", menu([
           { label: "このデバイスのビデオ・Lottie…", icon: "video", run: insertVideoFile },
           { label: "YouTube・URL…", icon: "link", run: () => insertFromUrl("video") },
-        ]), { big: true })),
+        ]), { big: true }),
+        drop("audio", "オーディオ", "音声を入れる：ファイル・この場で録音・URL", () => media.audioMenu(), { big: true }),
+        btn("screenRec", "画面|録画", "画面・ウィンドウ・タブを録画して、ビデオとして入れる（マイクの音声も）", () => media.recorder("screen"), { big: true })),
       group("記号と日付",
         col(drop("symbol", "記号と特殊文字", "記号を入れる（文字の入力中はカーソルの位置に）", () => symbolGallery(), { keep: true }),
           drop("date", "日付と時刻", "今日の日付を入れる（文字の入力中はカーソルの位置に）", () => dateMenu(), { keep: true }))),
@@ -855,7 +869,7 @@ export function createEditorUi(editor, app) {
   }
 
   function buildTab(id) {
-    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, developer: developerTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab }[id]();
+    return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, developer: developerTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab, playback: media.playbackTab }[id]();
   }
 
   /**
@@ -1024,6 +1038,15 @@ export function createEditorUi(editor, app) {
         media.kind === "video" ? line("", toggle("音を出さない", media.muted !== false, (on) => editor.apply((x) => (x.kind === "video" ? { muted: on } : null)))) : null,
         line("はめ込み方", choice([["cover", "トリミングして埋める"], ["contain", "全体を入れる"]], media.fit || "cover", (v) => editor.apply((x) => (["video", "lottie"].includes(x.kind) ? { fit: v } : null))))));
     }
+    if (chosen.some((x) => x.kind === "audio")) {
+      const sound = E.withDefaults(chosen.find((x) => x.kind === "audio"));
+      out.push(section("audio", "オーディオ", true,
+        line("ファイル", h("span", { class: "fp-file" }, sound.fileName || "（名前なし）")),
+        line("アイコンの色", swatchRow(E.PALETTE.line.filter(([c]) => c !== "#ffffff"), sound.color, (c) => editor.apply((x) => (x.kind === "audio" ? { color: c } : null)))),
+        line("再生", toggle("発表で自動再生", Boolean(sound.autoplay), (on) => editor.apply((x) => (x.kind === "audio" ? { autoplay: on } : null)))),
+        line("", toggle("繰り返す", Boolean(sound.loop), (on) => editor.apply((x) => (x.kind === "audio" ? { loop: on } : null)))),
+        line("", h("button", { type: "button", class: "btn btn-sm", onclick: () => showTab("playback", { open: true }) }, "再生タブ（トリミング・フェード・音量）"))));
+    }
     // Size and position (cm, degrees), as PowerPoint's 配置とサイズ.
     if (single) out.push(sizeSection(chosen[0], list));
     out.push(section("opacity", "透明度", false, line("透明度", slider((1 - (o.opacity ?? 1)) * 100, (v) => editor.apply({ opacity: v ? Math.round((1 - v / 100) * 100) / 100 : undefined })))));
@@ -1089,7 +1112,7 @@ export function createEditorUi(editor, app) {
   }
   function kindIcon(o) {
     if (o.kind === "shape") return E.SHAPES[o.shape] ? shapeThumb(o.shape, 18, 14) : freeformThumb(o.path?.closed ? "polygon" : "curve");
-    return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", lottie: "lottie", table: "table", chart: "chartBar" }[o.kind] || "shapes", 16);
+    return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", audio: "audio", lottie: "lottie", table: "table", chart: "chartBar", smartart: "smartart" }[o.kind] || "shapes", 16);
   }
 
   // アニメーション・画面切り替え (anim.mjs) build their tabs and the animation pane with these same parts.
@@ -1098,6 +1121,8 @@ export function createEditorUi(editor, app) {
   const ix = createInteractions(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), tabNow: () => tab, editLink: () => editLink() });
   const crop = createCrop(editor, app);
   const freeform = createFreeform(editor, app);
+  // 挿入 → オーディオ・画面録画 and the 再生 tab of a video or a sound (media.mjs).
+  const media = createMedia(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), refreshRibbon: () => refresh() });
   const tables = createTableUi(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), colors, showTab: (id) => showTab(id) });
 
   editor.subscribe(() => { renderRibbon(); renderPane(); });

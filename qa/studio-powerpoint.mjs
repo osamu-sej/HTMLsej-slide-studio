@@ -1,6 +1,6 @@
 // More of PowerPoint, in a real browser: sections in the thumbnails (added, folded, renamed, swapped, in the slide
-// sorter too) and dragging slides in the sorter; review comments (校閲 → 新しいコメント: post, resolve, delete, the
-// thumbnail's mark); rehearse timings (スライド ショー → リハーサル: the times become 自動で切り替え); the 開発 tab
+// sorter too) and dragging slides in the sorter; review comments (校閲 → 新しいコメント: the writer's name, replies,
+// @mentions, editing, pins on objects, resolve, delete, the thumbnail's mark); rehearse timings (スライド ショー → リハーサル: the times become 自動で切り替え); the 開発 tab
 // (the slide's JSON edited and applied, checked first; the HTML it becomes); ⌘H for find and replace; the ファイル
 // menu; guides (added, dragged with the distance shown, snapped to, dragged off to delete, kept).
 // Usage: node qa/studio-powerpoint.mjs [--base=http://127.0.0.1:8787]   (with `npm start` running)
@@ -123,32 +123,148 @@ await step("スライド一覧: the sections over their slides; drag a slide to 
   await page.waitForTimeout(300);
 });
 
-await step("校閲 → 新しいコメント: post, the thumbnail's mark, resolve, delete", async () => {
+await step("校閲 → 新しいコメント: the writer's name asked once, the thumbnail's mark, resolve, delete", async () => {
   await filmByIndex(1).click();
   await tab("校閲");
   await ribbonBtn("新しい");
   await page.waitForSelector("#commentPane:not([hidden])");
   await page.waitForTimeout(150);
   assert(await page.evaluate(() => document.activeElement?.classList.contains("cm-input")), "the box is ready to type");
+  assert(/名前が未設定/.test(await page.textContent("#commentPane .cm-who")), "no name yet");
   await page.keyboard.type("数字の出所を確認してください");
-  await page.click('#commentPane button:has-text("投稿")');
-  await page.waitForTimeout(300);
+  await page.click('#commentPane button.cm-post');
+  await answer("山田 太郎");
   let d = await deck();
-  assert(d.slides[1].comments?.length === 1 && d.slides[1].comments[0].text === "数字の出所を確認してください", "posted");
+  const c = d.slides[1].comments?.[0];
+  assert(d.slides[1].comments?.length === 1 && c.text === "数字の出所を確認してください", "posted");
+  assert(c.by === "山田 太郎" && /^[a-z0-9]{6,24}$/.test(c.uid) && c.at, `who and when: ${JSON.stringify(c)}`);
+  assert((await page.textContent("#commentPane .cm-item .cm-by")) === "山田 太郎", "the name on the thread");
+  assert((await page.textContent("#commentPane .cm-item .pp-avatar")) === "山田", "an avatar with the initials");
+  assert(await page.evaluate(() => localStorage.getItem("hsej-user-name")) === "山田 太郎", "the name is kept for next time");
   assert(await filmByIndex(1).locator(".flag-comment").count(), "the thumbnail shows it");
-  await shot("comments");
-  await page.click('#commentPane button:has-text("解決")');
+  await page.click('#commentPane .cm-item button:has-text("解決")');
   await page.waitForTimeout(300);
   d = await deck();
-  assert(d.slides[1].comments[0].done === true, "resolved");
+  assert(d.slides[1].comments[0].done === true && d.slides[1].comments[0].doneBy === "山田 太郎", "resolved, and by whom");
+  assert(/解決済み（山田 太郎）/.test(await page.textContent("#commentPane .cm-item")), "shown as resolved by the name");
   assert(!(await filmByIndex(1).locator(".flag-comment").count()), "a resolved comment drops the mark");
+  await page.click('#commentPane .cm-item button:has-text("もう一度開く")');
+  await page.waitForTimeout(300);
+  assert(!(await deck()).slides[1].comments[0].done, "opened again");
   await filmByIndex(4).click();
   await page.click('#commentPane button:has-text("前へ")');
   await page.waitForTimeout(300);
   assert((await page.textContent("#slidePos")).startsWith("スライド 2 /"), "前へ goes to the slide with comments");
-  await page.click('#commentPane .cm-item button:has-text("削除")');
+});
+
+await step("コメント: someone else's thread, @ suggestions in a reply, replies, editing your own, the 自分宛て filter", async () => {
+  // A colleague's comment (as it arrives from a shared session or a PowerPoint file), added through the slide's JSON.
+  await tab("開発");
+  await ribbonBtn("JSON");
+  await page.waitForSelector("#codeDialog[open]");
+  const data = JSON.parse(await page.inputValue("#codeText"));
+  data.comments.push({ id: "sato1", text: "@山田 太郎 表の単位は？", by: "佐藤", uid: "sato000001", at: "2026-09-01T09:00:00.000Z" });
+  await page.fill("#codeText", JSON.stringify(data));
+  await page.click("#codeApply");
   await page.waitForTimeout(300);
-  assert(!(await deck()).slides[1].comments, "deleted");
+  await tab("校閲");
+  await ribbonBtn("新しい");
+  await page.waitForTimeout(200);
+  const sato = page.locator('#commentPane .cm-item[data-id="sato1"]');
+  assert(await sato.locator(".pp-mention.me").count(), "a mention of me is marked");
+  assert(await sato.evaluate((el) => el.classList.contains("to-me")), "and the thread shows it is for me");
+  assert(!(await sato.locator('button:has-text("編集")').count()), "someone else's comment cannot be edited");
+  await sato.locator('button:has-text("返信")').click();
+  await page.waitForTimeout(150);
+  await page.keyboard.type("@佐");
+  await page.waitForSelector("#commentPane .cm-mentions li");
+  assert(/佐藤/.test(await page.textContent("#commentPane .cm-mentions")), "the names to pick after @");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("単位は億円です");
+  assert(await page.inputValue("#commentPane .cm-reply-input") === "@佐藤 単位は億円です", "the picked name is put in");
+  await page.click("#commentPane .cm-reply-post");
+  await page.waitForTimeout(300);
+  let d = await deck();
+  const reply = d.slides[1].comments.find((x) => x.id === "sato1").replies?.[0];
+  assert(reply && reply.text === "@佐藤 単位は億円です" && reply.by === "山田 太郎", `the reply: ${JSON.stringify(reply)}`);
+  assert(await page.locator('#commentPane .cm-item[data-id="sato1"] .cm-reply .pp-mention').count(), "the reply's @name is marked");
+  await page.locator("#commentPane .cm-item").first().locator('button:has-text("編集")').first().click();
+  await page.fill("#commentPane .cm-edit-input", "数字の出所（年度）を確認してください");
+  await page.click("#commentPane .cm-save");
+  await page.waitForTimeout(300);
+  d = await deck();
+  assert(d.slides[1].comments[0].text === "数字の出所（年度）を確認してください" && d.slides[1].comments[0].edited, "edited, and marked as edited");
+  assert(/編集済み/.test(await page.textContent("#commentPane .cm-item")), "（編集済み）");
+  await page.selectOption("#commentPane .cm-filter", "mine");
+  await page.waitForTimeout(150);
+  assert(await page.locator("#commentPane .cm-item").count() === 1, "自分宛て: only the thread that names me");
+  await page.selectOption("#commentPane .cm-filter", "all");
+  await shot("comment-threads");
+});
+
+await step("コメント: pinned to the selected object, pins on the slide open their thread, shown or hidden", async () => {
+  await tab("挿入");
+  await ribbonBtn("テキスト ボックス");
+  await page.click('.rb-pop .rb-menu button:has-text("横書き")');
+  const slide = await page.locator(".slide-wrap .hs-scaler").boundingBox();
+  const k = slide.width / 1920;
+  await page.mouse.move(slide.x + 1300 * k, slide.y + 700 * k);
+  await page.mouse.down();
+  await page.mouse.move(slide.x + 1650 * k, slide.y + 790 * k, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.type("注記");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const box = (await deck()).slides[1].elements.at(-1);
+  assert((await page.evaluate(() => window.__hsej.selection())).join() === box.id, "the box stays selected");
+  await tab("校閲");
+  await ribbonBtn("新しい");
+  await page.waitForTimeout(200);
+  assert(/選んでいるテキスト「注記」に付けます/.test(await page.textContent("#commentPane .cm-new")), "the box says where it goes");
+  await page.keyboard.type("この注記は不要では？");
+  await page.click("#commentPane button.cm-post");
+  await page.waitForTimeout(300);
+  const d = await deck();
+  const pinned = d.slides[1].comments.at(-1);
+  assert(pinned.anchor === box.id, `pinned to the box: ${JSON.stringify(pinned)}`);
+  assert(/📌 テキスト「注記」/.test(await page.textContent(`#commentPane .cm-item[data-id="${pinned.id}"]`)), "the thread names the object");
+  assert(await page.locator(".ed-comment-pin").count() === 3, `a pin per open thread: ${await page.locator(".ed-comment-pin").count()}`);
+  const pin = await page.locator(`.ed-comment-pin[data-id="${pinned.id}"]`).boundingBox();
+  const b = await page.locator(`.slide-wrap .hs-obj[data-el="${box.id}"]`).boundingBox();
+  assert(Math.abs(pin.x - (b.x + b.width)) < 20 && pin.y < b.y + 4, `the pin sits at the box's top right: ${JSON.stringify(pin)} vs ${JSON.stringify(b)}`);
+  await shot("comment-pins");
+  await page.click(`.ed-comment-pin[data-id="sato1"]`);
+  await page.waitForTimeout(150);
+  assert(await page.locator('#commentPane .cm-item[data-id="sato1"].flash').count(), "a pin brings its thread forward");
+  await ribbonBtn("コメントの表示");
+  await page.click('.rb-pop .rb-menu button:has-text("スライド上にコメントを表示")');
+  await page.waitForTimeout(200);
+  assert(!(await page.locator(".ed-comment-pin").count()), "pins hidden");
+  await ribbonBtn("コメントの表示");
+  await page.click('.rb-pop .rb-menu button:has-text("スライド上にコメントを表示")');
+  await page.waitForTimeout(200);
+  assert(await page.locator(".ed-comment-pin").count() === 3, "and shown again");
+});
+
+await step("ユーザー名: renamed from ファイル (your comments follow); 校閲 → 削除 clears the slide's comments; ⌘Z", async () => {
+  await page.click("#ribbon .rb-file");
+  await page.click('.rb-pop .rb-menu button:has-text("ユーザー名")');
+  await answer("山田 花子");
+  let d = await deck();
+  const byName = d.slides[1].comments.map((x) => x.by);
+  assert(byName[0] === "山田 花子" && byName.includes("佐藤"), `mine renamed, the colleague's kept: ${byName}`);
+  assert(d.slides[1].comments.find((x) => x.id === "sato1").replies[0].by === "山田 花子", "my reply too");
+  await tab("校閲");
+  await ribbonBtn("削除");
+  await page.click('.rb-pop .rb-menu button:has-text("このスライドのコメントをすべて削除")');
+  await page.waitForTimeout(300);
+  assert(!(await deck()).slides[1].comments, "all deleted");
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(300);
+  assert((await deck()).slides[1].comments.length === 3, "⌘Z brings them back");
+  await page.locator('#commentPane .cm-item[data-id="sato1"] button:has-text("スレッドを削除")').click();
+  await page.waitForTimeout(300);
+  assert((await deck()).slides[1].comments.length === 2, "a thread deleted");
 });
 
 await step("スライド ショー → リハーサル: the slides are timed; the times become 自動で切り替え", async () => {

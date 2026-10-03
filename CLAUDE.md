@@ -12,7 +12,7 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 ## 編集画面（PowerPointと同じ配置）
 
 - 上からリボン（全幅）・メッセージバー（1行）・［サムネイル｜スライドとノート｜作業ウィンドウ］・ステータス バー。配置と境目・開閉・ノート・ステータス バーとズームは `public/editor/window.mjs`、リボンの表示オプション（常に表示・タブのみ・自動的に非表示、⌘F1）は `public/editor/ui.mjs`。スライドはウィンドウに合わせて全体が見えること（ズームの100%は1280px）。リボンやメッセージを増やすときもスライドを押し出さない。ルーラーは `public/editor/rulers.mjs`、資料のガイド（`deck.guides`）は canvas.mjs（吸着はSEJのガイドと合わせて `allGuides()`）。変えたら `qa/studio-layout.mjs` を通す。
-- セクション（`slide.section`＝そのスライドから始まるセクション名）・コメント（`slide.comments`、`public/editor/comments.mjs`）・非表示（`hidden`）はユーザーだけの項目（`USER_ONLY_FIELDS`）。AIの変更のあとも `restoreUserFields`（server/chat.mjs）で残す。リハーサルは `slide.advance` に入れる。開発タブの「スライドのJSON」は `normalizeSlide` を通してから反映する。変えたら `qa/studio-powerpoint.mjs` を通す。
+- セクション（`slide.section`＝そのスライドから始まるセクション名）・コメント（`slide.comments`、`public/editor/comments.mjs`。書いた人 `by`・`uid`、返信 `replies`、ピン留め `anchor`。名前は `public/editor/people.mjs`）・非表示（`hidden`）はユーザーだけの項目（`USER_ONLY_FIELDS`）。AIの変更のあとも `restoreUserFields`（server/chat.mjs）で残す。リハーサルは `slide.advance` に入れる。開発タブの「スライドのJSON」は `normalizeSlide` を通してから反映する。変えたら `qa/studio-powerpoint.mjs` を通す。
 - 動きのIDE：アニメーション ウィンドウ（`public/editor/anim.mjs`）はスライドで動くものを起きる順に並べる（スライドの自動の動き＝`autoMotionInfo()`（app.js）・アニメーション・インタラクション）。どれもその場で変えられ、1回のUndoで戻る。見た目どおりの取り込みにはHTMLの動き（おまかせ）を自動で付け（設定 `hsej-auto-html`、既定はオン）、メッセージバーから元に戻せる。取り込みの忠実度を見るQA（`studio-import.mjs`）は自動をオフにして走らせ、自動の流れは `qa/studio-motion-ide.mjs` で確かめる。
 
 ## 自由配置（PowerPoint風の編集）
@@ -24,6 +24,7 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 - 表・グラフは部品の `table`・`chart`（編集は `public/editor/tables.mjs`）、トリミングは `crop.mjs`、手で描く形と頂点の編集は `freeform.mjs`（`shape: "custom"` と `path`）。
 - 「図形に変換」（`public/editor/convert.mjs`）は、レイアウトのスライドを画面外で原寸に描いて読み取り、部品にして白紙のスライドにする。項目は `group`、出し方は `timeline`、詳細・深掘りは部品の `item` に引き継ぐ。色は `PALETTE` に合わせる（淡い色は元の色＋透明度）。レイアウトを変えたら `qa/studio-convert.mjs` を通し、見た目が原本と変わらないことを確かめる。
 - PowerPointの「見た目どおりに取り込む」は `tools/pptx_exact.py`（`/api/import?mode=exact`）。1枚ずつ白紙（`hideTitle`・`master: source`）の部品にし、グラフは書式を `chart.style` に入れて `officeChart`（objects.js）で描く。取り込み資料は元のマスター・装飾・画像を保持し、スタジオのSEJマスターとブランド検査を重ねない。非表示スライドも編集データに残し、発表からは除く。変えたら `test/test_pptx_exact.py`・`test/import-exact.test.js`・`qa/studio-import.mjs` を通し、LibreOfficeで描いた原本と並べて見比べる。
+- オーディオは部品の `audio`（挿入 → オーディオ・録音、画面録画はビデオ）。再生の設定（`trimStart`・`trimEnd`・`fadeIn`・`fadeOut`・`volume`・`rewind`・`across`・`hideIcon`、ビデオは `fullscreen`・`hideIdle`）は objects.js の `normalizePlayback`、再生は `mediaPlay`（objects.js）、スライドをまたぐ再生は motion.js の `carrySounds`。編集は `public/editor/media.mjs`（再生タブ）。変えたら `test/media.test.js` と `qa/studio-media.mjs` を通す。
 - HTMLならではの動きは部品の `hover`・`tip`・`loop` と `action`（`popup`・`zoom`・`spot`・`flip`・`reveal`）。描くのは objects.js（発表中だけ `data-*` を付ける。編集画面では動かない）、動かすのは motion.js（プレーヤー）と engine.css、編集はリボン「インタラクション」（`public/editor/interact.mjs`）。HTMLの効果は animate.js の `html: true`（戻せないものは `noExit`）。おまかせ（`public/editor/htmlfx.mjs`）は元のアニメーション・動作を消さず、テンプレートの飾り（`chromeOf`）と非表示のスライドに付けない。変えたら `test/interact.test.js` と `qa/studio-interact.mjs` を通す。
 - アニメーションは `slide.timeline`（再生は `public/engine/animate.js`、編集は `public/editor/anim.mjs`）。開始・終了は `transform`／`opacity`／`clip-path`、強調は `scale`／`rotate`（足し合わせ）と色、軌跡は `translate`（足し合わせ）で動かし、同じ部品の効果が打ち消し合わないようにする。発表のクリックはレイアウトの「中身の出し方」の後にアニメーションが続く（`data-lsteps`・`data-steps`）。
 - 全ページの動き・クリック動作のリセットは `public/reset-actions.mjs`。元の文字・図形・画像とスライドを残し、タイムライン、レイアウトの出し方、モーショングラフィック、画面切り替え、メディアの自動再生、図形のクリックリンク、詳細・深掘りのクリック設定、HTML独自のホバー・説明・連続モーションを消す。アプリ側は1回だけUndoを積む。AIとの通常会話は`timeline`を書けないため、現段階の「AIにHTML演出を相談」は提案文を作るだけで自動反映しない。
@@ -41,6 +42,6 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 ## 確認
 
 - `npm test`（CodexとOllamaは偽物で代用）。
-- 画面にかかわる変更は、`npm start` のあと `qa/studio-smoke.mjs`・`studio-editing.mjs`・`studio-ai-mock.mjs`・`studio-motion.mjs`・`studio-drill.mjs`・`studio-interactive.mjs`・`studio-objects.mjs`・`studio-animations.mjs`・`studio-tables.mjs`・`studio-convert.mjs`・`studio-import.mjs`・`studio-interact.mjs`・`studio-layout.mjs`・`studio-motion-ide.mjs`・`studio-powerpoint.mjs` を実際のブラウザで通す。リボンは狭い幅だとグループを1つのボタンに折りたたむので、QAでボタンを探すときは折りたたんだグループも開く。
+- 画面にかかわる変更は、`npm start` のあと `qa/studio-smoke.mjs`・`studio-editing.mjs`・`studio-ai-mock.mjs`・`studio-motion.mjs`・`studio-drill.mjs`・`studio-interactive.mjs`・`studio-objects.mjs`・`studio-animations.mjs`・`studio-tables.mjs`・`studio-convert.mjs`・`studio-import.mjs`・`studio-interact.mjs`・`studio-layout.mjs`・`studio-motion-ide.mjs`・`studio-powerpoint.mjs`・`studio-media.mjs` を実際のブラウザで通す。リボンは狭い幅だとグループを1つのボタンに折りたたむので、QAでボタンを探すときは折りたたんだグループも開く。
 - 深掘りページ（`drillOf`）は元のスライドの直後に置く本編外のページ。本編の並び・番号は `E.storyMap`（engine.js）とサーバーの `drillParents`（server/chat.mjs）が同じ決まりで求める。
 - レイアウトの「見た目のグループ」と単調さのチェックは `public/layout-looks.mjs` にあり、サーバー（AIへの指示・自動の選び直し）とスタジオ（チェック・骨子の画面）が同じものを使う。

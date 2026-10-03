@@ -98,7 +98,7 @@ export function createAnimations(editor, app, kit) {
     if (cls === "path") e.path = E.pathPreset(fx, boxOf(el));
     return e;
   }
-  const mediaOk = (el) => ["video", "lottie"].includes(byId(el)?.kind);
+  const mediaOk = (el) => ["video", "audio", "lottie"].includes(byId(el)?.kind);
 
   /** Add an effect to everything selected (the first on a click, the others with it), as アニメーションの追加. */
   function add(cls, fx) {
