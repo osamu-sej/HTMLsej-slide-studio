@@ -1687,6 +1687,12 @@
       if (own?.kind === "zoom") { zoomTo(own, el); return true; }
       const action = own?.action;
       if (!action) return false;
+      runAction(action);
+      return true;
+    }
+    /** What a click or a mouse-over action does: its sound (サウンドの再生), then the jump or the link. */
+    function runAction(action) {
+      if (action.sound && opts.sounds !== false && !opts.static) playSound(action.sound);
       if (action.type === "next") next();
       else if (action.type === "prev") prev();
       else if (action.type === "first") go(order[0]);
@@ -1697,8 +1703,19 @@
         if (to >= 0) go(to);
         else flash("リンク先のスライドが見つかりません");
       } else if (action.type === "url") win.open(action.href, "_blank", "noopener");
-      return true;
     }
+    // マウスの通過: the pointer moving onto an object with a mouse-over action does it once (again only after it
+    // has left the object). A viewer only watches; a pen in hand writes over the slide instead.
+    let overNow = null;
+    const onStageOver = (event) => {
+      const el = event.target.closest?.(".hs-obj[data-over]");
+      if (el === overNow) return;
+      overNow = el;
+      if (!el || viewer || (penMode && penMode !== "laser") || zoom.level > 1 || event.pointerType === "touch") return;
+      const own = (slides[index]?.elements || []).find((o) => o.id === el.dataset.el);
+      if (own?.overAction) runAction(own.overAction);
+    };
+    const onStageOut = (event) => { if (overNow && !overNow.contains(event.relatedTarget)) overNow = null; };
     // 拡大 (PowerPoint's zoom in a slide show): the magnifier on the bar (or ＋) and a click where to look closer;
     // a drag looks around, − / Esc / a right-click shows the whole slide again; another slide starts whole.
     const zoom = { level: 1, tx: 0, ty: 0, picking: false, drag: null, moved: false };
@@ -1799,6 +1816,8 @@
     };
     if (opts.keyboard !== false) doc.addEventListener("keydown", onKey);
     stage.addEventListener("click", onStageClick);
+    stage.addEventListener("pointerover", onStageOver);
+    stage.addEventListener("pointerout", onStageOut);
     stage.addEventListener("touchstart", onTouchStart, { passive: true });
     stage.addEventListener("touchend", onTouchEnd);
     player.addEventListener("pointermove", onMove);

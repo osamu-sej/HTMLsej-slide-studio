@@ -286,3 +286,22 @@ test("図のレイアウト: pictures set out with a caption each, filling their
   assert.ok(cap.x > side.list.find((o) => o.id === "p1").x && cap.align === "left", "the words to the right of the picture");
   assert.equal(ops.pictureLayout([other], ["t1"], "row").ids.length, 0, "only pictures");
 });
+
+test("既定の図形に設定: only the look of a shape, text box or line is kept (never its words, place or size)", () => {
+  const shape = { id: "s", kind: "shape", shape: "rect", x: 10, y: 20, w: 300, h: 100, text: "<p>見出し</p>", fill: "#e2efda", stroke: "#1f3864", strokeW: 3, fs: 32, color: "#1f3864", bold: true, rot: 15 };
+  const style = ops.defaultStyleOf("shape", shape);
+  assert.deepEqual(style, { fill: "#e2efda", stroke: "#1f3864", strokeW: 3, fs: 32, color: "#1f3864", bold: true });
+  assert.deepEqual(ops.defaultStyleOf("line", { kind: "line", x1: 0, y1: 0, x2: 9, y2: 9, stroke: "#808080", strokeW: 6, dash: "dash", tail: "triangle", fill: "#fff" }), { stroke: "#808080", strokeW: 6, dash: "dash", tail: "triangle" });
+  assert.equal(ops.defaultStyleOf("table", shape), null);
+  assert.equal(ops.defaultStyleOf("shape", { text: "x" }), null);
+  const kept = ops.objectDefaultsOf({ shape, text: { wrap: false, fs: 28, x: 5 }, line: "x", chart: { fill: "#fff" } });
+  assert.deepEqual(Object.keys(kept), ["shape", "text"]);
+  assert.deepEqual(kept.text, { fs: 28, wrap: false });
+  assert.equal(ops.objectDefaultsOf({ shape: { x: 1 } }), null);
+  assert.equal(ops.objectDefaultsOf(null), null);
+  assert.equal(ops.objectDefaultsOf([shape]), null);
+  // The check passes each look (the studio normalizes it and moves colours to the SEJ palette).
+  const checked = ops.objectDefaultsOf({ shape: { fill: "#ff0000", fs: 30 } }, (kind, s) => (kind === "shape" ? { ...s, fill: "#dce4f2" } : s));
+  assert.deepEqual(checked, { shape: { fill: "#dce4f2", fs: 30 } });
+  assert.equal(ops.objectDefaultsOf({ shape: { fill: "#ff0000" } }, () => null), null, "a look the check refuses is dropped");
+});

@@ -42,6 +42,7 @@ export function resetDeckActions(source) {
     }
     for (const object of slide.elements ?? []) {
       if (object.action) { delete object.action; removed.links += 1; }
+      if (object.overAction) { delete object.overAction; removed.links += 1; }
       if (object.item) { delete object.item; removed.links += 1; }
       if (object.hover) { delete object.hover; removed.interactions += 1; }
       if (object.tip) { delete object.tip; removed.interactions += 1; }

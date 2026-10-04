@@ -41,3 +41,10 @@ test("whole-deck reset removes presentation actions while retaining imported con
   assert.doesNotThrow(() => deckShape.parse(deck));
   assert.equal(resetDeckActions(deck).changed, false, "a second reset is a no-op");
 });
+
+test("whole-deck reset also takes off マウスの通過 actions", () => {
+  const source = { title: "資料", theme: "sej", transition: "fade", slides: [{ type: "blank", title: "表紙", elements: [{ id: "s1", kind: "shape", x: 0, y: 0, w: 10, h: 10, overAction: { type: "next", sound: "chime" } }] }] };
+  const { deck, removed } = resetDeckActions(source);
+  assert.equal(deck.slides[0].elements[0].overAction, undefined);
+  assert.equal(removed.links, 1);
+});

@@ -256,6 +256,8 @@ export const deckShape = z.object({
   memo: z.string().max(2000).optional().default(""),
   // The guides people drag on the slides (表示 → ガイド), in slide px.
   guides: z.object({ x: z.array(z.number()).max(20).optional(), y: z.array(z.number()).max(20).optional() }).optional(),
+  // 既定の図形・テキスト ボックス・線に設定 (checked by the studio: objectDefaultsOf in public/editor/ops.mjs).
+  objectDefaults: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
   // スライド ショーの設定 and 目的別スライド ショー (checked again by the studio: public/editor/show.mjs).
   show: z.record(z.string(), z.unknown()).optional(),
   customShows: z.array(z.object({ id: z.string().max(32), name: z.string().max(60), sids: z.array(z.string().max(32)).max(500) })).max(30).optional(),

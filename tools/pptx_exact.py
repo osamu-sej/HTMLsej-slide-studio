@@ -385,6 +385,7 @@ class SlideReader:
         self.objects: list[dict[str, Any]] = []
         self.by_spid: dict[str, str] = {}
         self.actions: dict[str, dict[str, str]] = {}
+        self.over_actions: dict[str, dict[str, str]] = {}
         self.used: set[str] = set()
         self.title = ""
         self.importing_decoration = False
@@ -940,6 +941,8 @@ class SlideReader:
             self.by_spid[spid] = o["id"]
         if spid and not self.importing_decoration and spid in self.actions:
             o["action"] = self.actions.pop(spid)
+        if spid and not self.importing_decoration and spid in self.over_actions:
+            o["overAction"] = self.over_actions.pop(spid)
         self.objects.append(o)
 
     def shape(self, el, tf, group, *, part=None, offset=None):
@@ -1521,11 +1524,12 @@ class SlideReader:
             elif name == "grpSp":
                 self.walk(child, tf, group, part=drawing, offset=offset)
 
-    def click_action(self, el):
-        """What clicking the shape does in a slide show: go to a slide, next / previous / first / last, end, or open a link."""
+    def click_action(self, el, tag="hlinkClick"):
+        """What clicking the shape (or, with hlinkHover, moving the pointer onto it) does in a slide show: go to a
+        slide, next / previous / first / last, end, or open a link."""
         nv = next((c for c in el if local(c).startswith("nv")), None)
         cnv = nv.find(P + "cNvPr") if nv is not None else None
-        click = cnv.find(A + "hlinkClick") if cnv is not None else None
+        click = cnv.find(A + tag) if cnv is not None else None
         if click is None:
             return None
         action = click.get("action") or ""
@@ -1553,10 +1557,14 @@ class SlideReader:
                 continue
             if part is None and name in ("sp", "pic", "cxnSp", "graphicFrame"):
                 action = self.click_action(child)
+                over = self.click_action(child, "hlinkHover")
                 nv = next((c for c in child if local(c).startswith("nv")), None)
                 cnv = nv.find(P + "cNvPr") if nv is not None else None
                 if action and cnv is not None and cnv.get("id"):
                     self.actions[cnv.get("id")] = action
+                # マウスの通過: a jump (a browser opens a link only for a click).
+                if over and over["type"] != "url" and cnv is not None and cnv.get("id"):
+                    self.over_actions[cnv.get("id")] = over
             if name == "AlternateContent":
                 choice = child.find(f"{{{NS['mc']}}}Choice")
                 fallback = child.find(f"{{{NS['mc']}}}Fallback")

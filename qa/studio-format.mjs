@@ -908,6 +908,184 @@ print(json.dumps({"w": w, "h": h, "top": im.getpixel((w // 2, int(h * .12))), "b
   await shot("picture-save-reset");
 });
 
+// A new blank slide for the D22 steps, and helpers to point at it.
+const stageAt = async (x, y) => { const b = await page.locator("#stageBody .slide-wrap .hs-slide").first().boundingBox(); return [b.x + (x * b.width) / 1920, b.y + (y * b.height) / 1080]; };
+const objRightClick = async (id, item) => {
+  const r = await page.locator(`#stageBody .slide-wrap .hs-obj[data-el="${id}"]`).first().boundingBox();
+  await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2, { button: "right" });
+  await page.locator(`.ed-menu button:has-text("${item}")`).first().click();
+};
+const emptyRightClick = async (item) => {
+  await page.mouse.click(...(await stageAt(1700, 1000)), { button: "right" });
+  await page.locator(`.ed-menu button:has-text("${item}")`).first().click();
+};
+const redraw = async () => {
+  const at = await page.evaluate(() => window.__hsej.deck().slides.indexOf(window.__hsej.slide()));
+  await page.locator(".film-item").nth(at - 1).click();
+  await page.locator(".film-item").nth(at).click();
+  await page.waitForTimeout(300);
+};
+const pickInPane = async (ids) => {
+  await page.click("#formatTab").catch(() => {});
+  for (const [i, id] of ids.entries()) await page.locator(`#formatPane .fp-sel-list li[data-id="${id}"]`).click(i ? { modifiers: ["Shift"] } : {});
+  await page.waitForTimeout(200);
+};
+await step("描画モードのロック（右クリック）; 既定の図形・既定の線に設定; オプションで元に戻す", async () => {
+  await page.keyboard.press("Escape");
+  await tab("挿入");
+  await ribbonBtn("新しいスライド");
+  await menuItem("白紙");
+  await page.waitForTimeout(400);
+  await tab("挿入");
+  await ribbonBtn("図形");
+  assert((await page.textContent(".rb-pop .rb-gallery-hint")).includes("描画モードのロック"), "the gallery says how");
+  await page.locator('.rb-pop .rb-gallery button[data-shape="ellipse"]').last().click({ button: "right" });
+  for (const x of [400, 800, 1200]) { await page.mouse.click(...(await stageAt(x, 420))); await page.waitForTimeout(200); }
+  let list = (await slide()).elements || [];
+  assert(list.filter((o) => o.shape === "ellipse").length === 3, `three ellipses with one pick: ${list.map((o) => o.shape)}`);
+  assert(await page.locator(".ed-drawing").count(), "still drawing");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  assert(!(await page.locator(".ed-drawing").count()), "Esc ends the lock");
+  // The first one in light brown with navy bold 30 px words becomes the deck's default shape (no outline on a tinted box).
+  const [e1] = list.filter((o) => o.shape === "ellipse");
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((o) => o.id === id), { fill: "#d6c9b8", color: "#1f3864", bold: true, fs: 30 }), e1.id);
+  await redraw();
+  await objRightClick(e1.id, "既定の図形に設定");
+  await page.waitForTimeout(200);
+  let d = (await deck()).objectDefaults;
+  assert(d?.shape?.fill === "#d6c9b8" && d.shape.color === "#1f3864" && d.shape.bold === true && d.shape.fs === 30 && !("text" in d.shape) && !("x" in d.shape), `the default shape: ${JSON.stringify(d)}`);
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.locator('.rb-pop .rb-gallery button[data-shape="rect"]').last().click();
+  await page.mouse.click(...(await stageAt(400, 800)));
+  await page.waitForTimeout(300);
+  list = (await slide()).elements;
+  const rect = list.at(-1);
+  assert(rect.shape === "rect" && rect.fill === "#d6c9b8" && rect.color === "#1f3864" && rect.bold === true && rect.fs === 30, `a new shape takes the default: ${JSON.stringify(rect)}`);
+  // A line: grey 6 px becomes the default line; a new arrow takes it (with its own arrowhead).
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.locator('.rb-pop .rb-gallery button[title="直線"]').first().click();
+  await page.mouse.move(...(await stageAt(900, 760)));
+  await page.mouse.down();
+  await page.mouse.move(...(await stageAt(1300, 760)), { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const line = (await slide()).elements.at(-1);
+  assert(line.kind === "line", `a line: ${line.kind}`);
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((o) => o.id === id), { stroke: "#808080", strokeW: 6 }), line.id);
+  await redraw();
+  await page.mouse.click(...(await stageAt(1100, 760)), { button: "right" });
+  await page.locator('.ed-menu button:has-text("既定の線に設定")').click();
+  await page.waitForTimeout(200);
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.locator('.rb-pop .rb-gallery button[title="矢印"]').first().click();
+  await page.mouse.move(...(await stageAt(900, 900)));
+  await page.mouse.down();
+  await page.mouse.move(...(await stageAt(1300, 900)), { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const arrow = (await slide()).elements.at(-1);
+  assert(arrow.kind === "line" && arrow.stroke === "#808080" && arrow.strokeW === 6 && arrow.tail === "triangle", `a new arrow takes the default line: ${JSON.stringify(arrow)}`);
+  await shot("default-shapes");
+  // ファイル → オプション: what is set, and back to the studio's own.
+  await page.click(".rb-file");
+  await page.locator('.rb-pop .rb-menu button:has-text("オプション…")').click();
+  await page.waitForSelector(".options-dialog[open]");
+  assert((await page.textContent(".options-dialog .opt-defaults")).includes("図形・線"), `the summary: ${await page.textContent(".options-dialog .opt-defaults")}`);
+  await page.click(".options-dialog .opt-defaults-reset");
+  await page.waitForTimeout(200);
+  assert(!(await deck()).objectDefaults, "the defaults are gone");
+  await page.click(".options-dialog .btn-primary");
+  await undo();
+  assert((await deck()).objectDefaults?.shape?.fill === "#d6c9b8", "⌘Z brings them back");
+});
+
+await step("図として貼り付け（2つの図形を1枚の画像に）; 2つを図として保存（SVG）; 背景の保存", async () => {
+  const list = (await slide()).elements;
+  const [e1, e2] = list.filter((o) => o.shape === "ellipse");
+  await pickInPane([e1.id, e2.id]);
+  await objRightClick(e1.id, "コピー");
+  await emptyRightClick("図として貼り付け");
+  await page.waitForFunction((n) => window.__hsej.slide().elements.length > n, list.length, { timeout: 10000 });
+  const pic = (await slide()).elements.at(-1);
+  assert(pic.kind === "image" && /^idb:/.test(pic.src), `a picture: ${JSON.stringify(pic).slice(0, 160)}`);
+  // Both ellipses (240 wide, 400 apart) in one picture.
+  assert(Math.abs(pic.w - 640) <= 1 && Math.abs(pic.h - 240) <= 1, `the size of what was copied: ${pic.w}×${pic.h}`);
+  const px = await page.evaluate(async (id) => {
+    const img = document.querySelector(`#stageBody .hs-obj[data-el="${id}"] img`);
+    await img.decode?.().catch(() => {});
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext("2d");
+    g.drawImage(img, 0, 0);
+    const at = (fx, fy) => [...g.getImageData(Math.floor(fx * c.width), Math.floor(fy * c.height), 1, 1).data];
+    return { w: c.width, left: at(0.19, 0.5), right: at(0.81, 0.5), middle: at(0.5, 0.5) };
+  }, pic.id);
+  assert(Math.abs(px.w - pic.w * 2) <= 4, `drawn at twice the size: ${px.w}`);
+  assert(px.left[0] > 190 && px.left[2] < 200 && px.left[3] > 200, `the brown one on the left: ${px.left}`);
+  assert(px.right[2] > px.right[0] && px.right[3] > 200, `the blue one on the right: ${px.right}`);
+  assert(px.middle[3] < 30, `see-through between them: ${px.middle}`);
+  await shot("paste-as-picture");
+  await undo();
+  assert(!(await slide()).elements.some((o) => o.id === pic.id), "⌘Z takes the picture back");
+  // 図として保存 with two chosen: one SVG holding both.
+  await page.evaluate(() => { window.__names = []; const click = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { if (this.download) window.__names.push(this.download); return click.call(this); }; });
+  await pickInPane([e1.id, e2.id]);
+  await objRightClick(e2.id, "図として保存");
+  await page.waitForSelector(".ps-dialog[open]");
+  assert((await page.textContent(".ps-dialog")).includes("2個"), "two objects in one picture");
+  await page.selectOption(".ps-dialog .ps-format", "svg");
+  const [svg] = await Promise.all([page.waitForEvent("download", { timeout: 20000 }), page.click(".ps-dialog .ps-go")]);
+  const file = join(outDir, "format-saved-two.svg");
+  await svg.saveAs(file);
+  const text = await readFile(file, "utf8");
+  const width = Number(text.match(/<svg[^>]* width="(\d+)"/)?.[1]);
+  assert(Math.abs(width - 640) <= 1 && (text.match(/data-el=/g) || []).length === 2, `both in one SVG: ${width}, ${(text.match(/data-el=/g) || []).length}`);
+  assert((await page.evaluate(() => window.__names)).at(-1) === "図.svg", "named 図.svg");
+  // 背景の保存: the slide's background picture as a file.
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => { window.__hsej.slide().background = { image: "asset:storeOperations" }; });
+  await redraw();
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  const [bg] = await Promise.all([page.waitForEvent("download", { timeout: 20000 }), emptyRightClick("背景の保存")]);
+  const bgFile = join(outDir, "format-saved-background.jpg");
+  await bg.saveAs(bgFile);
+  assert(/^背景\.(jpg|png|webp)$/.test((await page.evaluate(() => window.__names)).at(-1)), `named 背景: ${await page.evaluate(() => window.__names)}`);
+  const size = execFileSync("python3", ["-c", "from PIL import Image; import sys; print(*Image.open(sys.argv[1]).size)", bgFile]).toString().trim().split(" ").map(Number);
+  assert(size[0] > 600, `the background picture itself: ${size}`);
+  await page.evaluate(() => { delete window.__hsej.slide().background; });
+  await redraw();
+});
+
+await step("マウスの通過: 動作設定で「次のスライド」とサウンド; 発表中にマウスを乗せると進む", async () => {
+  const rect = (await slide()).elements.find((o) => o.shape === "rect");
+  await pickInPane([rect.id]);
+  await objRightClick(rect.id, "リンク・動作の設定");
+  await page.waitForSelector('#formatPane select[aria-label="マウスの通過時の動作"]');
+  await page.selectOption('#formatPane select[aria-label="マウスの通過時の動作"]', "next");
+  await page.selectOption('#formatPane select[aria-label="マウスの通過時の動作：サウンド"]', "chime");
+  await page.selectOption('#formatPane select[aria-label="クリックしたときの動作：サウンド"]', "click");
+  await page.click('#formatPane .rb-link-form button:has-text("設定する")');
+  await page.waitForTimeout(300);
+  const o = (await slide()).elements.find((x) => x.id === rect.id);
+  assert(JSON.stringify(o.overAction) === JSON.stringify({ type: "next", sound: "chime" }) && JSON.stringify(o.action) === JSON.stringify({ type: "sound", sound: "click" }), `set: ${JSON.stringify([o.action, o.overAction])}`);
+  await page.mouse.move(5, 5);
+  await page.keyboard.press("Shift+F5");
+  await page.waitForSelector(`.hs-player-stage .hs-obj[data-el="${rect.id}"][data-over="next"]`);
+  await page.waitForTimeout(1200);
+  const before = (await page.textContent(".hs-player-count")).trim();
+  const b = await page.locator(`.hs-player-stage .hs-obj[data-el="${rect.id}"]`).boundingBox();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 4 });
+  await page.waitForFunction((was) => document.querySelector(".hs-player-count")?.textContent.trim() !== was, before, { timeout: 5000 });
+  const after = (await page.textContent(".hs-player-count")).trim();
+  assert(Number(after.split("/")[0]) === Number(before.split("/")[0]) + 1, `moved on: ${before} → ${after}`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

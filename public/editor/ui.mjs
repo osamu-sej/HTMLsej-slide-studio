@@ -260,20 +260,26 @@ export function createEditorUi(editor, app) {
   const RECENT_SHAPES = "hsej-recent-shapes";
   const recentShapes = () => { try { return JSON.parse(localStorage.getItem(RECENT_SHAPES) || "[]").filter((k) => E.SHAPES[k]).slice(0, 12); } catch { return []; } };
   const rememberShape = (key) => { try { localStorage.setItem(RECENT_SHAPES, JSON.stringify([key, ...recentShapes().filter((k) => k !== key)].slice(0, 12))); } catch { /* private window */ } };
+  // The shape gallery. Where it draws new shapes (with the lines), a right-click on a shape or a line is PowerPoint's
+  // 描画モードのロック: the same one drawn again and again until Esc.
   function shapeGallery(onPick, { lines = true } = {}) {
+    const lockable = lines;
+    const pickShape = (close, key, lock = false) => { close(); rememberShape(key); onPick({ kind: "shape", shape: key, ...(lock ? { lock: true } : {}) }); };
+    const lockOn = (close, pick) => (lockable ? (event) => { event.preventDefault(); pick(true); } : null);
     return (close) => {
       const box = h("div", { class: "rb-gallery shapes" });
+      if (lockable) box.append(h("div", { class: "rb-gallery-hint" }, "右クリックで描画モードのロック（同じ図形を続けて描く・Escで終わる）"));
       const recent = recentShapes();
       if (recent.length) {
         box.append(h("div", { class: "rb-gallery-head" }, "最近使用した図形"));
         box.append(h("div", { class: "rb-gallery-grid rb-recent-shapes" }, recent.map((key) => h("button", {
-          type: "button", title: E.SHAPES[key].label, "aria-label": E.SHAPES[key].label, "data-shape": key, onclick: () => { close(); rememberShape(key); onPick({ kind: "shape", shape: key }); },
+          type: "button", title: E.SHAPES[key].label, "aria-label": E.SHAPES[key].label, "data-shape": key, onclick: () => pickShape(close, key), oncontextmenu: lockOn(close, (lock) => pickShape(close, key, lock)),
         }, shapeThumb(key)))));
       }
       if (lines) {
         box.append(h("div", { class: "rb-gallery-head" }, "線"));
         box.append(h("div", { class: "rb-gallery-grid" }, [["line", "直線"], ["arrow", "矢印"], ["double", "両方向矢印"], ["elbow", "カギ線コネクタ"], ["curve", "曲線コネクタ"]].map(([variant, label]) => h("button", {
-          type: "button", title: label, "aria-label": label, onclick: () => { close(); onPick({ kind: "line", variant }); },
+          type: "button", title: label, "aria-label": label, onclick: () => { close(); onPick({ kind: "line", variant }); }, oncontextmenu: lockOn(close, () => { close(); onPick({ kind: "line", variant, lock: true }); }),
         }, lineThumb(variant))), [["curve", "曲線"], ["polygon", "フリーフォーム: 図形"], ["scribble", "フリーフォーム: フリーハンド"]].map(([mode, label]) => h("button", {
           type: "button", title: label, "aria-label": label, "data-freeform": mode, onclick: () => { close(); onPick({ kind: "freeform", mode }); },
         }, freeformThumb(mode)))));
@@ -281,7 +287,7 @@ export function createEditorUi(editor, app) {
       for (const [name, keys] of E.SHAPE_GROUPS) {
         box.append(h("div", { class: "rb-gallery-head" }, name));
         box.append(h("div", { class: "rb-gallery-grid" }, keys.map((key) => h("button", {
-          type: "button", title: E.SHAPES[key].label, "aria-label": E.SHAPES[key].label, onclick: () => { close(); rememberShape(key); onPick({ kind: "shape", shape: key }); },
+          type: "button", title: E.SHAPES[key].label, "aria-label": E.SHAPES[key].label, "data-shape": key, onclick: () => pickShape(close, key), oncontextmenu: lockOn(close, (lock) => pickShape(close, key, lock)),
         }, shapeThumb(key)))));
       }
       return box;
@@ -410,6 +416,7 @@ export function createEditorUi(editor, app) {
   function pickTool(tool) {
     if (tool.kind === "freeform") { freeform.start(tool.mode); return; }
     editor.setTool(tool);
+    if (tool.lock) { app.toast("描画モードをロックしました。同じ図形を続けて描けます（Escで終わる）"); return; }
     app.toast(tool.kind === "line" ? "スライド上をドラッグして線を引いてください（Shiftで水平・垂直・45°）" : tool.kind === "text" ? "クリックまたはドラッグでテキストボックスを置き、そのまま入力できます" : "スライド上をドラッグして描いてください（クリックで標準の大きさ。Shiftで縦横同じ比率）");
   }
 
@@ -438,26 +445,49 @@ export function createEditorUi(editor, app) {
     openPop(document.querySelector('[data-rb="link"]') || ribbon, (close) => linkForm(o, close));
   }
 
+  // PowerPoint's 動作設定: マウスのクリック and マウスの通過, each a jump (or a link, for a click) and a sound. An HTML
+  // click (詳細を開く・裏返す…, set on the インタラクション tab) stays as it is unless another click is chosen.
   function linkForm(o, close = null) {
-    const current = o.action?.type || "none";
-    const kind = h("select", { "aria-label": "クリックしたときの動作" }, ACTIONS.map(([value, label]) => h("option", { value, selected: value === current || null }, label)));
-    const slides = h("select", { "aria-label": "移動先のスライド", hidden: current !== "slide" }, app.deck().slides.map((slide, i) => h("option", { value: String(i), selected: o.action?.type === "slide" && app.slideOfSid(o.action.to) === i ? true : null }, `${i + 1}. ${E.strip(slide.title || slide.message || E.TYPE_LABELS[slide.type] || "")}`.slice(0, 40))));
-    const url = h("input", { type: "url", placeholder: "https://… または mailto:…", value: o.action?.type === "url" ? o.action.href : "", hidden: current !== "url" });
+    const slideOptions = (a) => app.deck().slides.map((slide, i) => h("option", { value: String(i), selected: a?.type === "slide" && app.slideOfSid(a.to) === i ? true : null }, `${i + 1}. ${E.strip(slide.title || slide.message || E.TYPE_LABELS[slide.type] || "")}`.slice(0, 40)));
+    const soundSelect = (a, label) => h("select", { "aria-label": label, class: "rb-link-sound" }, h("option", { value: "" }, "サウンドなし"), Object.entries(E.TRANSITION_SOUNDS).map(([v, l]) => h("option", { value: v, selected: a?.sound === v || null }, `サウンド：${l}`)));
+    // One way of acting (click or mouse over): what it does, where to, and its sound.
+    function part(a, { label, choices, keep, keepNames = false }) {
+      const current = keep ? "keep" : a?.type === "sound" ? "none" : a?.type || "none";
+      const kind = h("select", { "aria-label": label }, keep ? h("option", { value: "keep", selected: true }, `${keep}（インタラクション）`) : null, choices.map(([value, text]) => h("option", { value, selected: value === current || null }, text)));
+      const slides = h("select", { "aria-label": keepNames ? "移動先のスライド" : `${label}：移動先のスライド`, hidden: current !== "slide" }, slideOptions(a));
+      const url = choices.some(([v]) => v === "url") ? h("input", { type: "url", placeholder: "https://… または mailto:…", value: a?.type === "url" ? a.href : "", hidden: current !== "url", "aria-label": `${label}：URL` }) : null;
+      const sound = soundSelect(a, `${label}：サウンド`);
+      const sync = () => { slides.hidden = kind.value !== "slide"; if (url) url.hidden = kind.value !== "url"; sound.disabled = kind.value === "keep"; };
+      kind.addEventListener("change", sync);
+      sync();
+      const read = () => {
+        const type = kind.value;
+        const extra = sound.value ? { sound: sound.value } : {};
+        if (type === "keep") return { value: o.action };
+        if (type === "none") return { value: sound.value ? { type: "sound", sound: sound.value } : undefined };
+        if (type === "slide") return { value: { type, to: app.ensureSid(Number(slides.value)), ...extra } };
+        if (type === "url") return /^(https?:\/\/|mailto:)/i.test(url.value.trim()) ? { value: { type, href: url.value.trim(), ...extra } } : { error: "URLは https:// か mailto: で始めてください" };
+        return { value: { type, ...extra } };
+      };
+      return { nodes: [kind, slides, url, sound], read };
+    }
+    const htmlClick = o.action && E.IX_CLICKS[o.action.type] ? E.IX_CLICKS[o.action.type] : null;
+    const click = part(o.action, { label: "クリックしたときの動作", choices: ACTIONS, keep: htmlClick, keepNames: true });
+    const over = part(o.overAction, { label: "マウスの通過時の動作", choices: ACTIONS.filter(([v]) => v !== "url") });
     // ヒント設定 (PowerPoint's ScreenTip): words shown when the pointer is on it in the show (the object's tip).
     const tip = h("input", { type: "text", class: "rb-link-tip", maxlength: 200, placeholder: "スクリーンヒント（マウスを乗せたときの説明・任意）", value: o.tip || "", "aria-label": "スクリーンヒント" });
-    kind.addEventListener("change", () => { slides.hidden = kind.value !== "slide"; url.hidden = kind.value !== "url"; });
     const save = () => {
-      const type = kind.value;
-      let action;
-      if (type === "none") action = undefined;
-      else if (type === "slide") action = { type, to: app.ensureSid(Number(slides.value)) };
-      else if (type === "url") { if (!/^(https?:\/\/|mailto:)/i.test(url.value.trim())) { app.toast("URLは https:// か mailto: で始めてください"); return; } action = { type, href: url.value.trim() }; }
-      else action = { type };
-      editor.apply({ action, tip: tip.value.trim() || undefined }, { ids: [o.id] });
+      const a = click.read();
+      const b = over.read();
+      const error = a.error || b.error;
+      if (error) { app.toast(error); return; }
+      editor.apply({ action: a.value, overAction: b.value, tip: tip.value.trim() || undefined }, { ids: [o.id] });
       close?.();
-      app.toast(action ? "クリックしたときの動作を設定しました（発表中とHTML出力で働きます）" : "動作を外しました");
+      app.toast(a.value || b.value ? "動作を設定しました（発表中とHTML出力で働きます）" : "動作を外しました");
     };
-    return h("div", { class: "rb-form" }, h("b", {}, "クリックしたときの動作（発表中）"), kind, slides, url, tip,
+    return h("div", { class: "rb-form rb-link-form" },
+      h("b", {}, "クリックしたときの動作（発表中）"), ...click.nodes,
+      h("b", {}, "マウスの通過時の動作（発表中）"), ...over.nodes, tip,
       h("div", { class: "rb-form-foot" }, h("button", { type: "button", class: "btn btn-primary btn-sm", onclick: save }, "設定する")));
   }
 
@@ -539,6 +569,12 @@ export function createEditorUi(editor, app) {
    * ファイル → オプション (PowerPoint's Options): the settings kept in this browser, in one place — the user name,
    * proofing (spelling, AutoCorrect), the ribbon and the Quick Access Toolbar, the slide show, PowerPoint import.
    */
+  /** Which defaults this deck has (右クリック →「既定の図形に設定」など). */
+  function defaultsSummary() {
+    const own = app.objectDefaults() || {};
+    const names = [own.shape && "図形", own.text && "テキスト ボックス", own.line && "線"].filter(Boolean);
+    return names.length ? `${names.join("・")}の既定の書式が設定されています（図形を右クリック →「既定の図形に設定」など）。` : "図形・テキスト ボックス・線は標準の書式で描かれます。図形を右クリック →「既定の図形に設定」で変えられます。";
+  }
   function optionsDialog() {
     const check = (key, label, on, set, hint = "") => h("label", { class: "sh-choice" }, h("input", { type: "checkbox", "data-opt": key, checked: on || null, onchange: (event) => set(event.target.checked) }), h("span", {}, label), hint ? h("small", {}, hint) : null);
     const section = (title, ...rows) => h("fieldset", { class: "opt-sec" }, h("legend", {}, title), ...rows);
@@ -561,7 +597,11 @@ export function createEditorUi(editor, app) {
           check("presenter", "発表者ビューを使う（別のウィンドウに次のスライド・ノート・時間）", app.presenterView(), (on) => app.setPresenterView(on))),
         section("取り込み",
           check("autoHtml", "PowerPointを見た目どおりに取り込むと、HTMLの動き（おまかせ）を自動で付ける", app.autoHtml(), (on) => app.setAutoHtml(on))),
-        h("p", { class: "hint" }, "設定はこのブラウザに保存されます。")),
+        h("p", { class: "hint" }, "ここまでの設定はこのブラウザに保存されます。"),
+        // 既定の図形 (kept on this deck): what is set, and a way back to the studio's own.
+        section("この資料の既定の書式",
+          h("p", { class: "opt-defaults" }, defaultsSummary()),
+          h("div", {}, h("button", { type: "button", class: "btn btn-sm opt-defaults-reset", disabled: !app.objectDefaults() || null, onclick: (event) => { app.clearObjectDefaults(); event.currentTarget.disabled = true; event.currentTarget.closest(".opt-sec").querySelector(".opt-defaults").textContent = defaultsSummary(); } }, "既定の図形・テキスト ボックス・線を元に戻す")))),
       h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-primary", onclick: () => dialog.close() }, "閉じる")));
     document.body.append(dialog);
     dialog.addEventListener("close", () => dialog.remove());
@@ -843,6 +883,7 @@ export function createEditorUi(editor, app) {
           { label: "元の書式を保持", icon: "paste", keys: "⌘V", run: () => editor.pasteFromMemory("keep") },
           { label: "貼り付け先のスタイルを使用（SEJの色に合わせる）", icon: "fill", run: () => editor.pasteFromMemory("theme") },
           { label: "テキストのみ保持", icon: "textbox", keys: "⇧⌘V", run: () => editor.pasteFromMemory("text") },
+          { label: "図（1枚の画像として貼り付け）", icon: "image", run: () => editor.pasteFromMemory("picture") },
         ]), { big: true }),
         col(btn("cut", "切り取り", "切り取り（⌘X）", () => { document.execCommand("cut") || cutFallback(); }, { enabled: any }),
           btn("copy", "コピー", "コピー（⌘C）", () => { document.execCommand("copy") || copyFallback(); }, { enabled: any }),
@@ -1679,7 +1720,7 @@ export function createEditorUi(editor, app) {
         tool("flipH", "左右反転", () => editor.flipSelection("x")), tool("flipV", "上下反転", () => editor.flipSelection("y")),
         tool(chosen.some((x) => x.locked) ? "unlock" : "lock", chosen.some((x) => x.locked) ? "ロックを解除" : "ロック", () => editor.setLocked(!chosen.some((x) => x.locked))),
         tool("duplicate", "複製（⌘D）", () => editor.duplicateSelection()), tool("trash", "削除", () => editor.removeSelection()))));
-    if (single) out.push(section("action", "リンク・動作（発表中にクリック）", Boolean(chosen[0].action), linkForm(chosen[0])));
+    if (single) out.push(section("action", "リンク・動作（発表中のクリック・マウスの通過）", Boolean(chosen[0].action || chosen[0].overAction), linkForm(chosen[0])));
     return out;
   }
 
