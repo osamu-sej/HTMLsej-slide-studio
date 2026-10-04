@@ -251,6 +251,23 @@ await step("挿入 → 画面録画: record the screen, insert it as a video", a
   assert(!(await (await ribbonField("再生中のアイコンを隠す")).locator("input").isEnabled()), "the icon setting is for sounds");
 });
 
+await step("再生 → 表紙画像: a frame of the video becomes its poster (shown before it plays); リセット takes it away", async () => {
+  await tab("再生");
+  await ribbonBtn("表紙画像");
+  await page.locator('.rb-pop button:has-text("ビデオの1コマから")').first().click();
+  await page.waitForSelector(".poster-dialog[open]");
+  await page.waitForFunction(() => document.querySelector(".poster-dialog video")?.readyState >= 2, null, { timeout: 15000 });
+  await page.click(".poster-dialog .poster-take");
+  await page.waitForTimeout(300);
+  const o = (await deck()).slides[4].elements.find((x) => x.kind === "video");
+  assert(/^data:image\/jpeg;base64,/.test(o.poster || ""), `the poster: ${String(o.poster).slice(0, 40)}`);
+  assert(await page.locator(`#stageBody .hs-obj[data-el="${o.id}"] video[poster^="data:image/jpeg"]`).count(), "the video shows it");
+  await ribbonBtn("表紙画像");
+  await page.locator('.rb-pop button:has-text("リセット")').first().click();
+  await page.waitForTimeout(300);
+  assert(!(await deck()).slides[4].elements.find((x) => x.kind === "video").poster, "reset");
+});
+
 await step("HTML出力: the sound travels inside the file, with its settings", async () => {
   const [download] = await Promise.all([page.waitForEvent("download"), page.click("#downloadBtn").then(async () => { await page.waitForTimeout(300); if (await page.isVisible("#exportCheckDialog[open]")) await page.click("#exportCheckGoBtn"); })]);
   const file = join(outDir, "media-export.html");

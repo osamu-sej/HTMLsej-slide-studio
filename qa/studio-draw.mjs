@@ -38,8 +38,14 @@ const selection = () => page.evaluate(() => window.__hsej.selection());
 const index = () => page.evaluate(() => window.__hsej.deck().slides.indexOf(window.__hsej.slide()));
 let box = null;
 const measure = async () => {
-  await page.locator("#stageBody .slide-wrap .hs-slide").first().waitFor({ state: "visible", timeout: 5000 });
-  box = await page.locator("#stageBody .slide-wrap .hs-slide").first().boundingBox();
+  // The stage is drawn again a few times just after a change: a slide replaced while it was being measured has no box,
+  // so it is measured again.
+  box = null;
+  for (let t = 0; t < 20 && !box; t += 1) {
+    if (t) await page.waitForTimeout(100);
+    await page.locator("#stageBody .slide-wrap .hs-slide").first().waitFor({ state: "visible", timeout: 5000 });
+    box = await page.locator("#stageBody .slide-wrap .hs-slide").first().boundingBox();
+  }
   if (!box) throw new Error(`no slide on the stage (${await page.locator("#stageBody .slide-wrap .hs-slide").count()} found, view ${await page.evaluate(() => document.querySelector("#stageBody")?.className)})`);
 };
 const at = (x, y) => [box.x + (x * box.width) / 1920, box.y + (y * box.height) / 1080];

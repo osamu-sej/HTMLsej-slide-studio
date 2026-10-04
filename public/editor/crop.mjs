@@ -6,6 +6,37 @@ import { ico } from "./icons.mjs";
 
 const MARKS = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
+// トリミング ▾ (PowerPoint's): 縦横比 crops to a shape of picture, 塗りつぶし fills the frame (cropping what is over),
+// 枠に合わせる shows the whole picture inside the frame. `aspect` is the picture's own width / height.
+const fullOf = (o) => { const c = o.crop || { l: 0, t: 0, r: 0, b: 0 }; return { fw: o.w / (1 - c.l - c.r), fh: o.h / (1 - c.t - c.b) }; };
+const round4 = (v) => Math.round(v * 10000) / 10000;
+const tidy = (c) => (c.l || c.t || c.r || c.b ? { l: round4(c.l), t: round4(c.t), r: round4(c.r), b: round4(c.b) } : undefined);
+
+/** 縦横比: the largest middle part of the picture of that shape; the frame takes its size (the picture's scale kept). */
+export function cropToAspect(o, ratio, aspect = null) {
+  const { fw } = fullOf(o);
+  const a = aspect || fw / fullOf(o).fh;
+  const fh = fw / a;
+  const [rw, rh] = a > ratio ? [fh * ratio, fh] : [fw, fw / ratio];
+  const cx = o.x + o.w / 2;
+  const cy = o.y + o.h / 2;
+  const crop = tidy({ l: (fw - rw) / 2 / fw, r: (fw - rw) / 2 / fw, t: (fh - rh) / 2 / fh, b: (fh - rh) / 2 / fh });
+  return { x: cx - rw / 2, y: cy - rh / 2, w: rw, h: rh, crop };
+}
+/** 塗りつぶし: the frame stays; the picture fills it, its overhang cropped evenly. */
+export function cropFill(o, aspect) {
+  const frame = o.w / o.h;
+  if (aspect > frame) { const keep = frame / aspect; return { crop: tidy({ l: (1 - keep) / 2, r: (1 - keep) / 2, t: 0, b: 0 }) }; }
+  const keep = aspect / frame;
+  return { crop: tidy({ l: 0, r: 0, t: (1 - keep) / 2, b: (1 - keep) / 2 }) };
+}
+/** 枠に合わせる: the whole picture, as large as fits in the frame (its middle where the frame's was). */
+export function cropFit(o, aspect) {
+  const frame = o.w / o.h;
+  const [w, h] = aspect > frame ? [o.w, o.w / aspect] : [o.h * aspect, o.h];
+  return { x: o.x + (o.w - w) / 2, y: o.y + (o.h - h) / 2, w, h, crop: undefined };
+}
+
 export function createCrop(editor, app) {
   const { E, h } = app;
   let crop = null;

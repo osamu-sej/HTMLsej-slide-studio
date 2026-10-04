@@ -230,6 +230,54 @@ export function createMedia(editor, app, kit) {
 
   // ---------------------------------------------------------------- トリミング
 
+  /** 表紙画像 → ビデオの1コマから: a small player to find the moment, and that frame becomes the poster. */
+  function posterFromFrame() {
+    const o = current();
+    if (o?.kind !== "video") return;
+    const url = urlOf(o);
+    if (!url) { app.toast("このブラウザにビデオのデータがありません"); return; }
+    const el = h("video", { src: url, preload: "auto", class: "trim-media", controls: true, playsinline: true, muted: true });
+    const take = () => {
+      if (!el.videoWidth) { app.toast("ビデオを読み込んでから選んでください"); return; }
+      const k = Math.min(1, 1280 / el.videoWidth);
+      const c = document.createElement("canvas");
+      c.width = Math.round(el.videoWidth * k);
+      c.height = Math.round(el.videoHeight * k);
+      try {
+        c.getContext("2d").drawImage(el, 0, 0, c.width, c.height);
+        const poster = c.toDataURL("image/jpeg", 0.86);
+        setMedia((x) => (x.kind === "video" ? { poster } : null));
+        dialog.close();
+        app.toast("表紙画像にしました（⌘Zで戻せます）");
+      } catch { app.toast("このビデオの画面は画像にできません"); }
+    };
+    const dialog = h("dialog", { class: "poster-dialog", "aria-label": "表紙画像" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "表紙画像：ビデオの1コマから"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body" }, el, h("p", { class: "hint" }, "再生・シークで表紙にしたい場面にして「この場面を表紙画像にする」を押してください。")),
+      h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"),
+        h("button", { type: "button", class: "btn btn-primary poster-take", onclick: take }, "この場面を表紙画像にする")));
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => { el.pause(); dialog.remove(); });
+    dialog.showModal();
+  }
+  /** 表紙画像 → ファイルから画像 (made no larger than 1280 px across). */
+  async function posterFromFile() {
+    const [file] = await app.pickFiles("image/*", false);
+    if (!file) return;
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+    try { await img.decode(); } catch { app.toast("画像を読めませんでした"); return; }
+    const k = Math.min(1, 1280 / img.naturalWidth);
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * k);
+    c.height = Math.round(img.naturalHeight * k);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(img.src);
+    const poster = c.toDataURL("image/jpeg", 0.86);
+    setMedia((x) => (x.kind === "video" ? { poster } : null));
+    app.toast("表紙画像にしました（⌘Zで戻せます）");
+  }
+
   function trimDialog() {
     const o = current();
     if (!o) return;
@@ -357,6 +405,12 @@ export function createMedia(editor, app, kit) {
           videoCheck("全画面再生", "再生を始めると全画面に広げる", "fullscreen"),
           videoCheck("再生中のみ表示", "再生していないときは見せない", "hideIdle"),
           check("再生が終了したら巻き戻す", "再生し終わったら最初の位置に戻す", () => (current() ? Boolean(current().rewind) : null), (on) => setMedia({ rewind: on || undefined })))),
+      group("表紙画像",
+        drop("image", "表紙画像", "再生する前に見せる画像（ビデオの1コマ・画像ファイル）", () => menu([
+          { label: "ビデオの1コマから…", icon: "video", run: () => posterFromFrame() },
+          { label: "ファイルから画像…", icon: "image", run: () => posterFromFile() },
+          { label: "リセット（表紙画像なし）", icon: "reset", disabled: !current()?.poster, run: () => setMedia((o) => (o.kind === "video" ? { poster: undefined } : null)) },
+        ]), { big: true, enabled: () => current()?.kind === "video" && !E.youtubeId(current().src) })),
       group("キャプション",
         btn("caption", "キャプション|の挿入", "ビデオに字幕ファイル（WebVTT .vtt・SubRip .srt）を付ける：発表で動画の下に字幕が出ます", () => insertCaptions(), { big: true, enabled: () => Boolean(current()) && !isAudio() }),
         btn("trash", "キャプション|の削除", "このビデオの字幕を外す", () => setMedia((o) => (o.kind === "video" ? { captions: undefined, captionLang: undefined } : null)), { big: true, enabled: () => Boolean(current()?.captions) })),

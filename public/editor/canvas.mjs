@@ -1275,7 +1275,7 @@ export function createCanvas(app) {
       else if (kind === "unlink") document.execCommand("unlink");
       else if (kind === "align") document.execCommand({ left: "justifyLeft", center: "justifyCenter", right: "justifyRight", justify: "justifyFull" }[value]);
       else if (kind === "size" || kind === "grow" || kind === "shrink") sizeSelectedWords(kind, value);
-      else if (["valign", "lh", "vertical", "font", "autofit", "pad", "wrap", "psp", "ls"].includes(kind)) { stopTyping(true); applyText(kind, value); return; }
+      else if (["valign", "lh", "vertical", "direction", "font", "autofit", "pad", "wrap", "psp", "ls", "listStyle"].includes(kind)) { stopTyping(true); applyText(kind, value); return; }
       growWhileTyping();
       emit();
       return;
@@ -1344,10 +1344,14 @@ export function createCanvas(app) {
         case "align": return { align: value, text: ops.clearInline(E, text, "align") || undefined };
         case "valign": return { valign: value };
         case "bullet": case "number": { const type = kind === "bullet" ? "bullet" : "number"; return { text: ops.setList(E, text, ops.listOf(text) === type ? null : type) }; }
+        // 箇条書き・段落番号の種類: the list with that marker (the text made a list of that kind if it was not).
+        case "listStyle": { const [type, style] = value; return { text: ops.setList(E, text, type, style) }; }
         case "lh": return { lh: Number(value) };
         case "psp": return { psp: Number(value) || undefined };
         case "ls": return { ls: Number(value) || undefined };
         case "vertical": return { vertical: !o.vertical || undefined };
+        // 文字列の方向: "h" 横書き, "v" 縦書き, 90 / 270 the letters turned on their sides.
+        case "direction": return value === "v" ? { vertical: true, textRot: undefined } : value === 90 || value === 270 ? { vertical: undefined, textRot: value } : { vertical: undefined, textRot: undefined };
         case "font": return { font: value === "body" ? undefined : value };
         case "autofit": return { autofit: value };
         case "wrap": return { wrap: value ? undefined : false };
@@ -1381,7 +1385,7 @@ export function createCanvas(app) {
     const chosen = selected(list).filter((o) => ["shape", "text"].includes(o.kind) || (o.kind === "table" && ed.typing?.cell)).map((o) => E.withDefaults(o));
     if (!chosen.length) return null;
     const o = chosen[0];
-    const out = { fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, list: ops.listOf(o.text), pad: o.pad, wrap: o.wrap !== false };
+    const out = { fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, textRot: o.textRot || null, list: ops.listOf(o.text), listStyle: ops.listStyleOf(o.text), pad: o.pad, wrap: o.wrap !== false };
     if (ed.typing) {
       try {
         out.bold = document.queryCommandState("bold");

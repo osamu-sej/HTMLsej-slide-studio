@@ -17,7 +17,7 @@ import { createShowTools, customShowsOf, keptInk, playerOptions, showOf, showSli
 import { createA11y } from "./editor/a11y.mjs?v=__APP_VERSION__";
 import { createPrinter } from "./editor/print.mjs?v=__APP_VERSION__";
 import { createProofing } from "./editor/proof.mjs?v=__APP_VERSION__";
-import { createFileInfo, infoOf, strip as stripDeckData } from "./editor/fileinfo.mjs?v=__APP_VERSION__";
+import { createFileInfo, infoOf, isFinal, FINAL_STATUS, strip as stripDeckData } from "./editor/fileinfo.mjs?v=__APP_VERSION__";
 import { createSlideTools } from "./editor/slidetools.mjs?v=__APP_VERSION__";
 import { createVideoExport } from "./editor/video.mjs?v=__APP_VERSION__";
 import { createCompare } from "./editor/compare.mjs?v=__APP_VERSION__";
@@ -2056,7 +2056,11 @@ function renderStage() {
   const drillCount = Object.keys(story.parent).length;
   const hiddenCount = deck.slides.filter((slide) => slide.hidden).length;
   $("deckMeta").textContent = [deck.audience && `対象：${deck.audience}`, `${story.order.length}枚${drillCount ? `＋深掘り${drillCount}枚` : ""}${hiddenCount ? `＋非表示${hiddenCount}枚` : ""}`, `${types}種類のレイアウト`, videos ? `動画${videos}本` : "", lotties ? `アニメーション${lotties}個` : "", details ? `詳細${details}か所` : ""].filter(Boolean).join(" ・ ");
-  shell.renderMessage(importCallout());
+  // 最終版: the slide and the panes take no edits; the message bar says so and offers 編集する.
+  const final = isFinal(state.deck) && state.mode === "edit";
+  document.body.classList.toggle("is-final", final);
+  for (const id of ["notesInput", "deckTitleInput", "chatInput", "memoInput"]) { const el = $(id); if (el) el.readOnly = final; }
+  shell.renderMessage(finalCallout() || importCallout());
   shell.renderStatus();
   if (state.view === "outline") return renderOutline(body);
   if (state.view === "grid") {
@@ -2302,6 +2306,8 @@ const editorApp = {
   deck: () => state.deck,
   slide: () => (state.deck ? state.deck.slides[state.selected] ?? null : null),
   index: () => state.selected,
+  isFinal: () => isFinal(state.deck),
+  setFinal: (on) => setFinal(on),
   undo: () => undoRedo("undo"),
   redo: () => undoRedo("redo"),
   canUndo: () => state.undo.length > 0,
@@ -4849,6 +4855,7 @@ function pushChat(message) {
 async function sendChat(raw) {
   const text = String(raw ?? $("chatInput").value).trim();
   if (!text || state.chat.busy || !state.deck) return;
+  if (isFinal(state.deck)) { toast("最終版です。編集するにはメッセージ バーの「編集する」を押してください"); return; }
   if (state.panel !== "chat") setPanel("chat");
   if (raw == null) $("chatInput").value = "";
   const imageRequest = IMAGE_REQUEST.test(text);
@@ -6137,6 +6144,24 @@ async function importExistingDeck(file, mode = null) {
   }
 }
 
+/** 最終版にする / 編集する: the document's 状態 set to 最終版 (or no longer). */
+function setFinal(on) {
+  if (!state.deck) return;
+  const info = { ...(infoOf(state.deck.info) || {}) };
+  if (on) info.status = FINAL_STATUS; else delete info.status;
+  editor.select([]);
+  setDeckFields({ info: infoOf(info) });
+  toast(on ? "最終版にしました（メッセージ バーの「編集する」で編集できます）" : "編集できるようにしました");
+  renderStage();
+  editorUi.renderRibbon(true);
+}
+function finalCallout() {
+  if (!isFinal(state.deck) || state.mode !== "edit") return null;
+  return h("div", { class: "callout callout-final" },
+    h("div", { class: "text" }, h("b", {}, "最終版"), "作成者がこの資料を最終版として設定し、編集しないようにしています。"),
+    h("button", { class: "btn btn-final-edit", type: "button", onclick: () => setFinal(false) }, "編集する"));
+}
+
 function importCallout() {
   if (!state.imported) return null;
   const canAi = state.codexAuthorized;
@@ -6511,6 +6536,29 @@ function bind() {
   }, true);
   // The thumbnails keep the keys (Delete, ⌘C…) only while they have the focus: a click anywhere else takes it.
   document.addEventListener("pointerdown", (event) => { if (document.activeElement === $("filmstrip") && !event.target.closest?.("#filmstrip")) $("filmstrip").blur(); }, true);
+  // 最終版: no keys that edit (moving between slides, the show, find, print, save and the like still work).
+  // The places that edit the deck: their fields take no typing (other fields — search, dialogs — still do).
+  const FINAL_LOCKED = "#stageBody, #inspector, #formatPane, #animPane, #commentPane, #a11yPane, #notesPane, #chatForm, #memoBox, #deckTitleInput";
+  const FINAL_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End", "Escape", "Tab", "F5", "F1", "Shift", "Control", "Meta", "Alt", "?"]);
+  const finalNow = () => !state.player && state.mode === "edit" && isFinal(state.deck);
+  document.addEventListener("keydown", (event) => {
+    if (!finalNow()) return;
+    const locked = event.target?.closest?.(FINAL_LOCKED);
+    if (!locked && (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName) || event.target?.isContentEditable || document.querySelector("dialog[open]"))) return;
+    const meta = event.metaKey || event.ctrlKey;
+    const k = event.key.toLowerCase();
+    if (FINAL_KEYS.has(event.key) || (meta && ["c", "a", "f", "p", "s", "0", "=", "+", "-", "f1"].includes(k)) || (event.altKey && event.code === "KeyQ")) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    toast("最終版です。編集するにはメッセージ バーの「編集する」を押してください");
+  }, true);
+  for (const type of ["dragstart", "contextmenu", "paste", "drop", "cut"]) {
+    document.addEventListener(type, (event) => {
+      if (!finalNow() || (!event.target?.closest?.(FINAL_LOCKED) && event.target?.closest?.("dialog, input, textarea, .rb-pop, .rb-search"))) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+  }
   document.addEventListener("keydown", (event) => {
     if (state.player) return; // the player has its own keys
     if (state.motionPreview?.brief && !["Shift", "Control", "Meta", "Alt"].includes(event.key)) stopMotionPreview();

@@ -238,6 +238,82 @@ await step("アート効果「線画」: the square's edge drawn dark on white (
   assert(toned[2] >= toned[1] && toned[1] >= toned[0] && toned[2] < 160, `navy tone: ${toned}`);
 });
 
+/** A ribbon button found by the start of its tooltip (the ▾ halves of split buttons have no words), folded groups too. */
+const byTitle = async (start) => {
+  const sel = `.rb-btn:not(.rb-folded)[title^="${start}"]`;
+  const direct = page.locator(`.rb-body ${sel}`).first();
+  if ((await direct.count()) && (await direct.isVisible())) return direct.click();
+  for (const folded of await page.locator(".rb-body .rb-folded").all()) {
+    await folded.click();
+    const inside = page.locator(`.rb-pop .rb-fold ${sel}`).first();
+    if (await inside.count()) return inside.click();
+    await page.keyboard.press("Escape");
+  }
+  throw new Error(`no ribbon button titled "${start}…"`);
+};
+
+await step("箇条書き ▾ ◆ and 段落番号 ▾ ①; 文字列の方向 270 度; リンクのスクリーンヒント", async () => {
+  await tab("挿入");
+  await ribbonBtn("テキスト ボックス");
+  await menuItem("横書きテキスト ボックス");
+  const r = await page.locator(".slide-wrap .hs-slide").first().boundingBox();
+  await page.mouse.click(r.x + r.width * 0.2, r.y + r.height * 0.75);
+  await page.waitForTimeout(200);
+  await page.keyboard.type("一行目");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("二行目");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  const id = (await slide()).elements.at(-1).id;
+  const text = async () => (await slide()).elements.find((o) => o.id === id).text;
+  await tab("ホーム");
+  await byTitle("箇条書きの種類");
+  await page.click('.rb-pop .rb-list-sw[data-list-style="diamond"]');
+  await page.waitForTimeout(200);
+  assert((await text()).startsWith('<ul data-style="diamond">'), `bullets: ${await text()}`);
+  const marker = await page.evaluate((id) => getComputedStyle(document.querySelector(`#stageBody .hs-obj[data-el="${id}"] ul`)).listStyleType, id);
+  assert(marker.includes("◆"), `drawn with ◆: ${marker}`);
+  await byTitle("段落番号の種類");
+  await page.click('.rb-pop .rb-list-sw[data-list-style="circled"]');
+  await page.waitForTimeout(200);
+  assert((await text()).startsWith('<ol data-style="circled">'), `numbers: ${await text()}`);
+  await byTitle("文字列の方向");
+  await menuItem("270 度");
+  await page.waitForTimeout(200);
+  assert((await slide()).elements.find((o) => o.id === id).textRot === 270, "turned 270°");
+  assert(await page.locator(`#stageBody .hs-obj[data-el="${id}"] .hs-obj-text.is-rot270`).count(), "drawn turned");
+  await shot("bullets-direction");
+  await byTitle("文字列の方向");
+  await menuItem("横書き");
+  await page.waitForTimeout(200);
+  assert(!(await slide()).elements.find((o) => o.id === id).textRot, "横書き again");
+  // ヒント設定: the words shown when the pointer is on it (with a click that moves on).
+  await tab("挿入");
+  await ribbonBtn("リンク");
+  await page.waitForSelector(".rb-pop .rb-form");
+  await page.selectOption('.rb-pop .rb-form select[aria-label="クリックしたときの動作"]', "next");
+  await page.fill(".rb-pop .rb-link-tip", "次のページへ進みます");
+  await page.click('.rb-pop .rb-form button:has-text("設定する")');
+  await page.waitForTimeout(200);
+  const o = (await slide()).elements.find((x) => x.id === id);
+  assert(o.action?.type === "next" && o.tip === "次のページへ進みます", `the link and its ScreenTip: ${JSON.stringify({ action: o.action, tip: o.tip })}`);
+});
+
+await step("トリミング ▾: 縦横比 16:9 crops the middle of a 4:3 picture; 枠に合わせる shows it whole again", async () => {
+  const pic = await insertPicture(logo);
+  await tab("図の形式");
+  await byTitle("トリミングのオプション");
+  await menuItem("16:9");
+  await page.waitForTimeout(300);
+  let o = (await slide()).elements.find((x) => x.id === pic.id);
+  assert(Math.abs(o.w / o.h - 16 / 9) < 0.02 && o.crop && o.crop.t > 0.1 && !o.crop.l, `16:9: ${o.w}×${o.h} ${JSON.stringify(o.crop)}`);
+  await byTitle("トリミングのオプション");
+  await menuItem("枠に合わせる");
+  await page.waitForTimeout(300);
+  o = (await slide()).elements.find((x) => x.id === pic.id);
+  assert(!o.crop && Math.abs(o.w / o.h - 4 / 3) < 0.02, `fit: ${o.w}×${o.h} ${JSON.stringify(o.crop)}`);
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {
