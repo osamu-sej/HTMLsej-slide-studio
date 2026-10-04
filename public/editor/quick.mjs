@@ -254,5 +254,5 @@ export function createQuick(kit) {
     filter.focus();
   }
 
-  return { searchBox, focusSearch, toolbar, where, optionItems, contextMenu, customize, remember, get state() { return qat; } };
+  return { searchBox, focusSearch, toolbar, where, optionItems, contextMenu, customize, remember, setPlace: (patch) => set(patch), get state() { return qat; } };
 }

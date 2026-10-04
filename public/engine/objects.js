@@ -1840,6 +1840,8 @@
     if (!labels.length || !series.length) return null;
     const out = { type: CHART_KINDS[raw.type] ? raw.type : "bar", labels, series };
     for (const key of ["title", "unit"]) if (typeof raw[key] === "string" && raw[key].trim()) out[key] = raw[key].trim().slice(0, key === "unit" ? 10 : 80);
+    // 色の変更: one of the SEJ's colour sets (the mixed one is the theme's own).
+    if (CHART_COLORS[raw.colors]) out.colors = raw.colors;
     // グラフ要素を追加: data labels off, the legend's place (or none), gridlines off.
     const opts = {};
     if (raw.opts?.labels === false) opts.labels = false;
@@ -2681,6 +2683,15 @@
     rotEl.append(h("div", { class: "hs-obj-tablebox" }, table));
   }
 
+  /**
+   * グラフのデザイン → 色の変更: the series and stack colours of a chart, all from the SEJ's palette (青・グレー・茶 for
+   * one family of tones; the theme's own mixes them). Light fills carry the values' words (never navy under text).
+   */
+  const CHART_COLORS = {
+    blue: { label: "青", vars: { "--c1": "#1f3864", "--c2": "#b7c3da", "--c3": "#dce4f2", "--c4": "#808080", "--c5": "#f1f5fb", "--c6": "#d9d9d9", "--k1": "#b7c3da", "--k2": "#dce4f2", "--k3": "#f1f5fb", "--k4": "#d9d9d9", "--k5": "#f2f2f2", "--k6": "#808080", "--accent": "#1f3864", "--c-muted": "#dce4f2" } },
+    gray: { label: "グレー", vars: { "--c1": "#808080", "--c2": "#d9d9d9", "--c3": "#f2f2f2", "--c4": "#b7c3da", "--c5": "#1f3864", "--c6": "#d6c9b8", "--k1": "#d9d9d9", "--k2": "#f2f2f2", "--k3": "#808080", "--k4": "#b7c3da", "--k5": "#dce4f2", "--k6": "#d6c9b8", "--accent": "#808080", "--c-muted": "#d9d9d9" } },
+    brown: { label: "茶", vars: { "--c1": "#d6c9b8", "--c2": "#f5f0ea", "--c3": "#808080", "--c4": "#d9d9d9", "--c5": "#b7c3da", "--c6": "#dce4f2", "--k1": "#d6c9b8", "--k2": "#f5f0ea", "--k3": "#d9d9d9", "--k4": "#f2f2f2", "--k5": "#b7c3da", "--k6": "#dce4f2", "--accent": "#d6c9b8", "--c-muted": "#f5f0ea" } },
+  };
   /** A chart drawn by the engine's own charts (the same look as the layouts' charts), with an optional title. */
   // Kinds only the studio's own charts draw: an imported chart turned into one of them keeps its colours' order only.
   const STUDIO_ONLY_CHARTS = new Set(["hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst"]);
@@ -2689,7 +2700,8 @@
       rotEl.append(h("div", { class: "hs-obj-chart is-office" }, officeChart(o.chart, o.w, o.h)));
       return;
     }
-    const box = h("div", { class: "hs-obj-chart" });
+    const box = h("div", { class: "hs-obj-chart", "data-colors": o.chart.colors || null });
+    for (const [name, value] of Object.entries(CHART_COLORS[o.chart.colors]?.vars || {})) box.style.setProperty(name, value);
     if (o.chart.title) box.append(h("div", { class: "hs-obj-chart-title" }, o.chart.title));
     const titleH = o.chart.title ? 52 : 0;
     box.append(E.chart(chartSpec(o.chart), { w: Math.max(240, Math.round(o.w)), h: Math.max(140, Math.round(o.h - titleH)), key: `obj:${o.id}` }));
@@ -3519,7 +3531,7 @@
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
-    LIST_MARKS, LIST_MARK_SIZES, U_LINES, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
+    LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, mediaPlay, mediaPause, mediaToggle, mediaSpan,

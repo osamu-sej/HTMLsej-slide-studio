@@ -201,3 +201,15 @@ test("下線の種類・二重取り消し線: kept on the words and on the box,
   const s2 = { type: "blank", elements: [thick] };
   assert.match(E.render(s2, { mode: "present", index: 0, deck: { slides: [s2], theme: "sej" } }).querySelector(".hs-obj-tx").getAttribute("style"), /text-decoration-thickness/);
 });
+
+test("セルのサイズ: rows (or columns) set in pixels, the table growing by the difference, the others kept", () => {
+  const t = { kind: "table", x: 0, y: 0, w: 600, h: 300, rows: [0.5, 0.25, 0.25], cols: [0.5, 0.5], cells: [[{}, {}], [{}, {}], [{}, {}]] };
+  const taller = ops.tableSetSize(t, "rows", 1, 1, 150);
+  assert.equal(taller.h, 375);
+  const heights = taller.rows.map((f) => Math.round(f * taller.h));
+  assert.deepEqual(heights, [150, 150, 75]);
+  const narrow = ops.tableSetSize(t, "cols", 0, 1, 200);
+  assert.equal(narrow.w, 400);
+  assert.deepEqual(narrow.cols, [0.5, 0.5]);
+  assert.equal(ops.tableSetSize(t, "rows", 0, 0, 2).rows.length, 3, "never below the smallest size");
+});

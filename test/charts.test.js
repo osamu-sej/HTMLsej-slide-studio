@@ -212,3 +212,20 @@ test("軸の書式: the value axis's own minimum and maximum; values beyond it s
   const heights = [...bars.querySelectorAll("text.hs-val")].map((t) => y0 - Number(t.getAttribute("y")) - 16);
   assert.ok(heights.length === 3 && heights[1] / heights[2] > 0.79 && heights[1] / heights[2] < 0.81 && heights[0] / heights[2] > 0.59 && heights[0] / heights[2] < 0.61, `bars on a 0–100 axis (140 stops at the top): ${heights}`);
 });
+
+test("色の変更: a chart takes one of the SEJ's colour sets (all its colours from the palette)", async () => {
+  const E = await loadEngine();
+  const data = { labels: ["A", "B"], series: [{ name: "一", values: [1, 2] }, { name: "二", values: [2, 1] }] };
+  const { o, el } = draw(E, { type: "clustered-bar", ...data, colors: "brown" });
+  assert.equal(o.chart.colors, "brown");
+  const box = el.querySelector(".hs-obj-rot > .hs-obj-chart");
+  assert.equal(box.getAttribute("data-colors"), "brown");
+  assert.match(box.getAttribute("style") || "", /--c1: ?#d6c9b8/);
+  assert.equal(draw(E, { type: "bar", ...data, colors: "rainbow" }).o.chart.colors, undefined, "only the sets offered");
+  const fills = new Set(E.PALETTE.fill.map(([c]) => c));
+  for (const [key, def] of Object.entries(E.CHART_COLORS)) {
+    for (const [name, value] of Object.entries(def.vars)) assert.ok(fills.has(value), `${key} ${name} ${value} is an SEJ fill colour`);
+    // Stacked parts carry their values' words: never navy under them.
+    for (const k of ["--k1", "--k2", "--k3", "--k4", "--k5", "--k6"]) assert.notEqual(def.vars[k], "#1f3864", `${key} ${k}`);
+  }
+});
