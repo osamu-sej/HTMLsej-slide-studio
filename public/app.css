@@ -1387,6 +1387,15 @@ body.is-final .film-item { -webkit-user-drag: none; }
 .bm-row { display: flex; align-items: center; gap: 8px; }
 .bm-go { min-width: 84px; font-variant-numeric: tabular-nums; }
 .bm-name { flex: 1; min-width: 0; }
+/* フォント・段落・グリッドとガイド (dialogs). */
+.fmt-dialog { width: min(560px, calc(100vw - 32px)); }
+.fmt-body { display: flex; flex-direction: column; gap: 10px; }
+.fmt-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fmt-cols > fieldset:first-child, .fmt-cols > .hint { grid-column: 1 / -1; }
+.fmt-field { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.fmt-field > span:first-child { min-width: 9em; color: var(--muted); font-size: 12px; }
+.fmt-num { width: 90px; }
+.fmt-colors { display: inline-flex; gap: 6px; }
 /* クイック レイアウト (グラフのデザイン): a small picture of each layout's elements. */
 .tb-layout-row { display: inline-flex; align-items: center; gap: 10px; }
 .tb-layout-row small { display: block; color: var(--muted); font-size: 11px; }

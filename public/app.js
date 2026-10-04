@@ -6662,6 +6662,8 @@ function bind() {
     if (state.mode === "edit" && state.deck && !document.querySelector("dialog[open]")) {
       if (meta && event.key === "F1") { event.preventDefault(); editorUi.toggleRibbon(); return; }
       if (meta && !event.shiftKey && ["f", "h"].includes(event.key.toLowerCase()) && !document.activeElement?.isContentEditable) { event.preventDefault(); openReplace(); return; }
+      // フォント (⇧⌘F, as PowerPoint's Ctrl+Shift+F), also while typing.
+      if (meta && event.shiftKey && event.key.toLowerCase() === "f" && state.view === "single" && !isFinal(state.deck) && editor.textState()) { event.preventDefault(); editorUi.fontDialog(); return; }
       if (!typing && shell.zoomKey(event)) { event.preventDefault(); return; }
       if (meta && event.key.toLowerCase() === "m" && !typing) { event.preventDefault(); openTypeDialog("insert"); return; }
       if (document.activeElement === $("filmstrip") && filmKey(event)) { event.preventDefault(); return; }

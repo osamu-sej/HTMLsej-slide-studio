@@ -49,6 +49,12 @@ export const qatKey = (item) => (typeof item === "string" ? item : item?.ref);
  * A stored toolbar, tidied: { show, below, items } where an item is a common command's key or a ribbon command
  * { ref: "tab|group|title", label, icon }; no repeats, at most 30.
  */
+// Ribbon buttons whose tooltip changed: a toolbar saved with the old one keeps working.
+const QAT_RENAMED = {
+  "view|表示/非表示|1cmごとの線を表示": "view|表示/非表示|グリッド線を表示（間隔はグリッドとガイドの設定で）",
+  "view|表示/非表示|0.25cmごとに吸着": "view|表示/非表示|グリッド線に吸着（間隔はグリッドとガイドの設定で）",
+};
+
 export function normalizeQat(raw) {
   const out = { show: Boolean(raw?.show), below: Boolean(raw?.below), items: [] };
   const seen = new Set();
@@ -56,7 +62,7 @@ export function normalizeQat(raw) {
     let item = null;
     if (typeof it === "string") item = QAT_BUILTINS[it] ? it : null;
     else if (it && typeof it.ref === "string" && /^[A-Za-z0-9]+\|[^|]*\|./.test(it.ref)) {
-      item = { ref: it.ref.slice(0, 300), label: String(it.label || "").trim().slice(0, 60) || it.ref.split("|").pop().slice(0, 40), icon: /^[A-Za-z0-9]{1,30}$/.test(it.icon || "") ? it.icon : "" };
+      item = { ref: (QAT_RENAMED[it.ref] || it.ref).slice(0, 300), label: String(it.label || "").trim().slice(0, 60) || it.ref.split("|").pop().slice(0, 40), icon: /^[A-Za-z0-9]{1,30}$/.test(it.icon || "") ? it.icon : "" };
     }
     const key = qatKey(item);
     if (!item || seen.has(key)) continue;

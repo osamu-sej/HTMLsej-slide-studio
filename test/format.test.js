@@ -236,3 +236,24 @@ test("図で塗りつぶし: a picture fills the shape (cut to its outline), str
   assert.equal(draw(stored).querySelector(".hs-obj pattern"), null);
   assert.equal(draw(stored, { mediaUrls: { "idb:abc": "blob:x" } }).querySelector(".hs-obj pattern image").getAttribute("href"), "blob:x");
 });
+
+test("段落 → インデント: before the text, a first line indented or hanging; kept by the sanitizer, read back", async () => {
+  const { E, window } = await loadEngine();
+  globalThis.document = window.document;
+  try {
+    const hanging = ops.setIndent(E, '<p>一つ目</p><p style="text-align: center">二つ目</p>', { left: 56.69, first: -28.35 });
+    assert.match(hanging, /<p style="[^"]*margin-left: ?56\.69px[^"]*text-indent: ?-28\.35px[^"]*">一つ目<\/p>/);
+    assert.match(hanging, /text-align: ?center[^"]*margin-left: ?56\.69px/, "the paragraph keeps its alignment");
+    assert.deepEqual({ ...ops.indentOf(hanging) }, { left: 56.69, first: -28.35 });
+    assert.equal(ops.setIndent(E, hanging, { left: 0, first: 0 }), '<p>一つ目</p><p style="text-align: center">二つ目</p>', "0 takes them away");
+    assert.match(ops.setIndent(E, "<ul><li>a</li></ul>", { left: 20, first: 10 }), /<li style="margin-left: ?20px; text-indent: ?10px">a<\/li>/);
+    assert.equal(E.sanitizeRich('<p style="margin-left: 99999px; text-indent: abc">x</p>'), "<p>x</p>", "only lengths in range");
+    // フォント → すべて大文字・小型英大文字 on the box.
+    const o = E.normalizeObject({ id: "t", kind: "text", x: 0, y: 0, w: 400, h: 100, text: "<p>Seven</p>", caps: "small" });
+    assert.equal(o.caps, "small");
+    assert.equal(E.normalizeObject({ id: "t2", kind: "text", text: "<p>x</p>", caps: "huge" }).caps, undefined);
+    const slide = { type: "blank", elements: [o] };
+    const el = E.render(slide, { mode: "edit", index: 0, deck: { slides: [slide], theme: "sej" } });
+    assert.match(el.querySelector(".hs-obj-tx").getAttribute("style"), /font-variant: ?small-caps/);
+  } finally { delete globalThis.document; }
+});

@@ -1086,11 +1086,24 @@
     return out;
   }
 
+  /** A length in px from a style ("24px", "0"), within lo..hi (else null). */
+  const pxLen = (value, lo, hi) => {
+    const m = /^(-?\d+(?:\.\d+)?)(px)?$/.exec(String(value ?? "").trim());
+    const n = m ? Math.round(Number(m[1]) * 100) / 100 : NaN;
+    return Number.isFinite(n) && n !== 0 && n >= lo && n <= hi ? n : null;
+  };
   function blockAttrs(src, el) {
     const align = String(src.style?.textAlign || src.getAttribute?.("align") || "").toLowerCase();
     const last = String(src.style?.textAlignLast || src.style?.getPropertyValue?.("text-align-last") || "").toLowerCase();
-    if (align === "justify" && last === "justify") el.setAttribute("style", "text-align: justify; text-align-last: justify");
-    else if (ALIGN.has(align)) el.setAttribute("style", `text-align: ${align}`);
+    const styles = [];
+    if (align === "justify" && last === "justify") styles.push("text-align: justify", "text-align-last: justify");
+    else if (ALIGN.has(align)) styles.push(`text-align: ${align}`);
+    // 段落 → インデント: before the text, and the first line indented or hanging (a negative indent).
+    const left = pxLen(src.style?.marginLeft, 0, 1200);
+    const first = pxLen(src.style?.textIndent, -1200, 1200);
+    if (left) styles.push(`margin-left: ${left}px`);
+    if (first) styles.push(`text-indent: ${first}px`);
+    if (styles.length) el.setAttribute("style", styles.join("; "));
     const indent = Number(src.getAttribute?.("data-indent"));
     if (Number.isInteger(indent) && indent > 0) el.setAttribute("data-indent", String(Math.min(indent, 4)));
     // A paragraph's own bullet or number ("■", "①", "1."), as PowerPoint draws it (a hanging mark).
@@ -1623,6 +1636,8 @@
       if (ls) o.ls = ls;
       const psp = num(raw.psp, 0, 4);
       if (psp) o.psp = psp;
+      // フォント → 文字飾り: すべて大文字 / 小型英大文字 (Latin letters only change).
+      if (raw.caps === "all" || raw.caps === "small") o.caps = raw.caps;
       if (Array.isArray(raw.pad) && raw.pad.length === 4) o.pad = raw.pad.map((v) => num(v, 0, 400, 0));
       if (AUTOFIT[raw.autofit]) o.autofit = raw.autofit;
       // 段組み: the words run in two to four columns.
@@ -2629,6 +2644,7 @@
       "text-decoration-style": (o.underline && o.uline && o.uline !== "thick" ? o.uline : null) || (o.strike && o.sline === "double" && !o.underline ? "double" : null),
       "text-decoration-thickness": o.underline && o.uline === "thick" ? ".12em" : null,
       "letter-spacing": o.ls ? `${o.ls}em` : null, "--psp": o.psp ? `${o.psp}em` : null,
+      "text-transform": o.caps === "all" ? "uppercase" : null, "font-variant": o.caps === "small" ? "small-caps" : null,
       "font-family": o.fontFace ? `"${o.fontFace}", sans-serif` : o.font ? FONTS[o.font][1] : null, "white-space": o.wrap === false ? "pre" : null,
     };
     for (const [k, v] of Object.entries(style)) if (v != null) tx.style.setProperty(k, String(v));

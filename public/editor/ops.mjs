@@ -569,6 +569,29 @@ export function setListProps(E, html, { start, mark, msize } = {}) {
   return E.sanitizeRich(box.innerHTML);
 }
 
+/**
+ * 段落 → インデント: every paragraph indented `left` px before its text, its first line moved by `first` px
+ * (negative: ぶら下げ, the first line out to the left of the rest). 0 takes an indent away.
+ */
+export function setIndent(E, html, { left = 0, first = 0 } = {}) {
+  const box = document.createElement("div");
+  box.append(E.richFragment(html || ""));
+  const blocks = box.querySelectorAll("p, li, div");
+  if (!blocks.length && box.textContent) { const p = document.createElement("p"); p.append(...box.childNodes); box.append(p); }
+  for (const block of box.querySelectorAll("p, li, div")) {
+    block.style.marginLeft = left ? `${Math.round(left * 100) / 100}px` : "";
+    block.style.textIndent = first ? `${Math.round(first * 100) / 100}px` : "";
+  }
+  return E.sanitizeRich(box.innerHTML);
+}
+
+/** The first paragraph's indents (px): { left, first }. */
+export function indentOf(html) {
+  const tag = /^<(p|li|div)\b[^>]*style="([^"]*)"/.exec(String(html || "").replace(/^<(ul|ol)\b[^>]*>/, ""));
+  const read = (name) => { const m = new RegExp(`${name}:\\s*(-?[\\d.]+)px`).exec(tag?.[2] || ""); return m ? Number(m[1]) : 0; };
+  return { left: read("margin-left"), first: read("text-indent") };
+}
+
 /** Which list the text is (all bullets / all numbers / none). */
 export function listOf(html) {
   const text = String(html || "");

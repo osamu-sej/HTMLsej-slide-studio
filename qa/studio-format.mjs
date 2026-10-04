@@ -658,6 +658,105 @@ await step("クイック レイアウト（グラフ）; 図形の塗りつぶ�
   assert((await slide()).elements.find((x) => x.id === rect.id).fillImg, "⌘Z brings the picture back");
 });
 
+await step("フォント（⇧⌘F）・段落（インデント・ぶら下げ）の設定を1回の⌘Zで; グリッドとガイド; スライドに合わせて配置; ⌘Dが移動を繰り返す", async () => {
+  await page.keyboard.press("Escape");
+  await tab("挿入");
+  await ribbonBtn("テキスト ボックス");
+  await menuItem("横書きテキスト ボックス");
+  const box = await page.locator("#stageBody .hs-slide").first().boundingBox();
+  const pt = (x, y) => [box.x + (x * box.width) / 1920, box.y + (y * box.height) / 1080];
+  await page.mouse.click(...pt(300, 860));
+  await page.waitForTimeout(200);
+  await page.keyboard.type("Seven Eleven");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  const obj = async () => (await slide()).elements.find((x) => x.id === id);
+  // フォント: 太字・32pt・濃紺・二重下線・小型英大文字・広く, in one step.
+  await page.keyboard.press("Control+Shift+F");
+  await page.waitForSelector(".font-dialog[open]");
+  await page.selectOption('.font-dialog select[name="スタイル"]', "bold");
+  await page.fill('.font-dialog input[name="サイズ"]', "32");
+  await page.click('.font-dialog .fp-sw[data-color="#1f3864"]');
+  await page.selectOption('.font-dialog select[name="下線のスタイル"]', "double");
+  await page.check('.font-dialog input[name="smallCaps"]');
+  await page.selectOption('.font-dialog select[name="文字間隔"]', "0.05");
+  await shot("font-dialog");
+  await page.click(".font-dialog .fmt-ok");
+  await page.waitForTimeout(300);
+  let o = await obj();
+  assert(o.bold && o.fs === 64 && o.color === "#1f3864" && o.underline && o.uline === "double" && o.caps === "small" && o.ls === 0.05, `the font settings: ${JSON.stringify({ bold: o.bold, fs: o.fs, color: o.color, underline: o.underline, uline: o.uline, caps: o.caps, ls: o.ls })}`);
+  assert(await page.evaluate((i) => getComputedStyle(document.querySelector(`#stageBody .hs-obj[data-el="${i}"] .hs-obj-tx`)).fontVariantCaps, id) === "small-caps", "drawn in small capitals");
+  await undo();
+  o = await obj();
+  assert(!o.bold && !o.caps && !o.ls && o.fs !== 64, `one ⌘Z takes all of the dialog back: ${JSON.stringify({ bold: o.bold, caps: o.caps, ls: o.ls, fs: o.fs })}`);
+  await page.keyboard.press("Control+y");
+  await page.waitForTimeout(300);
+  // 段落: 中央揃え, 1 cm before the text with a 0.5 cm hanging first line, 12 pt after, 1.5 lines.
+  await tab("ホーム");
+  await byTitle("段落の設定");
+  await page.waitForSelector(".para-dialog[open]");
+  await page.selectOption('.para-dialog select[name="配置"]', "center");
+  await page.fill('.para-dialog input[name="テキストの前"]', "1");
+  await page.selectOption('.para-dialog select[name="最初の行"]', "hanging");
+  await page.fill('.para-dialog input[name="幅"]', "0.5");
+  await page.fill('.para-dialog input[name="段落後"]', "12");
+  await page.selectOption('.para-dialog select[name="行間"]', "1.5");
+  await page.click(".para-dialog .fmt-ok");
+  await page.waitForTimeout(300);
+  o = await obj();
+  assert(o.align === "center" && o.lh === 1.5 && Math.abs(o.psp - 12 / 32) < 0.01, `alignment, line and paragraph spacing: ${JSON.stringify({ align: o.align, lh: o.lh, psp: o.psp })}`);
+  assert(/margin-left: ?85\.0\dpx/.test(o.text) && /text-indent: ?-28\.3\dpx/.test(o.text), `1.5 cm in, the first line 0.5 cm out: ${o.text}`);
+  const ind = await page.evaluate((i) => { const p = document.querySelector(`#stageBody .hs-obj[data-el="${i}"] .hs-obj-tx p`); const cs = getComputedStyle(p); return [cs.marginLeft, cs.textIndent]; }, id);
+  assert(parseFloat(ind[0]) > 80 && parseFloat(ind[1]) < -25, `drawn indented: ${ind}`);
+  // グリッドとガイド: 0.5 cm, snap on.
+  await tab("表示");
+  await byTitle("グリッドとガイドの設定");
+  await page.waitForSelector(".grid-dialog[open]");
+  await page.selectOption('.grid-dialog select[name="間隔"]', "0.5");
+  await page.check('.grid-dialog input[name="snapGrid"]');
+  await page.check('.grid-dialog input[name="grid"]');
+  await page.click(".grid-dialog .fmt-ok");
+  await page.waitForTimeout(300);
+  const ed = await page.evaluate(() => JSON.parse(localStorage.getItem("hsej-editor-gridStep") || "null"));
+  assert(ed === 0.5, `the spacing kept: ${ed}`);
+  assert(await page.locator("#stageBody .ed-grid").count(), "the grid is shown");
+  await byTitle("グリッドとガイドの設定");
+  await page.waitForSelector(".grid-dialog[open]");
+  await page.uncheck('.grid-dialog input[name="snapGrid"]');
+  await page.uncheck('.grid-dialog input[name="grid"]');
+  await page.selectOption('.grid-dialog select[name="間隔"]', "0.25");
+  await page.click(".grid-dialog .fmt-ok");
+  await page.waitForTimeout(300);
+  // ⌘D, move the copy, ⌘D again: the third lands as far again.
+  await page.keyboard.press("Control+d");
+  await page.waitForTimeout(300);
+  const copy1 = (await slide()).elements.at(-1);
+  for (let i = 0; i < 5; i += 1) await page.keyboard.press("Shift+ArrowRight");
+  await page.waitForTimeout(300);
+  const moved = (await slide()).elements.find((x) => x.id === copy1.id);
+  await page.keyboard.press("Control+d");
+  await page.waitForTimeout(300);
+  const copy2 = (await slide()).elements.at(-1);
+  const src = await obj();
+  const [dx, dy] = [moved.x - src.x, moved.y - src.y];
+  assert(Math.abs(copy2.x - moved.x - dx) < 0.6 && Math.abs(copy2.y - moved.y - dy) < 0.6, `the move repeated: source ${src.x},${src.y} copy ${moved.x},${moved.y} next ${copy2.x},${copy2.y}`);
+  // 配置 → スライドに合わせて配置: two boxes both to the slide's right edge.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+a");
+  await tab("ホーム");
+  await ribbonBtn("配置");
+  await menuItem("スライドに合わせて配置");
+  await ribbonBtn("配置");
+  await menuItem("右揃え");
+  await page.waitForTimeout(300);
+  const all = (await slide()).elements.filter((x) => [id, copy1.id, copy2.id].includes(x.id));
+  assert(all.every((x) => Math.abs(x.x + x.w - 1920) < 1), `all at the slide's right edge: ${all.map((x) => x.x + x.w)}`);
+  await ribbonBtn("配置");
+  await menuItem("選択したオブジェクトを揃える");
+  assert(await page.evaluate(() => JSON.parse(localStorage.getItem("hsej-editor-alignTo") || "null")) === "auto", "back to aligning with each other");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {
