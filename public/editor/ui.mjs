@@ -1510,7 +1510,8 @@ export function createEditorUi(editor, app) {
       h("p", { class: "hint fp-tips" }, "ドラッグで移動・四隅でサイズ・上の丸で回転。Shiftで比率を保つ、Altで吸着なし、Ctrlを押しながらドラッグでコピー。ダブルクリックで文字を入力。右クリックでメニュー。"));
     } else {
       const title = chosen.length === 1 ? E.objectName(chosen[0], list.indexOf(chosen[0])) : `${chosen.length}個のオブジェクト`;
-      head.append(h("b", {}, title), chosen.length === 1 ? h("button", { type: "button", class: "btn btn-ghost btn-sm", title: "名前を変える", onclick: async () => { const name = await app.ask("オブジェクトの名前", "選択ウィンドウやアニメーションに表示される名前", E.objectName(chosen[0], list.indexOf(chosen[0]))); if (name != null) editor.rename(chosen[0].id, name); } }, "名前") : null);
+      // (append writes a null as the word "null": the rename button only for one object)
+      head.append(...[h("b", {}, title), chosen.length === 1 ? h("button", { type: "button", class: "btn btn-ghost btn-sm", title: "名前を変える", onclick: async () => { const name = await app.ask("オブジェクトの名前", "選択ウィンドウやアニメーションに表示される名前", E.objectName(chosen[0], list.indexOf(chosen[0]))); if (name != null) editor.rename(chosen[0].id, name); } }, "名前") : null].filter(Boolean));
       body.append(...paneSections(chosen, list));
     }
     body.append(selectionPane(list));
