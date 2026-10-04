@@ -283,6 +283,47 @@ await step("ファイル → 情報: properties saved on the deck, statistics, a
   assert((await deck()).slides.some((s) => String(s.notes || "").trim()), "and the notes");
 });
 
+await step("ファイル → 情報 → 最終版にする: the message bar says so, keys and the ribbon do not edit; 編集する lets them back", async () => {
+  await page.locator(".film-item").nth(1).click();
+  await page.click(".rb-file");
+  await page.locator('.rb-pop .rb-menu button:has-text("情報")').click();
+  await page.waitForSelector(".fileinfo-dialog[open]");
+  await page.click(".fileinfo-dialog .fi-final");
+  await page.waitForSelector("#msgBar .callout-final");
+  assert((await deck()).info?.status === "最終版", "the document's 状態");
+  assert(await page.evaluate(() => document.body.classList.contains("is-final")), "the page knows");
+  const slides = (await deck()).slides.length;
+  await page.locator(".film-item").nth(1).click();
+  await page.keyboard.press("Control+d");
+  await page.keyboard.press("Delete");
+  await page.waitForTimeout(300);
+  assert((await deck()).slides.length === slides, "no slide duplicated or deleted");
+  await page.click('.rb-tabs [role=tab]:text-is("ホーム")');
+  assert(await page.locator(".rb-body > .rb-group.rb-off").count() > 2, "the ホーム tab is off");
+  await page.click('.rb-tabs [role=tab]:text-is("スライド ショー")');
+  assert(!(await page.locator(".rb-body > .rb-group.rb-off").count()), "the スライド ショー tab still works");
+  // The notes, the panes and the search's commands take nothing either.
+  const notes = (await deck()).slides[1].notes || "";
+  assert(await page.evaluate(() => document.getElementById("notesInput").readOnly), "the notes are read-only");
+  await page.evaluate(() => document.getElementById("notesInput").focus());
+  await page.keyboard.type("書き足し");
+  assert(((await deck()).slides[1].notes || "") === notes, "nothing typed into the notes");
+  assert(await page.evaluate(() => getComputedStyle(document.querySelector("#animPane") || document.body).opacity !== "" && [...document.querySelectorAll("#inspector button, #animPane button, #commentPane button")].every((b) => getComputedStyle(b).pointerEvents === "none")), "the panes' buttons do not answer");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Alt+KeyQ");
+  await page.keyboard.type("新しいスライド");
+  await page.waitForSelector(".rb-pop .rb-search-item");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(400);
+  assert((await deck()).slides.length === slides, "a command from the search does not edit");
+  await page.keyboard.press("Escape");
+  await shot("final");
+  await page.click("#msgBar .btn-final-edit");
+  await page.waitForTimeout(300);
+  assert(!(await deck()).info?.status && !(await page.evaluate(() => document.body.classList.contains("is-final"))), "編集する: editable again");
+  assert(!(await page.locator("#msgBar .callout-final").count()), "the bar goes");
+});
+
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");
 await browser.close();
 process.exit(errors.length ? 1 : 0);

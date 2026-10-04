@@ -7,7 +7,7 @@ import { ico } from "./icons.mjs";
 import { createAnimations } from "./anim.mjs";
 import { createInteractions } from "./interact.mjs";
 import { createTableUi } from "./tables.mjs";
-import { createCrop } from "./crop.mjs";
+import { createCrop, cropFill, cropFit, cropToAspect } from "./crop.mjs";
 import { createFreeform } from "./freeform.mjs";
 import { createMedia } from "./media.mjs";
 import { MERGE_HINTS, MERGE_MODES, canMerge, clippingLib, mergeObjects } from "./merge.mjs";
@@ -100,6 +100,13 @@ export function createEditorUi(editor, app) {
     });
     return el;
   }
+  /** The ▾ half of a split button (箇条書き ▾): the menu beside a button that acts at once. */
+  function caret(title, build, { enabled = null } = {}) {
+    const el = h("button", { type: "button", class: "rb-btn rb-drop rb-caret-only", title, "aria-label": title, "aria-haspopup": "true", "data-keeps-text": "",
+      onmousedown: (event) => event.preventDefault(), onclick: (event) => { event.preventDefault(); openPop(el, build); } }, h("b", { class: "rb-caret" }, "▾"));
+    updaters.push(() => { if (enabled) el.disabled = !enabled(); });
+    return el;
+  }
   const group = (label, ...items) => h("div", { class: "rb-group" }, h("div", { class: "rb-items" }, ...items.flat().filter(Boolean)), h("div", { class: "rb-label" }, label));
   const col = (...items) => h("div", { class: "rb-col" }, ...items.flat().filter(Boolean));
   const row = (...items) => h("div", { class: "rb-row" }, ...items.flat().filter(Boolean));
@@ -142,6 +149,44 @@ export function createEditorUi(editor, app) {
     : item.head ? h("div", { class: "rb-menu-head" }, item.head)
       : h("button", { type: "button", class: item.on ? "on" : "", title: item.title || null, disabled: item.disabled || null, onmousedown: (e) => e.preventDefault(), onclick: () => { item.hover?.(false); close(); item.run(); },
         onmouseenter: item.hover ? () => item.hover(true) : null, onmouseleave: item.hover ? () => item.hover(false) : null }, item.icon ? ico(item.icon) : h("span", { class: "rb-noicon" }), h("span", {}, item.label), item.keys ? h("kbd", {}, item.keys) : null))));
+
+  // トリミング ▾: 縦横比, 塗りつぶし, 枠に合わせる (the picture's own shape from the stage's <img>).
+  const CROP_RATIOS = [["1:1", 1], ["2:3", 2 / 3], ["3:2", 3 / 2], ["3:4", 3 / 4], ["4:3", 4 / 3], ["3:5", 3 / 5], ["5:3", 5 / 3], ["4:5", 4 / 5], ["5:4", 5 / 4], ["9:16", 9 / 16], ["16:9", 16 / 9], ["16:10", 16 / 10]];
+  function pictureAspect(o) {
+    const img = document.querySelector(`#stageBody .hs-obj[data-el="${CSS.escape(o.id)}"] img`);
+    if (img?.naturalWidth && img.naturalHeight) return img.naturalWidth / img.naturalHeight;
+    const c = o.crop || { l: 0, t: 0, r: 0, b: 0 };
+    return (o.w / (1 - c.l - c.r)) / (o.h / (1 - c.t - c.b));
+  }
+  function cropMenu() {
+    const o = one();
+    if (o?.kind !== "image") return null;
+    const apply = (patch, label) => { editor.apply(patch, { ids: [o.id] }); app.toast(`${label}（⌘Zで戻せます）`); };
+    return menu([
+      { head: "縦横比" },
+      ...CROP_RATIOS.map(([label, r]) => ({ label, run: () => apply(cropToAspect(o, r, pictureAspect(o)), `縦横比 ${label} にトリミングしました`) })),
+      "-",
+      { label: "塗りつぶし（枠いっぱいに）", icon: "zoomFit", run: () => apply(cropFill(o, pictureAspect(o)), "枠いっぱいに合わせました") },
+      { label: "枠に合わせる（全体を表示）", icon: "zoomFit", run: () => apply(cropFit(o, pictureAspect(o)), "画像の全体が枠に入るようにしました") },
+    ]);
+  }
+
+  // 箇条書き・段落番号の種類: PowerPoint's galleries (なし first); the marker stays on the list (data-style).
+  const LIST_NAMES = { disc: "黒丸", circle: "白丸", square: "四角", diamond: "ひし形", arrow: "矢印", check: "チェック マーク", star: "星", dash: "ダッシュ", decimal: "1. 2. 3.", paren: "1) 2) 3)", circled: "① ② ③", "lower-alpha": "a. b. c.", "upper-alpha": "A. B. C.", "lower-roman": "i. ii. iii.", "upper-roman": "I. II. III.", kanji: "一、二、三、" };
+  function listGallery(type) {
+    const tag = type === "number" ? "ol" : "ul";
+    return (close) => {
+      const st = editor.textState();
+      const current = st?.list === type ? st.listStyle : st?.list ? "" : "none";
+      const marks = (style) => (tag === "ol" ? E.LIST_STYLES.ol[style] : [0, 1, 2].map(() => E.LIST_STYLES.ul[style]));
+      const cell = (style, body, label) => h("button", { type: "button", class: ["rb-list-sw", current === (style || "none") ? "on" : ""], title: label, "aria-label": label, "data-list-style": style || "none",
+        onmousedown: (event) => event.preventDefault(), onclick: () => { close(); editor.textFormat("listStyle", [style ? type : null, style]); } }, body);
+      return h("div", { class: "rb-gallery rb-lists" }, h("div", { class: "rb-gallery-head" }, type === "number" ? "段落番号" : "箇条書き"),
+        h("div", { class: "rb-list-grid" },
+          cell(null, h("span", { class: "rb-list-none" }, "なし"), "なし"),
+          Object.keys(E.LIST_STYLES[tag]).map((style) => cell(style, h("span", { class: "rb-list-prev" }, marks(style).map((m) => h("span", {}, h("b", {}, m), h("i")))), LIST_NAMES[style] || style))));
+    };
+  }
 
   /** Colour swatches of the SEJ palette (plus none and, for fills and lines, any colour with a warning). */
   function colors(list, current, pick, { none = null, custom = true, note = "" } = {}) {
@@ -330,6 +375,8 @@ export function createEditorUi(editor, app) {
     const kind = h("select", { "aria-label": "クリックしたときの動作" }, ACTIONS.map(([value, label]) => h("option", { value, selected: value === current || null }, label)));
     const slides = h("select", { "aria-label": "移動先のスライド", hidden: current !== "slide" }, app.deck().slides.map((slide, i) => h("option", { value: String(i), selected: o.action?.type === "slide" && app.slideOfSid(o.action.to) === i ? true : null }, `${i + 1}. ${E.strip(slide.title || slide.message || E.TYPE_LABELS[slide.type] || "")}`.slice(0, 40))));
     const url = h("input", { type: "url", placeholder: "https://… または mailto:…", value: o.action?.type === "url" ? o.action.href : "", hidden: current !== "url" });
+    // ヒント設定 (PowerPoint's ScreenTip): words shown when the pointer is on it in the show (the object's tip).
+    const tip = h("input", { type: "text", class: "rb-link-tip", maxlength: 200, placeholder: "スクリーンヒント（マウスを乗せたときの説明・任意）", value: o.tip || "", "aria-label": "スクリーンヒント" });
     kind.addEventListener("change", () => { slides.hidden = kind.value !== "slide"; url.hidden = kind.value !== "url"; });
     const save = () => {
       const type = kind.value;
@@ -338,11 +385,11 @@ export function createEditorUi(editor, app) {
       else if (type === "slide") action = { type, to: app.ensureSid(Number(slides.value)) };
       else if (type === "url") { if (!/^(https?:\/\/|mailto:)/i.test(url.value.trim())) { app.toast("URLは https:// か mailto: で始めてください"); return; } action = { type, href: url.value.trim() }; }
       else action = { type };
-      editor.apply({ action }, { ids: [o.id] });
+      editor.apply({ action, tip: tip.value.trim() || undefined }, { ids: [o.id] });
       close?.();
       app.toast(action ? "クリックしたときの動作を設定しました（発表中とHTML出力で働きます）" : "動作を外しました");
     };
-    return h("div", { class: "rb-form" }, h("b", {}, "クリックしたときの動作（発表中）"), kind, slides, url,
+    return h("div", { class: "rb-form" }, h("b", {}, "クリックしたときの動作（発表中）"), kind, slides, url, tip,
       h("div", { class: "rb-form-foot" }, h("button", { type: "button", class: "btn btn-primary btn-sm", onclick: save }, "設定する")));
   }
 
@@ -374,7 +421,7 @@ export function createEditorUi(editor, app) {
 
   function signature() {
     const ctx = TABS.filter((t) => t.contextual?.()).map((t) => t.id).join(",");
-    return `${tab}|${ctx}|${ribbonMode}|${floating}|${onSlide()}`;
+    return `${tab}|${ctx}|${ribbonMode}|${floating}|${onSlide()}|${Boolean(app.isFinal?.())}`;
   }
 
   // ---------------------------------------------------------------- ribbon display options
@@ -473,6 +520,14 @@ export function createEditorUi(editor, app) {
         g.title = "1枚表示（標準）で使えます";
       }
     }
+    // 最終版: only the tabs for looking and presenting work (編集する on the message bar lets the rest back).
+    if (body && app.isFinal?.() && !FINAL_TABS.has(tab)) {
+      for (const g of body.querySelectorAll(":scope > .rb-group")) {
+        g.classList.add("rb-off");
+        g.inert = true;
+        g.title = "最終版です（メッセージ バーの「編集する」で編集できます）";
+      }
+    }
     if (pop && !pop.anchor.isConnected) closePop(true);
     const reveal = h("button", { type: "button", class: "rb-reveal", title: "リボンを表示する（自動的に非表示）", "aria-label": "リボンを表示する", onclick: () => (floating ? closeFloating() : openFloating()) }, "•••");
     const below = quick?.where() === "below" ? h("div", { class: "rb-qat-row" }, qatBar) : "";
@@ -485,6 +540,7 @@ export function createEditorUi(editor, app) {
   // Off the 1枚 view: whole tabs and groups that work on slides rather than on the objects of the one on the stage.
   const OFF_SLIDE_TABS = new Set(["design", "transition", "slideshow", "review", "view", "developer"]);
   const OFF_SLIDE_GROUPS = new Set(["スライド"]);
+  const FINAL_TABS = new Set(["slideshow", "view"]);
   // A narrow window squeezes the ribbon as PowerPoint does, from the right-hand groups first: small buttons
   // lose their words (the tooltip keeps them), then whole groups fold into one button that opens them;
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
@@ -588,7 +644,9 @@ export function createEditorUi(editor, app) {
           btn("clear", "", "書式のクリア", () => editor.textFormat("clear"), { enabled: hasText, keep: true }))),
       group("段落",
         row(btn("bullet", "", "箇条書き", () => editor.textFormat("bullet"), { enabled: hasText, pressed: () => editor.textState()?.list === "bullet", keep: true }),
+          caret("箇条書きの種類（●・■・◆・➢・✓…）", listGallery("bullet"), { enabled: hasText }),
           btn("number", "", "段落番号", () => editor.textFormat("number"), { enabled: hasText, pressed: () => editor.textState()?.list === "number", keep: true }),
+          caret("段落番号の種類（1.・1)・①・a.・i.・一、…）", listGallery("number"), { enabled: hasText }),
           btn("indentLess", "", "インデントを減らす", () => editor.textFormat("outdent"), { enabled: () => editor.typing, keep: true }),
           btn("indentMore", "", "インデントを増やす", () => editor.textFormat("indent"), { enabled: () => editor.typing, keep: true }),
           drop("lineSpacing", "", "行間", () => menu(LINE_HEIGHTS.map(([v, label]) => ({ label, on: Math.abs((editor.textState()?.lh ?? 0) - v) < 0.01, run: () => editor.textFormat("lh", v) }))), { enabled: hasText, keep: true })),
@@ -597,6 +655,13 @@ export function createEditorUi(editor, app) {
           btn("textRight", "", "右揃え（⌘R）", () => editor.textFormat("align", "right"), { enabled: hasText, pressed: () => editor.textState()?.align === "right", keep: true }),
           btn("textJustify", "", "両端揃え（⌘J）", () => editor.textFormat("align", "justify"), { enabled: hasText, pressed: () => editor.textState()?.align === "justify", keep: true }),
           btn("vtext", "", "縦書き", () => editor.textFormat("vertical"), { enabled: hasText, pressed: tState("vertical") }),
+          caret("文字列の方向（横書き・縦書き・90度／270度回転）", () => menu([
+            { head: "文字列の方向" },
+            { label: "横書き", icon: "textbox", on: !tState("vertical")() && !tState("textRot")(), run: () => editor.textFormat("direction", "h") },
+            { label: "縦書き", icon: "vtext", on: Boolean(tState("vertical")()), run: () => editor.textFormat("direction", "v") },
+            { label: "すべてのテキストを 90 度回転", icon: "rotate", on: tState("textRot")() === 90, run: () => editor.textFormat("direction", 90) },
+            { label: "すべてのテキストを 270 度回転", icon: "rotate", on: tState("textRot")() === 270, run: () => editor.textFormat("direction", 270) },
+          ]), { enabled: hasText }),
           drop("valignMiddle", "", "文字の配置（上下）", () => menu([["top", "上揃え", "valignTop"], ["middle", "上下中央揃え", "valignMiddle"], ["bottom", "下揃え", "valignBottom"]].map(([v, label, icon]) => ({ label, icon, on: editor.textState()?.valign === v, run: () => editor.textFormat("valign", v) }))), { enabled: hasText }),
           drop("columns", "", "段組み：テキストを2段・3段に分ける", () => extras.columnsMenu(), { enabled: hasText }),
           drop("smartart", "", "SmartArt に変換：選んだテキストの段落（箇条書きのレベル）を図に", () => smart.convertGallery(), { enabled: () => selected().some((o) => ["shape", "text"].includes(o.kind) && o.text) }))),
@@ -986,6 +1051,7 @@ export function createEditorUi(editor, app) {
       arrangeGroup(),
       group("サイズ",
         btn("crop", "トリミング", "画像の端を切り取る：黒い印をドラッグ（Enterで確定）。数値は書式パネルで", () => { const o = one(); if (o?.kind === "image") crop.start(o.id); else app.openPanel("format", "picture"); }, { big: true, enabled: hasImage, pressed: () => crop.active }),
+        caret("トリミングのオプション（縦横比・塗りつぶし・枠に合わせる）", () => cropMenu(), { enabled: () => one()?.kind === "image" }),
         sizeFields()),
     ];
   }
@@ -1105,6 +1171,7 @@ export function createEditorUi(editor, app) {
     }
     const t = TABS.find((x) => x.id === id);
     if (!t || (t.contextual && !t.contextual())) { app.toast("このコマンドは今は使えません（対象を選ぶと出るタブのコマンドです）"); return false; }
+    if (app.isFinal?.() && !FINAL_TABS.has(id)) { app.toast("最終版です。編集するにはメッセージ バーの「編集する」を押してください"); return false; }
     closePop(true);
     if (from) {
       const saved = updaters;

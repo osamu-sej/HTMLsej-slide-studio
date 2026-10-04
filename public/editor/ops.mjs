@@ -521,7 +521,7 @@ export function clearInline(E, html, kind) {
 }
 
 /** Turn every paragraph into a bulleted or numbered list, or every list back into paragraphs. */
-export function setList(E, html, type) {
+export function setList(E, html, type, style = null) {
   const box = document.createElement("div");
   box.append(E.richFragment(html || "<p><br></p>"));
   const lines = [];
@@ -534,14 +534,21 @@ export function setList(E, html, type) {
   collect(box);
   if (!type) return E.sanitizeRich(lines.map((line) => `<p>${line || "<br>"}</p>`).join(""));
   const tag = type === "number" ? "ol" : "ul";
-  return E.sanitizeRich(`<${tag}>${lines.map((line) => `<li>${line || "<br>"}</li>`).join("")}</${tag}>`);
+  const kept = style && E.LIST_STYLES?.[tag]?.[style] ? ` data-style="${style}"` : "";
+  return E.sanitizeRich(`<${tag}${kept}>${lines.map((line) => `<li>${line || "<br>"}</li>`).join("")}</${tag}>`);
+}
+
+/** The list's marker (箇条書き・段落番号の種類): its data-style, or the plain one. */
+export function listStyleOf(html) {
+  const m = String(html || "").match(/^<(ul|ol)(?: data-style="([\w-]+)")?>/);
+  return m ? m[2] || (m[1] === "ul" ? "disc" : "decimal") : null;
 }
 
 /** Which list the text is (all bullets / all numbers / none). */
 export function listOf(html) {
   const text = String(html || "");
-  if (/^<ul>/.test(text) && !/<p[ >]/.test(text)) return "bullet";
-  if (/^<ol>/.test(text) && !/<p[ >]/.test(text)) return "number";
+  if (/^<ul[ >]/.test(text) && !/<p[ >]/.test(text)) return "bullet";
+  if (/^<ol[ >]/.test(text) && !/<p[ >]/.test(text)) return "number";
   return null;
 }
 

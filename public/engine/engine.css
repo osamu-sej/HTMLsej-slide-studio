@@ -58,6 +58,10 @@
 .hs-obj-text[data-valign="middle"] { justify-content: center; }
 .hs-obj-text[data-valign="bottom"] { justify-content: flex-end; }
 .hs-obj-text.is-vertical { writing-mode: vertical-rl; }
+/* 文字列の方向: すべてのテキストを90度回転 (read top to bottom) and 270度回転 (bottom to top). */
+.hs-obj-text.is-rot90, .hs-obj-text.is-rot270 { writing-mode: vertical-rl; }
+.hs-obj-text.is-rot90 .hs-obj-tx, .hs-obj-text.is-rot270 .hs-obj-tx { text-orientation: sideways; }
+.hs-obj-text.is-rot270 { transform: rotate(180deg); }
 /* Web fonts are served without vertical metrics (glyphs would overlap): vertical text uses the computer's own fonts. */
 .hs-obj-text.is-vertical .hs-obj-tx { font-family: "Meiryo UI", "メイリオ", Meiryo, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans CJK JP", sans-serif; }
 .hs-obj-tx { flex: none; min-width: 0; font-family: var(--font-body); white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; line-break: strict; letter-spacing: 0; }
@@ -71,6 +75,22 @@
 .hs-slide .hs-obj-tx ol ol { list-style: lower-alpha; }
 .hs-slide .hs-obj-tx li::marker { color: currentColor; }
 .hs-slide .hs-obj-tx p[data-bullet] { padding-left: 1.15em; text-indent: -1.15em; }
+/* 箇条書き・段落番号の種類 (data-style on the list). */
+@counter-style hs-circled { system: fixed; symbols: "①" "②" "③" "④" "⑤" "⑥" "⑦" "⑧" "⑨" "⑩" "⑪" "⑫" "⑬" "⑭" "⑮" "⑯" "⑰" "⑱" "⑲" "⑳"; suffix: " "; fallback: decimal; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ul[data-style="circle"] { list-style-type: circle; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ul[data-style="square"] { list-style-type: square; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ul[data-style="diamond"] { list-style-type: "◆  "; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ul[data-style="arrow"] { list-style-type: "➢  "; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ul[data-style="check"] { list-style-type: "✓  "; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ul[data-style="star"] { list-style-type: "★  "; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ul[data-style="dash"] { list-style-type: "–  "; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ol[data-style="paren"] > li::marker { content: counter(list-item) ") "; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ol[data-style="circled"] { list-style-type: hs-circled; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ol[data-style="lower-alpha"] { list-style-type: lower-alpha; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ol[data-style="upper-alpha"] { list-style-type: upper-alpha; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ol[data-style="lower-roman"] { list-style-type: lower-roman; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ol[data-style="upper-roman"] { list-style-type: upper-roman; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) ol[data-style="kanji"] { list-style-type: cjk-ideographic; }
 .hs-slide .hs-obj-tx p[data-bullet]::before { content: attr(data-bullet); display: inline-block; min-width: 1.15em; text-indent: 0; }
 .hs-slide .hs-obj-tx [data-indent="1"] { margin-left: 1.5em; } .hs-slide .hs-obj-tx [data-indent="2"] { margin-left: 3em; } .hs-slide .hs-obj-tx [data-indent="3"] { margin-left: 4.5em; } .hs-slide .hs-obj-tx [data-indent="4"] { margin-left: 6em; }
 .hs-obj-tx b { font-weight: 700; }
@@ -596,6 +616,7 @@
 .hs-chart .hs-axis-title { fill: var(--muted); font-size: 21px; font-weight: 700; }
 .hs-chart .hs-trend { fill: none; opacity: .85; }
 .hs-chart .hs-tm-name, .hs-chart .hs-sb-name { font-weight: 700; }
+.hs-obj-media .hs-video-poster { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: cover; }
 .hs-legend { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-bottom: 16px; font-size: 22px; color: var(--ink2); }
 .hs-legend span { display: inline-flex; align-items: center; gap: 10px; }
 .hs-legend i { width: 18px; height: 18px; border-radius: 5px; background: var(--c, var(--accent)); }

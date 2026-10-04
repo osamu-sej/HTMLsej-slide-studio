@@ -5,6 +5,11 @@
 
 export const INFO_FIELDS = [["author", "作成者", 80], ["subject", "件名", 120], ["keywords", "キーワード", 200], ["category", "分類", 60], ["company", "会社", 80], ["status", "状態", 40], ["comments", "コメント", 1000]];
 
+// 最終版にする (PowerPoint's Mark as Final): the document's 状態 says 最終版, and the studio keeps it from being edited
+// until someone chooses 編集する.
+export const FINAL_STATUS = "最終版";
+export const isFinal = (deck) => infoOf(deck?.info)?.status === FINAL_STATUS;
+
 /** deck.info, checked (null when empty). */
 export function infoOf(value) {
   const v = value && typeof value === "object" ? value : {};
@@ -120,9 +125,14 @@ export function createFileInfo(app) {
           } }, "すべて削除") : null)));
     }
     renderSide();
+    // プレゼンテーションの保護 → 最終版にする.
+    const final = isFinal(deck);
+    const protect = h("div", { class: "fi-protect" }, h("b", {}, "プレゼンテーションの保護"),
+      h("p", { class: "hint" }, final ? "この資料は最終版です。編集しないように設定されています。" : "最終版にすると、読む人が誤って変更しないように編集を止めます（メッセージ バーの「編集する」で戻せます）。"),
+      h("button", { type: "button", class: "btn btn-sm fi-final", onclick: () => { dialog.close(); app.setFinal(!final); } }, final ? "最終版を解除" : "最終版にする"));
     const dialog = h("dialog", { class: "fileinfo-dialog", "aria-label": "情報" },
       h("div", { class: "dialog-head" }, h("h3", {}, "情報（プロパティ）"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
-      h("div", { class: "dialog-body fi-body" }, h("div", {}, fields), h("div", { class: "fi-side" }, h("b", {}, "統計"), stats, inspectBox)),
+      h("div", { class: "dialog-body fi-body" }, h("div", {}, fields), h("div", { class: "fi-side" }, protect, h("b", {}, "統計"), stats, inspectBox)),
       h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"),
         h("button", { type: "button", class: "btn btn-primary fi-ok", onclick: () => {
           const next = infoOf(Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value])));

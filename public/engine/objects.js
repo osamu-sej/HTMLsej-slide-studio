@@ -1087,8 +1087,16 @@
     if (bullet.trim() && /^[^<>"&\s]{1,4}$/u.test(bullet) && el.tagName !== "LI") el.setAttribute("data-bullet", bullet);
   }
 
+  // 箇条書き・段落番号の種類 (PowerPoint's galleries): a list's own marker, kept on the ul / ol as data-style.
+  const LIST_STYLES = {
+    ul: { disc: "●", circle: "○", square: "■", diamond: "◆", arrow: "➢", check: "✓", star: "★", dash: "–" },
+    ol: { decimal: ["1.", "2.", "3."], paren: ["1)", "2)", "3)"], circled: ["①", "②", "③"], "lower-alpha": ["a.", "b.", "c."], "upper-alpha": ["A.", "B.", "C."], "lower-roman": ["i.", "ii.", "iii."], "upper-roman": ["I.", "II.", "III."], kanji: ["一、", "二、", "三、"] },
+  };
   function cleanList(src, doc, depth) {
-    const list = doc.createElement(src.tagName.toUpperCase() === "OL" ? "ol" : "ul");
+    const tag = src.tagName.toUpperCase() === "OL" ? "ol" : "ul";
+    const list = doc.createElement(tag);
+    const style = String(src.getAttribute?.("data-style") || "");
+    if (LIST_STYLES[tag][style] && style !== (tag === "ul" ? "disc" : "decimal")) list.setAttribute("data-style", style);
     for (const child of [...src.childNodes]) {
       if (child.nodeType === 1 && ["UL", "OL"].includes(child.tagName.toUpperCase()) && depth < 4) {
         const nested = cleanList(child, doc, depth + 1);
@@ -1553,6 +1561,8 @@
       const color = hexColor(raw.color);
       if (color) o.color = color;
       for (const key of ["bold", "italic", "underline", "strike", "vertical"]) if (typeof raw[key] === "boolean") o[key] = raw[key];
+      // 文字列の方向: すべてのテキストを90度・270度回転 (the letters on their sides).
+      if (raw.textRot === 90 || raw.textRot === 270) o.textRot = raw.textRot;
       if (raw.lockRatio === true) o.lockRatio = true;
       if (typeof raw.wrap === "boolean") o.wrap = raw.wrap;
       if (ALIGN.has(raw.align)) o.align = raw.align;
@@ -1593,6 +1603,8 @@
         for (const key of ["autoplay", "loop", "muted"]) if (typeof raw[key] === "boolean") o[key] = raw[key];
       }
       if (o.kind === "video" || o.kind === "audio") Object.assign(o, normalizePlayback(raw, o.kind));
+      // ビデオの表紙画像 (PowerPoint's poster frame): what shows before the video plays.
+      if (o.kind === "video" && typeof raw.poster === "string" && /^data:image\/(png|jpeg|webp);base64,/.test(raw.poster) && raw.poster.length <= 3_000_000) o.poster = raw.poster;
       // スライド ショーの記録: the slide's narration (played with the slide unless 「ナレーションを付けない」).
       if (o.kind === "audio" && raw.narration === true) o.narration = true;
       // 再生 →「キャプションの挿入」: subtitles for a video (WebVTT text, shown with the video).
@@ -2602,7 +2614,7 @@
       // Every shape has a text box (empty until something is typed in it).
       const [l, t, r, b] = g.text;
       const [pt, pr, pb, pl] = o.pad;
-      const box = h("div", { class: ["hs-obj-text", o.vertical ? "is-vertical" : ""], "data-valign": o.valign, style: { left: `${r2(l + pl)}px`, top: `${r2(t + pt)}px`, width: `${r2(Math.max(0, r - l - pl - pr))}px`, height: `${r2(Math.max(0, b - t - pt - pb))}px` } });
+      const box = h("div", { class: ["hs-obj-text", o.vertical ? "is-vertical" : "", o.textRot ? `is-rot${o.textRot}` : ""], "data-valign": o.valign, style: { left: `${r2(l + pl)}px`, top: `${r2(t + pt)}px`, width: `${r2(Math.max(0, r - l - pl - pr))}px`, height: `${r2(Math.max(0, b - t - pt - pb))}px` } });
       const tx = textNode(o, scale);
       if (o.cols > 1) { tx.style.columnCount = String(o.cols); tx.style.columnGap = `${o.colGap ?? 28}px`; tx.style.width = "100%"; }
       box.append(tx);
@@ -3318,6 +3330,8 @@
       const media = E.mediaEl(desc, ctx, "hs-obj-media");
       const video = media.querySelector("video");
       if (video) playbackData(video, o);
+      if (video && o.poster) video.setAttribute("poster", o.poster);
+      if (!video && o.poster && !yt) media.prepend(h("img", { class: "hs-video-poster", src: o.poster, alt: "", draggable: "false" }));
       if (video && o.captions) {
         video.setAttribute("crossorigin", "anonymous");
         video.append(h("track", { kind: "captions", src: `data:text/vtt;charset=utf-8,${encodeURIComponent(o.captions)}`, srclang: o.captionLang || "ja", label: "字幕", default: true }));
@@ -3445,7 +3459,7 @@
   }
 
   Object.assign(E, {
-    PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
+    PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
     TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,

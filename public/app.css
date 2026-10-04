@@ -864,6 +864,25 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .rb-eyedrop { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 6px; padding: 5px 6px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; cursor: pointer; }
 .rb-eyedrop:hover { background: var(--canvas); }
 .tb-kind-hint { margin: -2px 0 6px; font-size: 11.5px; line-height: 1.55; }
+/* 箇条書き ▾ / 段落番号 ▾: the split button's menu half and the gallery of markers. */
+.rb-btn.rb-caret-only { width: 14px; min-width: 14px; padding: 0; margin-left: -3px; justify-content: center; }
+.rb-list-grid { display: grid; grid-template-columns: repeat(3, 82px); gap: 6px; }
+.rb-list-sw { display: flex; align-items: center; justify-content: center; height: 66px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; }
+.rb-list-sw:hover { border-color: var(--accent); }
+.rb-list-sw.on { border-color: var(--accent); background: var(--accent-soft); }
+.rb-list-prev { display: flex; flex-direction: column; gap: 7px; width: 100%; padding: 0 10px; }
+.rb-list-prev > span { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink); }
+.rb-list-prev b { min-width: 18px; font-weight: 600; }
+.rb-list-prev i { flex: 1; height: 2px; background: var(--line-2); }
+.rb-list-none { color: var(--muted); font-size: 12px; font-weight: 700; }
+/* 最終版: the slide, the panes and the chat take no edits (the slides can still be looked through and shown). */
+body.is-final #stageBody .slide-wrap, body.is-final #chatForm, body.is-final #notesInput, body.is-final #deckTitleInput, body.is-final #memoInput { pointer-events: none; }
+body.is-final :is(#inspector, #formatPane, #animPane, #commentPane, #a11yPane, #stageBody) :is(button, input, select, textarea, label, [contenteditable]) { pointer-events: none; }
+body.is-final :is(#inspector, #formatPane, #animPane, #commentPane, #a11yPane, #chatForm, #notesInput) { opacity: .6; }
+body.is-final .film-item { -webkit-user-drag: none; }
+.callout-final { border-left: 4px solid var(--warn, #b7791f); }
+.fi-protect { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.fi-protect .btn { align-self: flex-start; }
 /* 音声読み上げ: PowerPoint's small bar over the slide, and the block being read lit (only here, never on the slide). */
 .ra-bar { position: absolute; top: 10px; left: 50%; z-index: 30; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 4px 6px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); box-shadow: 0 8px 24px rgba(20, 22, 28, .14); }
 .ra-btn { width: 30px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font-size: 14px; cursor: pointer; }
