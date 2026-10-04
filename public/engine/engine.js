@@ -365,7 +365,7 @@
       return { type, labels: rows.map((row) => strip(row.label)), series: Array.from({ length: width }, (_, si) => ({ name: strip(names[si] ?? `系列${si + 1}`), values: rows.map((row) => Number(arr(row.values)[si]) || 0) })) };
     }
     if (arr(data.series).length) {
-      return { type: type === "line" ? "multi-line" : type, labels: arr(data.xAxisLabels).map(strip), series: arr(data.series).map((serie, i) => ({ name: strip(serie.label ?? serie.id ?? `系列${i + 1}`), values: arr(serie.values).map((v) => Number(v) || 0) })) };
+      return { type: type === "line" ? "multi-line" : type, labels: arr(data.xAxisLabels).map(strip), series: arr(data.series).map((serie, i) => ({ name: strip(serie.label ?? serie.id ?? `系列${i + 1}`), values: arr(serie.values).map((v) => (v == null && (type === "boxplot" || type === "histogram") ? null : Number(v) || 0)) })) };
     }
     const items = arr(data.items);
     const labels = items.map((it) => strip(it.label));
@@ -383,18 +383,30 @@
     if (spec?.chartType === "shift") { wrap.append(shiftChart(spec, key)); return wrap; }
     const model = chartModel(spec);
     const opts = spec?.opts || {};
-    const legendNames = ["donut", "pie", "funnel", "waterfall"].includes(model.type) ? model.labels : model.series.length > 1 ? model.series.map((serie) => serie.name) : [];
+    // Charts that name their parts on the marks themselves (or on the axis) need no legend.
+    const SELF_NAMED = ["donut", "pie", "funnel", "waterfall", "treemap", "sunburst", "histogram", "boxplot", "bubble"];
+    const legendNames = SELF_NAMED.includes(model.type) ? model.labels : model.series.length > 1 ? model.series.map((serie) => serie.name) : [];
     let legend = null;
-    if (legendNames.length > 1 && !["donut", "pie", "funnel", "waterfall"].includes(model.type) && opts.legend !== "none") {
-      const stacked = model.type === "stacked-bar" || model.type === "100-stacked-bar";
+    if (legendNames.length > 1 && !SELF_NAMED.includes(model.type) && opts.legend !== "none") {
+      const stacked = ["stacked-bar", "100-stacked-bar", "stacked-hbar", "stacked-area"].includes(model.type);
       legend = h("div", { class: ["hs-legend", opts.legend ? `at-${opts.legend}` : ""] }, legendNames.map((name, i) => h("span", { style: { "--c": stacked ? stackColor(i) : SERIES[i % SERIES.length] } }, h("i"), name)));
       if (!opts.legend) wrap.append(legend);
     }
     const holder = h("div", { class: "hs-chart", "data-field": key });
     const svg = s("svg", { viewBox: `0 0 ${w} ${ht}`, preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": strip(spec?.data?.title || "グラフ") });
     const draw = { bar: barChart, combo: barChart, "clustered-bar": clusteredChart, line: lineChart, "multi-line": lineChart, donut: donutChart, pie: donutChart, "stacked-bar": stackedChart, "100-stacked-bar": stackedChart,
-      area: areaChart, scatter: scatterChart, radar: radarChart, waterfall: waterfallChart, funnel: funnelChart }[model.type] || barChart;
-    draw(svg, model, w, ht);
+      area: areaChart, scatter: scatterChart, radar: radarChart, waterfall: waterfallChart, funnel: funnelChart,
+      hbar: hbarChart, "stacked-hbar": hbarChart, "stacked-area": stackedAreaChart, bubble: bubbleChart, histogram: histogramChart, boxplot: boxplotChart, treemap: treemapChart, sunburst: sunburstChart }[model.type] || barChart;
+    // 軸ラベル (グラフ要素): the axes' titles take a strip at the left and at the bottom; the chart draws in the rest.
+    const axisY = AXIS_CHARTS.has(model.type) && opts.axisY ? String(opts.axisY) : "";
+    const axisX = AXIS_CHARTS.has(model.type) && opts.axisX ? String(opts.axisX) : "";
+    const padL = axisY ? 54 : 0;
+    const padB = axisX ? 50 : 0;
+    const plot = padL || padB ? s("g", { transform: `translate(${padL},0)` }) : svg;
+    draw(plot, model, w - padL, ht - padB, opts);
+    if (plot !== svg) svg.append(plot);
+    if (axisY) svg.append(s("text", { class: "hs-axis-title", x: 0, y: 0, transform: `translate(22,${(ht - padB) / 2}) rotate(-90)`, "text-anchor": "middle" }, axisY.slice(0, 40)));
+    if (axisX) svg.append(s("text", { class: "hs-axis-title", x: padL + (w - padL) / 2, y: ht - 10, "text-anchor": "middle" }, axisX.slice(0, 40)));
     // グラフ要素: no data labels (the values on the marks), no gridlines.
     if (opts.labels === false) svg.querySelectorAll(".hs-val").forEach((el) => el.remove());
     if (opts.grid === false) svg.querySelectorAll("line.hs-grid, polygon.hs-grid").forEach((el) => el.remove());
@@ -440,7 +452,7 @@
     });
   }
 
-  function barChart(svg, model, w, h) {
+  function barChart(svg, model, w, h, opts = {}) {
     const values = model.series[0]?.values || [];
     const labels = model.labels;
     const n = Math.max(1, values.length);
@@ -481,6 +493,7 @@
       if (!combo) svg.append(s("text", { class: `hs-val${isHot ? " hot" : ""}`, x: x + bw / 2, y: y0 - bh - 16, "text-anchor": "middle" }, fmt(value)));
       svg.append(s("text", { x: x + bw / 2, y: y0 + 40, "text-anchor": "middle" }, labels[i]));
     });
+    if (opts.trend === "linear" && !combo) trendLine(svg, values.map((v, i) => [slot * i + slot / 2, y0 - (Math.max(0, v) / max) * plotH]));
     if (combo) {
       const line = model.series[1].values;
       const pts = line.map((value, i) => [slot * i + slot / 2, y0 - (Math.max(0, value) / max) * plotH]);
@@ -499,7 +512,7 @@
     return `M${x},${y + h} V${y + radius} Q${x},${y} ${x + radius},${y} H${x + w - radius} Q${x + w},${y} ${x + w},${y + radius} V${y + h} Z`;
   }
 
-  function lineChart(svg, model, w, h) {
+  function lineChart(svg, model, w, h, opts = {}) {
     const labels = model.labels.length ? model.labels : (model.series[0]?.values || []).map((_, i) => String(i + 1));
     const series = model.series.filter((serie) => serie.values.length);
     const many = series.length > 1;
@@ -537,6 +550,7 @@
         svg.append(s("path", { d: area, fill: color, "fill-opacity": 0.1 }));
       }
       svg.append(s("polyline", { class: "hs-draw", points: pts.map((p) => p.join(",")).join(" "), fill: "none", stroke: color, "stroke-width": si === 0 ? 5 : 3.5, "stroke-linejoin": "round", "stroke-linecap": "round", style: { "--len": pathLength(pts), "--i": si } }));
+      if (opts.trend === "linear") trendLine(svg, pts, color);
       const hotIndex = serie.values.length - 1;
       pts.forEach(([x, y], i) => {
         const end = i === hotIndex;
@@ -630,7 +644,7 @@
   }
 
   /** 散布図 (scatter): the labels are the X values (numbers; otherwise 1, 2, 3…), each series a set of points. */
-  function scatterChart(svg, model, w, h) {
+  function scatterChart(svg, model, w, h, opts = {}) {
     const xs = model.labels.map((label, i) => { const v = Number(String(label).replace(/[,，]/g, "")); return Number.isFinite(v) && String(label).trim() !== "" ? v : i + 1; });
     const ys = model.series.flatMap((serie) => serie.values);
     const ylo = Math.min(0, ...ys);
@@ -645,10 +659,11 @@
     const xOf = (v) => left + ((v - xlo) / (xhi - xlo || 1)) * (right - left);
     for (let k = 0; k <= 4; k += 1) {
       const v = xlo + ((xhi - xlo) * k) / 4;
-      svg.append(s("text", { class: "hs-tick", x: xOf(v), y: bottom + 42, "text-anchor": "middle" }, fmt(Math.round(v * 100) / 100)));
+      svg.append(s("text", { class: "hs-tick", x: xOf(v), y: bottom + 42, "text-anchor": k === 4 ? "end" : "middle" }, fmt(Math.round(v * 100) / 100)));
     }
     model.series.forEach((serie, si) => {
       serie.values.forEach((v, i) => svg.append(markTip(s("circle", { class: "hs-dot", cx: xOf(xs[i]), cy: yOf(v), r: 11, fill: SERIES[si % SERIES.length], "fill-opacity": 0.85 }), `${model.series.length > 1 ? `${serie.name}・` : ""}X ${fmt(xs[i])}／Y ${fmt(v)}`, i)));
+      if (opts.trend === "linear") trendLine(svg, serie.values.map((v, i) => [xOf(xs[i]), yOf(v)]), SERIES[si % SERIES.length]);
     });
   }
 
@@ -679,12 +694,13 @@
 
   /** ウォーターフォール: each value moves the running total up or down; a label like 合計 shows the total itself. */
   const TOTAL_LABEL = /^(合計|総計|計|小計|累計|total|subtotal|sum)$/i;
-  function waterfallChart(svg, model, w, h) {
+  function waterfallChart(svg, model, w, h, opts = {}) {
     const values = model.series[0]?.values || [];
     const labels = model.labels;
+    const totals = new Set(opts.totals || []);
     let run = 0;
     const steps = values.map((v, i) => {
-      if (TOTAL_LABEL.test(String(labels[i] || "").trim())) return { from: 0, to: run, total: true, v: run };
+      if (totals.has(i) || TOTAL_LABEL.test(String(labels[i] || "").trim())) return { from: 0, to: run, total: true, v: run };
       const from = run;
       run += v;
       return { from, to: run, total: false, v };
@@ -730,6 +746,318 @@
       svg.append(s("text", { x: labelW - 18, y: y + barH / 2 + 8, "text-anchor": "end" }, String(labels[i] || "").length > 10 ? `${String(labels[i]).slice(0, 9)}…` : labels[i]));
       svg.append(markTip(s("rect", { class: "hs-bar h", x, y, width: bw, height: barH, rx: 6, fill: SERIES[i % SERIES.length], "data-center": "" }), `${labels[i]}：${fmt(v)}`, i));
       svg.append(s("text", { class: "hs-val", x: w - 10, y: y + barH / 2 + 9, "text-anchor": "end" }, `${fmt(v)}${i ? `（${Math.round((v / (values[0] || 1)) * 100)}%）` : ""}`));
+    });
+  }
+
+  // Charts with axes (they take 軸ラベル).
+  const AXIS_CHARTS = new Set(["bar", "combo", "clustered-bar", "stacked-bar", "100-stacked-bar", "line", "multi-line", "area", "stacked-area", "scatter", "bubble", "waterfall", "hbar", "stacked-hbar", "histogram", "boxplot"]);
+
+  /** 近似曲線（線形）: the least-squares line through points on the screen (both axes being linear, it is the same line). */
+  function trendLine(svg, pts, color = "var(--ink)") {
+    const ok = pts.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+    if (ok.length < 2) return;
+    const n = ok.length;
+    const sx = ok.reduce((a, [x]) => a + x, 0);
+    const sy = ok.reduce((a, [, y]) => a + y, 0);
+    const sxx = ok.reduce((a, [x]) => a + x * x, 0);
+    const sxy = ok.reduce((a, [x, y]) => a + x * y, 0);
+    const b = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1);
+    const a = (sy - b * sx) / n;
+    const x1 = Math.min(...ok.map(([x]) => x));
+    const x2 = Math.max(...ok.map(([x]) => x));
+    svg.append(s("line", { class: "hs-trend", x1, y1: a + b * x1, x2, y2: a + b * x2, stroke: color, "stroke-width": 3, "stroke-dasharray": "12 9", "stroke-linecap": "round" }));
+  }
+
+  /** 集合横棒・積み上げ横棒: the labels down the left, each series a bar beside the others (or after them). */
+  function hbarChart(svg, model, w, h) {
+    const stacked = model.type === "stacked-hbar";
+    const labels = model.labels;
+    const series = model.series.length ? model.series : [{ name: "", values: [] }];
+    const n = Math.max(1, labels.length);
+    const k = series.length;
+    const labelW = Math.min(w * 0.3, Math.max(...labels.map((l) => String(l).length), 2) * 26 + 24);
+    const plotW = w - labelW - 120;
+    const slot = h / n;
+    const totals = labels.map((_, i) => series.reduce((a, serie) => a + Math.max(0, serie.values[i] || 0), 0));
+    const max = niceMax((stacked ? Math.max(...totals, 0) : Math.max(...series.flatMap((serie) => serie.values), 0)) * 1.02 || 1);
+    const groupH = Math.min(slot * 0.74, (stacked ? 1 : k) * 46);
+    const bh = stacked ? groupH : groupH / k;
+    const hot = k === 1 ? totals.indexOf(Math.max(...totals)) : -1;
+    svg.append(s("line", { class: "hs-axisline", x1: labelW, x2: labelW, y1: 0, y2: h }));
+    labels.forEach((label, i) => {
+      const y0 = slot * i + (slot - groupH) / 2;
+      svg.append(s("text", { x: labelW - 16, y: slot * i + slot / 2 + 8, "text-anchor": "end" }, label.length > 12 ? `${label.slice(0, 11)}…` : label));
+      let x = labelW;
+      series.forEach((serie, si) => {
+        const v = Math.max(0, serie.values[i] || 0);
+        const bw = (v / max) * plotW;
+        const y = stacked ? y0 : y0 + si * bh;
+        const fill = stacked ? stackColor(si) : k > 1 ? SERIES[si % SERIES.length] : i === hot ? "var(--accent)" : "var(--c-muted)";
+        svg.append(markTip(s("rect", { class: "hs-bar h", x, y: stacked ? y : y + 2, width: Math.max(stacked ? 0 : 2, bw), height: Math.max(2, stacked ? bh : bh - 4), rx: stacked ? 0 : 6, fill }), `${label}${serie.name ? `・${serie.name}` : ""}：${fmt(v)}`, i * k + si));
+        if (stacked) {
+          if (bw > 64) svg.append(s("text", { class: "hs-val", x: x + bw / 2, y: y + bh / 2 + 8, "text-anchor": "middle", style: { "font-size": "20px", fill: "var(--k-ink, #fff)" } }, fmt(v)));
+          x += bw;
+        } else if (n * k <= 24) svg.append(s("text", { class: `hs-val${i === hot ? " hot" : ""}`, x: x + bw + 12, y: y + bh / 2 + 8, style: { "font-size": "21px" } }, fmt(v)));
+      });
+      if (stacked) svg.append(s("text", { class: "hs-val", x: x + 12, y: y0 + groupH / 2 + 8, style: { "font-size": "22px" } }, fmt(totals[i])));
+    });
+  }
+
+  /** 積み上げ面: each series an area standing on the ones below it, so the top line is the total. */
+  function stackedAreaChart(svg, model, w, h) {
+    const labels = model.labels;
+    const series = model.series.filter((serie) => serie.values.length);
+    const sums = labels.map((_, i) => series.reduce((a, serie) => a + Math.max(0, serie.values[i] || 0), 0));
+    const hi = niceMax(Math.max(...sums, 0) * 1.08 || 1);
+    const left = 90;
+    const top = 40;
+    const bottom = h - 64;
+    const yOf = valueAxis(svg, 0, hi, { left, right: w, top, bottom });
+    const n = Math.max(2, labels.length);
+    const xOf = (i) => left + ((w - left - 20) * i) / (n - 1);
+    const step = Math.ceil(labels.length / 8);
+    labels.forEach((label, i) => { if (i % step === 0 || i === labels.length - 1) svg.append(s("text", { x: xOf(i), y: bottom + 42, "text-anchor": "middle" }, label.length > 8 ? `${label.slice(0, 7)}…` : label)); });
+    let base = labels.map(() => 0);
+    series.forEach((serie, si) => {
+      const upper = base.map((b, i) => b + Math.max(0, serie.values[i] || 0));
+      const pts = upper.map((v, i) => [xOf(i), yOf(v)]);
+      const low = base.map((v, i) => [xOf(i), yOf(v)]).reverse();
+      svg.append(s("path", { class: "hs-oarea", d: `M${pts.map((p) => p.join(",")).join(" L")} L${low.map((p) => p.join(",")).join(" L")} Z`, fill: stackColor(si) }));
+      svg.append(s("polyline", { class: "hs-draw", points: pts.map((p) => p.join(",")).join(" "), fill: "none", stroke: SERIES[si % SERIES.length], "stroke-width": 3, "stroke-linejoin": "round", style: { "--len": pathLength(pts), "--i": si } }));
+      pts.forEach(([x, y], i) => svg.append(markTip(s("circle", { cx: x, cy: y, r: 5, fill: SERIES[si % SERIES.length] }), `${labels[i]}・${serie.name}：${fmt(serie.values[i])}（計 ${fmt(upper[i])}）`, i)));
+      base = upper;
+    });
+  }
+
+  /** バブル: X from the labels (numbers), Y from the first series, the bubble's area from the second. */
+  function bubbleChart(svg, model, w, h) {
+    const xs = model.labels.map((label, i) => { const v = Number(String(label).replace(/[,，]/g, "")); return Number.isFinite(v) && String(label).trim() !== "" ? v : i + 1; });
+    const ys = model.series[0]?.values || [];
+    const sizes = (model.series[1]?.values || ys.map(() => 1)).map((v) => Math.max(0, Number(v) || 0));
+    const rMax = Math.min(w, h) * 0.085;
+    const big = Math.max(...sizes, 0) || 1;
+    const radius = (v) => Math.max(7, Math.sqrt(v / big) * rMax);
+    const ylo = Math.min(0, ...ys);
+    const yhi = ylo + niceMax((Math.max(...ys, 0) - ylo) * 1.15 || 1);
+    const xlo = Math.min(0, ...xs);
+    const xhi = xlo + niceMax((Math.max(...xs, 0) - xlo) * 1.1 || 1);
+    const left = 90;
+    const top = 30;
+    const bottom = h - 64;
+    const right = w - 20;
+    const yOf = valueAxis(svg, ylo, yhi, { left, right, top, bottom });
+    const xOf = (v) => left + ((v - xlo) / (xhi - xlo || 1)) * (right - left);
+    for (let k = 0; k <= 4; k += 1) {
+      const v = xlo + ((xhi - xlo) * k) / 4;
+      svg.append(s("text", { class: "hs-tick", x: xOf(v), y: bottom + 42, "text-anchor": k === 4 ? "end" : "middle" }, fmt(Math.round(v * 100) / 100)));
+    }
+    // The big ones behind the small ones.
+    ys.map((y, i) => i).sort((a, b) => sizes[b] - sizes[a]).forEach((i) => {
+      svg.append(markTip(s("circle", { class: "hs-dot", cx: xOf(xs[i]), cy: yOf(ys[i]), r: radius(sizes[i]), fill: SERIES[i % 6], "fill-opacity": 0.72, stroke: "var(--bg)", "stroke-width": 2 }), `X ${fmt(xs[i])}／Y ${fmt(ys[i])}／サイズ ${fmt(sizes[i])}`, i));
+    });
+  }
+
+  /** ヒストグラム's bins: the values counted into bins of a round width (about √n of them, as Excel's automatic bins). */
+  function histogramBins(values, count = null) {
+    const v = (values || []).map(Number).filter(Number.isFinite);
+    if (!v.length) return [];
+    const lo = Math.min(...v);
+    const hi = Math.max(...v);
+    const k = count || Math.max(1, Math.min(20, Math.round(Math.sqrt(v.length))));
+    const raw = (hi - lo) / k || 1;
+    const exp = 10 ** Math.floor(Math.log10(raw));
+    const width = [1, 2, 2.5, 5, 10].map((m) => m * exp).find((x) => x >= raw - 1e-12) || 10 * exp;
+    const start = Math.floor(lo / width + 1e-9) * width;
+    const n = Math.max(1, Math.floor((hi - start) / width + 1e-9) + 1);
+    const bins = Array.from({ length: n }, (_, i) => ({ from: start + i * width, to: start + (i + 1) * width, count: 0 }));
+    for (const x of v) bins[Math.min(n - 1, Math.floor((x - start) / width + 1e-9))].count += 1;
+    return bins;
+  }
+  const round6 = (x) => Math.round(x * 1e6) / 1e6;
+  /** ヒストグラム: the first series' values counted into bins; the bars touch, the bins under them. */
+  function histogramChart(svg, model, w, h) {
+    const bins = histogramBins(model.series[0]?.values || []);
+    if (!bins.length) return;
+    const left = 90;
+    const top = 40;
+    const bottom = h - 64;
+    // Counts: whole numbers on the axis (four steps of a round size).
+    const most = Math.max(...bins.map((b) => b.count), 1);
+    const per = Math.max(1, Math.ceil(niceStep(most * 1.1)));
+    const yOf = valueAxis(svg, 0, per * Math.ceil((most * 1.1) / per), { left, right: w, top, bottom, ticks: Math.ceil((most * 1.1) / per) });
+    const slot = (w - left - 10) / bins.length;
+    const every = Math.ceil(bins.length / 8);
+    bins.forEach((b, i) => {
+      const x = left + slot * i;
+      const y = yOf(b.count);
+      svg.append(markTip(s("rect", { class: "hs-bar", x: x + 1, y, width: Math.max(2, slot - 2), height: Math.max(0, bottom - y), fill: "var(--c2)" }), `${fmt(round6(b.from))}〜${fmt(round6(b.to))}：${b.count}`, i));
+      if (b.count && bins.length <= 16) svg.append(s("text", { class: "hs-val", x: x + slot / 2, y: y - 12, "text-anchor": "middle", style: { "font-size": "21px" } }, String(b.count)));
+      if (i % every === 0) svg.append(s("text", { class: "hs-tick", x: x + slot / 2, y: bottom + 40, "text-anchor": "middle", style: { "font-size": "19px" } }, `${fmt(round6(b.from))}〜${fmt(round6(b.to))}`));
+    });
+  }
+
+  /** 箱ひげ図's numbers: quartiles (inclusive, as QUARTILE.INC), the whiskers to the last values within 1.5 IQR, the rest outliers. */
+  function boxStats(values) {
+    const v = (values || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+    if (!v.length) return null;
+    const q = (p) => { const at = (v.length - 1) * p; const i = Math.floor(at); return v[i] + (v[Math.min(v.length - 1, i + 1)] - v[i]) * (at - i); };
+    const q1 = q(0.25);
+    const median = q(0.5);
+    const q3 = q(0.75);
+    const iqr = q3 - q1;
+    const inside = v.filter((x) => x >= q1 - 1.5 * iqr && x <= q3 + 1.5 * iqr);
+    return { min: inside[0], q1, median, q3, max: inside.at(-1), mean: v.reduce((a, b) => a + b, 0) / v.length, outliers: v.filter((x) => x < q1 - 1.5 * iqr || x > q3 + 1.5 * iqr) };
+  }
+  /** 箱ひげ図: each series a box (quartiles), its median, mean (×), whiskers and outliers. */
+  function boxplotChart(svg, model, w, h) {
+    const groups = model.series.map((serie) => ({ name: serie.name, st: boxStats(serie.values) })).filter((g) => g.st);
+    if (!groups.length) return;
+    const all = groups.flatMap((g) => [g.st.min, g.st.max, ...g.st.outliers]);
+    const lo0 = Math.min(...all);
+    const hi0 = Math.max(...all);
+    const pad = (hi0 - lo0) * 0.1 || 1;
+    // The axis in round steps around the values (from 0 when they are all near it).
+    const step = niceStep(hi0 - lo0 + pad * 2);
+    let lo = Math.floor((lo0 - pad) / step) * step;
+    if (lo0 >= 0 && lo < 0) lo = 0;
+    const ticks = Math.max(2, Math.ceil((hi0 + pad - lo) / step));
+    const left = 90;
+    const top = 40;
+    const bottom = h - 64;
+    const yOf = valueAxis(svg, lo, lo + step * ticks, { left, right: w, top, bottom, ticks });
+    const slot = (w - left) / groups.length;
+    const bw = Math.min(140, slot * 0.46);
+    groups.forEach(({ name, st }, i) => {
+      const cx = left + slot * i + slot / 2;
+      const x = cx - bw / 2;
+      const tip = `${name}：最小 ${fmt(st.min)}・第1四分位 ${fmt(round6(st.q1))}・中央値 ${fmt(round6(st.median))}・第3四分位 ${fmt(round6(st.q3))}・最大 ${fmt(st.max)}・平均 ${fmt(round6(st.mean))}`;
+      for (const [a, b] of [[st.max, st.q3], [st.q1, st.min]]) svg.append(s("line", { class: "hs-draw hs-whisker", x1: cx, x2: cx, y1: yOf(a), y2: yOf(b), stroke: "var(--muted)", "stroke-width": 3, style: { "--len": Math.abs(yOf(a) - yOf(b)) } }));
+      for (const v of [st.min, st.max]) svg.append(s("line", { class: "hs-whisker", x1: cx - bw / 4, x2: cx + bw / 4, y1: yOf(v), y2: yOf(v), stroke: "var(--muted)", "stroke-width": 3 }));
+      svg.append(markTip(s("rect", { class: "hs-bar", x, y: yOf(st.q3), width: bw, height: Math.max(2, yOf(st.q1) - yOf(st.q3)), fill: stackColor(i), "data-center": "" }), tip, i));
+      svg.append(s("line", { class: "hs-median", x1: x, x2: x + bw, y1: yOf(st.median), y2: yOf(st.median), stroke: "var(--ink)", "stroke-width": 4 }));
+      const m = yOf(st.mean);
+      svg.append(s("path", { class: "hs-mean", d: `M${cx - 9},${m - 9} L${cx + 9},${m + 9} M${cx + 9},${m - 9} L${cx - 9},${m + 9}`, stroke: "var(--ink)", "stroke-width": 3 }));
+      st.outliers.forEach((v) => svg.append(s("circle", { cx, cy: yOf(v), r: 6, fill: "none", stroke: "var(--muted)", "stroke-width": 3 })));
+      svg.append(s("text", { x: cx, y: bottom + 42, "text-anchor": "middle" }, name.length > 10 ? `${name.slice(0, 9)}…` : name));
+    });
+  }
+
+  /** ツリーマップ's layout: rectangles of areas in proportion, as near square as they can be (squarified). */
+  function squarify(items, x, y, w, h) {
+    const list = items.filter((it) => it.value > 0).sort((a, b) => b.value - a.value);
+    const total = list.reduce((a, it) => a + it.value, 0);
+    const out = [];
+    if (!total || w <= 0 || h <= 0) return out;
+    const scale = (w * h) / total;
+    let rest = list.map((it) => ({ it, area: it.value * scale }));
+    let box = { x, y, w, h };
+    const worst = (row, side) => { const sum = row.reduce((a, r) => a + r.area, 0); const max = Math.max(...row.map((r) => r.area)); const min = Math.min(...row.map((r) => r.area)); return Math.max((side * side * max) / (sum * sum), (sum * sum) / (side * side * min)); };
+    while (rest.length) {
+      const side = Math.min(box.w, box.h);
+      const row = [rest[0]];
+      let k = 1;
+      while (k < rest.length && worst([...row, rest[k]], side) <= worst(row, side)) { row.push(rest[k]); k += 1; }
+      rest = rest.slice(k);
+      const sum = row.reduce((a, r) => a + r.area, 0);
+      if (box.w >= box.h) {
+        const cw = sum / box.h;
+        let cy = box.y;
+        for (const r of row) { const ch = r.area / cw; out.push({ ...r.it, x: box.x, y: cy, w: cw, h: ch }); cy += ch; }
+        box = { x: box.x + cw, y: box.y, w: box.w - cw, h: box.h };
+      } else {
+        const ch = sum / box.w;
+        let cx = box.x;
+        for (const r of row) { const cw = r.area / ch; out.push({ ...r.it, x: cx, y: box.y, w: cw, h: ch }); cx += cw; }
+        box = { x: box.x, y: box.y + ch, w: box.w, h: box.h - ch };
+      }
+    }
+    return out;
+  }
+  /** Labels written 親/子 (or 親／子) make a hierarchy: [{ name, value, children }] with the parents' totals. */
+  function hierarchy(labels, values) {
+    const parents = new Map();
+    const flat = [];
+    labels.forEach((label, i) => {
+      const v = Math.max(0, Number(values[i]) || 0);
+      const [p, c] = String(label).split(/[/／]/).map((t) => t.trim());
+      if (c) {
+        if (!parents.has(p)) { const node = { name: p, value: 0, children: [] }; parents.set(p, node); flat.push(node); }
+        const node = parents.get(p);
+        node.children.push({ name: c, value: v, full: label });
+        node.value += v;
+      } else flat.push({ name: String(label), value: v, children: [] });
+    });
+    return flat;
+  }
+  /** ツリーマップ: each label a rectangle of its share (親/子 labels grouped, one colour a group); the name and value inside. */
+  function treemapChart(svg, model, w, h) {
+    const nodes = hierarchy(model.labels, model.series[0]?.values || []);
+    const total = nodes.reduce((a, n) => a + n.value, 0) || 1;
+    let i = 0;
+    const cell = (r, name, value, color, sub) => {
+      svg.append(markTip(s("rect", { class: "hs-bar", x: r.x, y: r.y, width: Math.max(0, r.w - 3), height: Math.max(0, r.h - 3), fill: color, "data-center": "" }), `${sub ? `${sub} / ` : ""}${name}：${fmt(value)}（${Math.round((value / total) * 100)}%）`, i++));
+      if (r.w > 90 && r.h > 50) {
+        const fs = Math.max(16, Math.min(28, r.w / 9, r.h / 3));
+        svg.append(s("text", { class: "hs-tm-name", x: r.x + 14, y: r.y + fs + 8, style: { "font-size": `${fs}px`, fill: "var(--k-ink, #fff)" } }, name.length > r.w / fs ? `${name.slice(0, Math.max(1, Math.floor(r.w / fs) - 1))}…` : name));
+        if (r.h > fs * 2 + 24) svg.append(s("text", { class: "hs-val", x: r.x + 14, y: r.y + fs * 2 + 18, style: { "font-size": `${Math.max(15, fs * 0.8)}px`, fill: "var(--k-ink, #fff)" } }, fmt(value)));
+      }
+    };
+    squarify(nodes, 0, 0, w, h).forEach((r, gi) => {
+      const color = stackColor(gi);
+      if (!r.children.length) { cell(r, r.name, r.value, color); return; }
+      // A group: its name on a strip at the top, its members inside.
+      const strip = r.h > 90 && r.w > 80 ? 34 : 0;
+      if (strip) svg.append(s("text", { class: "hs-tm-group", x: r.x + 10, y: r.y + 25, style: { "font-size": "20px", "font-weight": 700, fill: "var(--ink)" } }, r.name.length > r.w / 20 ? `${r.name.slice(0, Math.max(1, Math.floor(r.w / 20) - 1))}…` : r.name));
+      squarify(r.children, r.x, r.y + strip, r.w, r.h - strip).forEach((c) => cell(c, c.name, c.value, color, r.name));
+    });
+  }
+
+  /** サンバースト: 親/子 labels as rings — the groups inside, their members outside (one colour a group); flat labels one ring. */
+  function sunburstChart(svg, model, w, h) {
+    const nodes = hierarchy(model.labels, model.series[0]?.values || []).filter((n) => n.value > 0);
+    const total = nodes.reduce((a, n) => a + n.value, 0);
+    if (!total) return;
+    const deep = nodes.some((n) => n.children.length);
+    const cx = w / 2;
+    const cy = h / 2;
+    const R = Math.min(w, h) / 2 - 8;
+    const hole = R * 0.18;
+    const mid = deep ? hole + (R - hole) * 0.5 : R;
+    const arc = (r0, r1, a0, a1) => {
+      const p = (r, a) => [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+      const large = a1 - a0 > Math.PI ? 1 : 0;
+      const [x0, y0] = p(r1, a0);
+      const [x1, y1] = p(r1, a1);
+      const [x2, y2] = p(r0, a1);
+      const [x3, y3] = p(r0, a0);
+      return `M${x0},${y0} A${r1},${r1} 0 ${large} 1 ${x1},${y1} L${x2},${y2} A${r0},${r0} 0 ${large} 0 ${x3},${y3} Z`;
+    };
+    const g = s("g", { class: "hs-ochart-pie", "data-c": `${cx},${cy}` });
+    svg.append(g);
+    let i = 0;
+    const slice = (r0, r1, a0, a1, color, name, value, opacity = 1) => {
+      g.append(markTip(s("path", { class: "hs-oslice", d: arc(r0, r1, a0, a1 - 0.004), fill: color, "fill-opacity": opacity, stroke: "var(--bg)", "stroke-width": 3 }), `${name}：${fmt(value)}（${Math.round((value / total) * 100)}%）`, i++));
+      const span = (a1 - a0) * ((r0 + r1) / 2);
+      if (span > 70 && r1 - r0 > 34) {
+        const am = (a0 + a1) / 2;
+        const rm = (r0 + r1) / 2;
+        g.append(s("text", { class: "hs-sb-name", x: cx + rm * Math.sin(am), y: cy - rm * Math.cos(am) + 8, "text-anchor": "middle", style: { "font-size": "20px", fill: "var(--k-ink, #fff)" } }, name.length > span / 20 ? `${name.slice(0, Math.max(1, Math.floor(span / 20) - 1))}…` : name));
+      }
+    };
+    let a = 0;
+    nodes.forEach((n, gi) => {
+      const a1 = a + (n.value / total) * Math.PI * 2;
+      const color = stackColor(gi);
+      slice(hole, mid, a, a1, color, n.name, n.value);
+      if (deep && n.children.length) {
+        let b = a;
+        n.children.filter((c) => c.value > 0).forEach((c, ci) => {
+          const b1 = b + (c.value / total) * Math.PI * 2;
+          slice(mid, R, b, b1, color, c.name, c.value, ci % 2 ? 0.7 : 0.88);
+          b = b1;
+        });
+      }
+      a = a1;
     });
   }
 
@@ -2427,7 +2755,7 @@
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },
     setSejArt(art) { SEJ_ART = art || {}; },
-    render, mount, fit, brandCheck, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, mediaEl, resolveSrc, chart, chartModel, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
+    render, mount, fit, brandCheck, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, mediaEl, resolveSrc, chart, chartModel, histogramBins, boxStats, squarify, hierarchy, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
     evalFormula, formulaTokens, rankShow, simUpdate, gapUpdate, fmtNum,
   });
   root.SlideEngine = Engine;

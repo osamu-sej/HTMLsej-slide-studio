@@ -240,6 +240,36 @@
     };
   }
 
+  // 動作設定ボタン (PowerPoint's action buttons): a square with its sign drawn darker; the ones that move through the
+  // show come with that click already set (`action`).
+  const ACTION_BUTTONS = (() => {
+    const sign = (draw) => (w, hh) => {
+      const s0 = Math.min(w, hh) * 0.62;
+      const x0 = (w - s0) / 2;
+      const y0 = (hh - s0) / 2;
+      const q = (x, y) => [x0 + x * s0, y0 + y * s0];
+      return draw(q, s0, x0, y0);
+    };
+    const shapeOf = (points) => (q) => [{ d: poly(points.map(([x, y]) => q(x, y))), tone: "dark" }];
+    const line = (q, pts) => `M${pts.map(([x, y]) => P(...q(x, y))).join(" L")}`;
+    const ring = (q, s0) => { const [cx, cy] = q(0.5, 0.5); return ellipse(cx, cy, s0 * 0.48, s0 * 0.48); };
+    const make = (label, extras, action = null) => ({ label: `動作設定ボタン: ${label}`, d: (w, hh) => poly([[0, 0], [w, 0], [w, hh], [0, hh]]), extras: sign(extras), ...(action ? { action } : {}) });
+    return {
+      actionButtonBackPrevious: make("戻る/前へ", shapeOf([[0.05, 0.5], [0.95, 0.05], [0.95, 0.95]]), { type: "prev" }),
+      actionButtonForwardNext: make("進む/次へ", shapeOf([[0.95, 0.5], [0.05, 0.05], [0.05, 0.95]]), { type: "next" }),
+      actionButtonBeginning: make("最初へ", (q) => [{ d: `${poly([[0.25, 0.5], [0.95, 0.05], [0.95, 0.95]].map(([x, y]) => q(x, y)))} ${poly([[0.05, 0.05], [0.18, 0.05], [0.18, 0.95], [0.05, 0.95]].map(([x, y]) => q(x, y)))}`, tone: "dark" }], { type: "first" }),
+      actionButtonEnd: make("最後へ", (q) => [{ d: `${poly([[0.75, 0.5], [0.05, 0.05], [0.05, 0.95]].map(([x, y]) => q(x, y)))} ${poly([[0.82, 0.05], [0.95, 0.05], [0.95, 0.95], [0.82, 0.95]].map(([x, y]) => q(x, y)))}`, tone: "dark" }], { type: "last" }),
+      actionButtonHome: make("ホーム", shapeOf([[0.5, 0.05], [0.95, 0.45], [0.82, 0.45], [0.82, 0.95], [0.18, 0.95], [0.18, 0.45], [0.05, 0.45]]), { type: "first" }),
+      actionButtonInformation: make("情報", (q, s0) => { const [cx, cy] = q(0.5, 0.24); return [{ d: ring(q, s0), tone: "dark" }, { d: `${ellipse(cx, cy, s0 * 0.07, s0 * 0.07)} ${poly([[0.43, 0.4], [0.57, 0.4], [0.57, 0.82], [0.43, 0.82]].map(([x, y]) => q(x, y)))}`, tone: "light" }]; }),
+      actionButtonReturn: make("戻る", (q) => [{ d: line(q, [[0.8, 0.15], [0.8, 0.6], [0.6, 0.8], [0.3, 0.8], [0.15, 0.62]]), tone: "line" }, { d: poly([[0.02, 0.62], [0.28, 0.48], [0.28, 0.76]].map(([x, y]) => q(x, y))), tone: "dark" }], { type: "prev" }),
+      actionButtonMovie: make("ビデオ", (q) => [{ d: `${poly([[0.05, 0.25], [0.62, 0.25], [0.62, 0.75], [0.05, 0.75]].map(([x, y]) => q(x, y)))} ${poly([[0.62, 0.45], [0.95, 0.25], [0.95, 0.75], [0.62, 0.55]].map(([x, y]) => q(x, y)))}`, tone: "dark" }]),
+      actionButtonDocument: make("ドキュメント", (q) => [{ d: poly([[0.18, 0.05], [0.62, 0.05], [0.82, 0.25], [0.82, 0.95], [0.18, 0.95]].map(([x, y]) => q(x, y))), tone: "dark" }, { d: line(q, [[0.62, 0.05], [0.62, 0.25], [0.82, 0.25]]), tone: "line" }]),
+      actionButtonSound: make("サウンド", (q) => [{ d: poly([[0.05, 0.35], [0.3, 0.35], [0.58, 0.08], [0.58, 0.92], [0.3, 0.65], [0.05, 0.65]].map(([x, y]) => q(x, y))), tone: "dark" }, { d: `${line(q, [[0.72, 0.3], [0.8, 0.5], [0.72, 0.7]])} ${line(q, [[0.84, 0.15], [0.97, 0.5], [0.84, 0.85]])}`, tone: "line" }]),
+      actionButtonHelp: make("ヘルプ", (q, s0) => { const [cx, cy] = q(0.5, 0.88); return [{ d: `${line(q, [[0.3, 0.3], [0.38, 0.12], [0.62, 0.12], [0.7, 0.3], [0.5, 0.48], [0.5, 0.66]])}`, tone: "line" }, { d: ellipse(cx, cy, s0 * 0.07, s0 * 0.07), tone: "dark" }]; }),
+      actionButtonBlank: make("空白", () => []),
+    };
+  })();
+
   const SHAPES = {
     // ---- 四角形
     rect: { label: "正方形/長方形", d: (w, hh) => poly([[0, 0], [w, 0], [w, hh], [0, hh]]) },
@@ -873,6 +903,7 @@
       extras: (w, hh, adj) => { const [tx, ty] = wedgeTip(w, hh, adj); const start = [clamp(tx, 0, w) === tx ? tx : tx < 0 ? 0 : w, ty > hh ? hh : ty < 0 ? 0 : hh / 2]; return [{ d: `M${P(...start)} L${P(tx, ty)}`, tone: "line" }]; },
       handles: [tailHandle],
     },
+    ...ACTION_BUTTONS,
   };
   for (const [key, shape] of Object.entries(SHAPES)) shape.key = key;
 
@@ -884,6 +915,7 @@
     ["フローチャート", ["flowProcess", "flowAlternate", "flowDecision", "flowData", "flowPredefined", "flowInternalStorage", "flowDocument", "flowMultidocument", "flowTerminator", "flowPreparation", "flowManualInput", "flowManualOperation", "flowConnector", "flowOffpage", "flowCard", "flowPunchedTape", "flowSummingJunction", "flowOr", "flowCollate", "flowSort", "flowExtract", "flowMerge", "flowStoredData", "flowDelay", "flowMagneticDisk", "flowDirectAccess", "flowDisplay"]],
     ["星とリボン", ["explosion1", "explosion2", "star4", "star5", "star6", "star7", "star8", "star10", "star12", "star16", "star24", "star32", "wave", "doubleWave"]],
     ["吹き出し", ["wedgeRectCallout", "wedgeRoundRectCallout", "wedgeEllipseCallout", "cloudCallout", "lineCallout"]],
+    ["動作設定ボタン", Object.keys(ACTION_BUTTONS)],
   ];
 
   /** A shape's adjustments, each within its range (defaults for what is missing). */
@@ -1186,7 +1218,8 @@
   const VOLUMES = { 0: "ミュート", 0.33: "小", 0.66: "中", 1: "大" };
   // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
   const TABLE_STYLES = { sej: "罫線（SEJ）", rows: "淡い横線", grid: "格子", lines: "横線だけ", plain: "線なし", brown: "淡茶の見出し" };
-  const CHART_KINDS = { bar: "縦棒", "clustered-bar": "集合縦棒", "stacked-bar": "積み上げ縦棒", "100-stacked-bar": "100%積み上げ縦棒", line: "折れ線", "multi-line": "折れ線（複数）", area: "面", pie: "円", donut: "ドーナツ", scatter: "散布図", radar: "レーダー", waterfall: "ウォーターフォール", funnel: "じょうご", combo: "複合（棒と折れ線）" };
+  const CHART_KINDS = { bar: "縦棒", "clustered-bar": "集合縦棒", "stacked-bar": "積み上げ縦棒", "100-stacked-bar": "100%積み上げ縦棒", line: "折れ線", "multi-line": "折れ線（複数）", area: "面", pie: "円", donut: "ドーナツ", scatter: "散布図", radar: "レーダー", waterfall: "ウォーターフォール", funnel: "じょうご", combo: "複合（棒と折れ線）",
+    hbar: "集合横棒", "stacked-hbar": "積み上げ横棒", "stacked-area": "積み上げ面", bubble: "バブル", histogram: "ヒストグラム", boxplot: "箱ひげ図", treemap: "ツリーマップ", sunburst: "サンバースト" };
   const DASHES = {
     solid: ["実線", null], roundDot: ["丸点線", [0, 2]], squareDot: ["角点線", [1, 1]], dash: ["破線", [4, 3]], dashDot: ["一点鎖線", [4, 3, 1, 3]],
     longDash: ["長破線", [8, 3]], longDashDot: ["長鎖線", [8, 3, 1, 3]], longDashDotDot: ["長二点鎖線", [8, 3, 1, 3, 1, 3]],
@@ -1757,9 +1790,16 @@
   function normalizeChart(raw) {
     if (!raw || typeof raw !== "object") return null;
     const labels = (Array.isArray(raw.labels) ? raw.labels : []).slice(0, CHART_MAX_LABELS).map((label) => String(label ?? "").trim().slice(0, 500));
+    // 箱ひげ図 and ヒストグラム read samples: a group may be shorter than the others, its empty cells stay empty (null).
+    const gappy = raw.type === "boxplot" || raw.type === "histogram";
     const series = (Array.isArray(raw.series) ? raw.series : []).filter((s) => s && typeof s === "object").slice(0, CHART_MAX_SERIES).map((s, i) => ({
       name: String(s.name ?? "").trim().slice(0, 500) || `系列${i + 1}`,
-      values: labels.map((_, j) => { const v = Number(Array.isArray(s.values) ? s.values[j] : NaN); return Number.isFinite(v) ? Math.round(clamp(v, -1e12, 1e12) * 10000) / 10000 : 0; }),
+      values: labels.map((_, j) => {
+        const r = Array.isArray(s.values) ? s.values[j] : null;
+        if (gappy && (r == null || r === "")) return null;
+        const v = Number(r);
+        return Number.isFinite(v) ? Math.round(clamp(v, -1e12, 1e12) * 10000) / 10000 : gappy ? null : 0;
+      }),
     }));
     if (!labels.length || !series.length) return null;
     const out = { type: CHART_KINDS[raw.type] ? raw.type : "bar", labels, series };
@@ -1769,6 +1809,14 @@
     if (raw.opts?.labels === false) opts.labels = false;
     if (["bottom", "right", "none"].includes(raw.opts?.legend)) opts.legend = raw.opts.legend;
     if (raw.opts?.grid === false) opts.grid = false;
+    // 軸ラベル and 近似曲線 (グラフ要素).
+    for (const key of ["axisX", "axisY"]) if (typeof raw.opts?.[key] === "string" && raw.opts[key].trim()) opts[key] = raw.opts[key].trim().slice(0, 40);
+    if (raw.opts?.trend === "linear") opts.trend = "linear";
+    // ウォーターフォール: the bars that show the running total (PowerPoint's 合計として設定), besides labels like 合計.
+    if (Array.isArray(raw.opts?.totals)) {
+      const totals = [...new Set(raw.opts.totals.map(Number).filter((i) => Number.isInteger(i) && i >= 0 && i < labels.length))].sort((a, b) => a - b).slice(0, 50);
+      if (totals.length) opts.totals = totals;
+    }
     if (Object.keys(opts).length) out.opts = opts;
     const style = normalizeChartStyle(raw.style, labels.length);
     if (style) out.style = style;
@@ -2357,7 +2405,7 @@
     if (c.type === "stacked-bar" || c.type === "100-stacked-bar") {
       data.barData = c.labels.map((label, i) => ({ label, values: c.series.map((s) => s.values[i] ?? 0) }));
       data.legendLabels = c.series.map((s) => s.name);
-    } else if (["multi-line", "clustered-bar", "area", "scatter", "radar"].includes(c.type)) {
+    } else if (["multi-line", "clustered-bar", "area", "scatter", "radar", "hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst"].includes(c.type)) {
       data.xAxisLabels = c.labels;
       data.series = c.series.map((s) => ({ label: s.name, values: s.values }));
     } else if (c.type === "combo") {
@@ -2591,8 +2639,10 @@
   }
 
   /** A chart drawn by the engine's own charts (the same look as the layouts' charts), with an optional title. */
+  // Kinds only the studio's own charts draw: an imported chart turned into one of them keeps its colours' order only.
+  const STUDIO_ONLY_CHARTS = new Set(["hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst"]);
   function chartBody(o, rotEl) {
-    if (o.chart.style) {
+    if (o.chart.style && !STUDIO_ONLY_CHARTS.has(o.chart.type)) {
       rotEl.append(h("div", { class: "hs-obj-chart is-office" }, officeChart(o.chart, o.w, o.h)));
       return;
     }

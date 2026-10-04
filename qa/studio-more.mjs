@@ -82,7 +82,7 @@ await ribbonBtn("新しいスライド");
 await menuItem("白紙");
 await page.waitForTimeout(400);
 
-await step("グラフ: 14 kinds in the picker; 円・ウォーターフォール・じょうご・レーダー・散布図・面 inserted and drawn", async () => {
+await step("グラフ: the kinds in the picker; 円・ウォーターフォール・じょうご・レーダー・散布図・面 inserted and drawn", async () => {
   await tab("挿入");
   await ribbonBtn("グラフ");
   await page.waitForSelector(".tb-chart-grid");
@@ -107,6 +107,85 @@ await step("グラフ: 14 kinds in the picker; 円・ウォーターフォール
   await page.click('.tb-chart-grid button[data-chart="pie"]');
   await page.waitForTimeout(300);
   assert((await slide()).elements.at(-1).chart.type === "pie", "changed to 円");
+});
+
+await step("グラフ（追加）: 集合横棒・積み上げ横棒・積み上げ面・バブル・ヒストグラム・箱ひげ図・ツリーマップ・サンバースト drawn; 軸ラベル and 近似曲線", async () => {
+  await tab("ホーム");
+  await ribbonBtn("新しいスライド");
+  await menuItem("白紙");
+  await page.waitForTimeout(300);
+  const expect = { hbar: "rect.hs-bar.h", "stacked-hbar": "rect.hs-bar.h", "stacked-area": "path.hs-oarea", bubble: "circle.hs-dot", histogram: "rect.hs-bar", boxplot: "rect.hs-bar[data-center]", treemap: "rect.hs-bar[data-center]", sunburst: ".hs-ochart-pie .hs-oslice" };
+  for (const [kind, sel] of Object.entries(expect)) {
+    await tab("挿入");
+    await ribbonBtn("グラフ");
+    await page.click(`.tb-chart-grid button[data-chart="${kind}"]`);
+    await page.waitForSelector(".tb-sheet-dialog[open]");
+    if (["bubble", "histogram", "boxplot", "treemap", "sunburst"].includes(kind)) assert(!(await page.locator(".tb-sheet-dialog .tb-kind-hint").isHidden()), `${kind}: the data sheet says how it is read`);
+    await page.locator('.tb-sheet-dialog .dialog-foot button:has-text("反映する")').click();
+    await page.waitForTimeout(300);
+    const o = (await slide()).elements.at(-1);
+    assert(o.kind === "chart" && o.chart.type === kind, `${kind} inserted: ${o.chart?.type}`);
+    const el = page.locator(`#stageBody .hs-obj[data-el="${o.id}"]`);
+    assert(await el.locator(sel).count(), `${kind} drawn with ${sel}`);
+    await el.screenshot({ path: join(outDir, `more-chart-${kind}.png`) });
+    await page.keyboard.press("Delete");
+    await page.waitForTimeout(200);
+  }
+  // グラフ要素を追加 → 軸ラベル and 近似曲線 on a line chart.
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="line"]');
+  await page.waitForSelector(".tb-sheet-dialog[open]");
+  await page.locator('.tb-sheet-dialog .dialog-foot button:has-text("反映する")').click();
+  await tab("グラフのデザイン");
+  await ribbonBtn("グラフ要素");
+  await menuItem("軸ラベル");
+  await page.waitForSelector("#askDialog[open]");
+  await page.fill("#askInput", "月");
+  await page.click("#askOk");
+  await page.waitForSelector("#askDialog[open]");
+  await page.fill("#askInput", "売上（億円）");
+  await page.click("#askOk");
+  await page.waitForTimeout(300);
+  await ribbonBtn("グラフ要素");
+  await menuItem("近似曲線");
+  await page.waitForTimeout(300);
+  const c = (await slide()).elements.at(-1);
+  assert(c.chart.opts?.axisX === "月" && c.chart.opts?.axisY === "売上（億円）" && c.chart.opts?.trend === "linear", `opts: ${JSON.stringify(c.chart.opts)}`);
+  const el = page.locator(`#stageBody .hs-obj[data-el="${c.id}"]`);
+  assert(await el.locator(".hs-axis-title").count() === 2 && await el.locator(".hs-trend").count() === 1, "the axis titles and the trendline drawn");
+  await el.screenshot({ path: join(outDir, "more-chart-axis-trend.png") });
+});
+
+await step("動作設定ボタン: 進む/次へ drawn with its click set; in the show a click on it goes to the next slide", async () => {
+  await tab("挿入");
+  await ribbonBtn("図形");
+  const names = await page.$$eval(".rb-pop .rb-gallery button[title^='動作設定ボタン']", (els) => els.map((el) => el.title));
+  assert(names.length === 12, `twelve action buttons: ${names.length}`);
+  await page.click('.rb-pop .rb-gallery button[title="動作設定ボタン: 進む/次へ"]');
+  const r = await page.locator(".slide-wrap .hs-slide").first().boundingBox();
+  const at = (x, y) => [r.x + (x * r.width) / 1920, r.y + (y * r.height) / 1080];
+  await page.mouse.move(...at(1500, 820));
+  await page.mouse.down();
+  await page.mouse.move(...at(1700, 960), { steps: 5 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const b = (await slide()).elements.at(-1);
+  assert(b.shape === "actionButtonForwardNext" && b.action?.type === "next", `the button: ${JSON.stringify({ shape: b.shape, action: b.action })}`);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Shift+F5");
+  await page.waitForSelector("#presenter .hs-player");
+  await page.waitForTimeout(800);
+  const count = () => page.textContent("#presenter .hs-player-count");
+  const before = await count();
+  const box = await page.locator(`#presenter .hs-obj[data-el="${b.id}"]`).last().boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForFunction((was) => document.querySelector("#presenter .hs-player-count")?.textContent !== was, before, { timeout: 5000 });
+  const pos = (text) => Number(String(text).trim().split("/")[0]);
+  assert(pos(await count()) === pos(before) + 1, `moved on to the next slide: ${before} → ${await count()}`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  if (await page.isVisible("#presenter .hs-player")) await page.keyboard.press("Escape");
 });
 
 let saved = 0;

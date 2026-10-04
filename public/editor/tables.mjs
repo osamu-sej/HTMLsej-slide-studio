@@ -10,7 +10,16 @@ const SAMPLE = {
   labels: ["4月", "5月", "6月", "7月"],
   series: [{ name: "売上", values: [120, 135, 128, 160] }, { name: "前年", values: [110, 118, 125, 131] }],
 };
-const CHART_ICONS = { bar: "chartBar", "stacked-bar": "chartStack", "100-stacked-bar": "chartStack", line: "chartLine", "multi-line": "chartLine", donut: "chartDonut", combo: "chartCombo", area: "chartArea", pie: "chartPie", scatter: "chartScatter", radar: "chartRadar", waterfall: "chartWaterfall", funnel: "chartFunnel" };
+const CHART_ICONS = { bar: "chartBar", "stacked-bar": "chartStack", "100-stacked-bar": "chartStack", line: "chartLine", "multi-line": "chartLine", donut: "chartDonut", combo: "chartCombo", area: "chartArea", pie: "chartPie", scatter: "chartScatter", radar: "chartRadar", waterfall: "chartWaterfall", funnel: "chartFunnel",
+  hbar: "chartHbar", "stacked-hbar": "chartHstack", "stacked-area": "chartStackArea", bubble: "chartBubble", histogram: "chartHistogram", boxplot: "chartBox", treemap: "chartTreemap", sunburst: "chartSunburst" };
+// What the data sheet means for the kinds that read it differently.
+const CHART_HINTS = {
+  bubble: "項目名がX（数値）、1列目（系列1）がY、2列目（系列2）がバブルの大きさです。",
+  histogram: "1列目（系列1）の値を同じ幅の区間に分けて数えます（項目名は使いません）。",
+  boxplot: "列（系列）ごとに1つの箱になります。各列に値を縦に並べてください（項目名は使いません）。",
+  treemap: "「親/子」の項目名でグループにまとまります（例：食品/おにぎり）。",
+  sunburst: "「親/子」の項目名で、内側の輪が親、外側の輪が子になります（例：食品/おにぎり）。",
+};
 // Sample data that suits each kind of chart when it is inserted (the data editor opens right after).
 const SAMPLES = {
   pie: { labels: ["来店", "アプリ", "宅配"], series: [{ name: "構成比", values: [60, 25, 15] }] },
@@ -18,6 +27,14 @@ const SAMPLES = {
   radar: { labels: ["品揃え", "接客", "清潔さ", "価格", "立地"], series: [{ name: "自店", values: [4, 3.5, 4.5, 3, 4] }, { name: "地区平均", values: [3.5, 3.5, 3.8, 3.4, 3.6] }] },
   waterfall: { labels: ["前年", "来店客増", "客単価", "廃棄減", "人件費", "合計"], series: [{ name: "利益（百万円）", values: [100, 25, 12, 8, -15, 0] }] },
   funnel: { labels: ["認知", "興味", "来店", "購入", "リピート"], series: [{ name: "人数", values: [1000, 620, 380, 240, 120] }] },
+  hbar: { labels: ["東日本", "中部", "西日本", "九州"], series: [{ name: "今期", values: [320, 210, 280, 150] }, { name: "前期", values: [290, 200, 250, 160] }] },
+  "stacked-hbar": { labels: ["東日本", "中部", "西日本", "九州"], series: [{ name: "食品", values: [180, 120, 150, 80] }, { name: "飲料", values: [90, 60, 80, 45] }, { name: "日用品", values: [50, 30, 50, 25] }] },
+  "stacked-area": { labels: ["4月", "5月", "6月", "7月", "8月"], series: [{ name: "店舗", values: [80, 85, 90, 96, 102] }, { name: "アプリ", values: [20, 26, 33, 41, 50] }, { name: "宅配", values: [10, 12, 15, 19, 24] }] },
+  bubble: { labels: ["20", "35", "50", "65", "80"], series: [{ name: "売上（万円）", values: [120, 260, 180, 320, 240] }, { name: "店舗数", values: [8, 20, 12, 30, 15] }] },
+  histogram: { labels: Array.from({ length: 24 }, (_, i) => String(i + 1)), series: [{ name: "待ち時間（分）", values: [2, 3, 3, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 9, 10, 11, 12, 14, 18] }] },
+  boxplot: { labels: Array.from({ length: 8 }, (_, i) => String(i + 1)), series: [{ name: "東日本", values: [62, 68, 70, 71, 74, 77, 80, 95] }, { name: "中部", values: [55, 60, 63, 66, 68, 70, 72, 75] }, { name: "西日本", values: [58, 64, 69, 73, 76, 79, 83, 86] }] },
+  treemap: { labels: ["食品/おにぎり", "食品/弁当", "食品/パン", "飲料/お茶", "飲料/コーヒー", "日用品/洗剤", "日用品/ティッシュ"], series: [{ name: "売上（百万円）", values: [42, 35, 18, 24, 20, 9, 6] }] },
+  sunburst: { labels: ["食品/おにぎり", "食品/弁当", "食品/パン", "飲料/お茶", "飲料/コーヒー", "日用品/洗剤", "日用品/ティッシュ"], series: [{ name: "売上（百万円）", values: [42, 35, 18, 24, 20, 9, 6] }] },
 };
 
 export function createTableUi(editor, app, kit) {
@@ -87,11 +104,14 @@ export function createTableUi(editor, app, kit) {
     const dialog = h("dialog", { class: "tb-sheet-dialog" });
     const preview = h("div", { class: "tb-sheet-preview" });
     const sheet = h("div", { class: "tb-sheet-wrap" });
+    const kindHint = h("p", { class: "hint tb-kind-hint" });
     const kind = h("select", { "aria-label": "グラフの種類", onchange: () => { data.type = kind.value; draw(); } }, Object.entries(E.CHART_KINDS).map(([k, l]) => h("option", { value: k, selected: k === data.type || null }, l)));
     const title = h("input", { type: "text", value: data.title || "", placeholder: "（なし）", "aria-label": "グラフのタイトル", oninput: () => { data.title = title.value; draw(); } });
     const unit = h("input", { type: "text", value: data.unit || "", placeholder: "例：億円", maxlength: 10, "aria-label": "単位", oninput: () => { data.unit = unit.value; } });
     const draw = () => {
       renderSheet();
+      kindHint.textContent = CHART_HINTS[data.type] || "";
+      kindHint.hidden = !CHART_HINTS[data.type];
       const clean = E.normalizeObject({ ...o, chart: data });
       preview.replaceChildren();
       if (!clean) { preview.append(h("p", { class: "hint" }, "項目と系列を1つ以上入れてください")); return; }
@@ -107,6 +127,7 @@ export function createTableUi(editor, app, kit) {
       requestAnimationFrame(() => E.repaintCharts?.(preview));
     };
     const single = () => ["bar", "line", "donut"].includes(data.type);
+    const gappy = () => ["boxplot", "histogram"].includes(data.type);
     function renderSheet() {
       const shown = single() ? data.series.slice(0, 1) : data.series;
       const head = h("tr", {}, h("th", {}, ""), shown.map((s, j) => h("th", {}, h("input", { type: "text", value: s.name, "aria-label": `系列${j + 1}の名前`, oninput: (event) => { data.series[j].name = event.target.value; } }),
@@ -114,7 +135,13 @@ export function createTableUi(editor, app, kit) {
       const body = data.labels.map((label, i) => h("tr", {},
         h("th", {}, h("input", { type: "text", value: label, "aria-label": `項目${i + 1}`, oninput: (event) => { data.labels[i] = event.target.value; scheduleDraw(); } }),
           data.labels.length > 1 ? h("button", { type: "button", class: "tb-x", title: "この項目を削除", onclick: () => { data.labels.splice(i, 1); for (const s of data.series) s.values.splice(i, 1); draw(); } }, "×") : null),
-        shown.map((s, j) => h("td", {}, h("input", { type: "text", inputmode: "decimal", value: String(s.values[i] ?? 0), "aria-label": `${label}・${s.name}`, oninput: (event) => { const v = Number(String(event.target.value).replace(/[,，]/g, "")); data.series[j].values[i] = Number.isFinite(v) ? v : 0; scheduleDraw(); } })))));
+        shown.map((s, j) => h("td", {}, h("input", { type: "text", inputmode: "decimal", value: s.values[i] == null ? (gappy() ? "" : "0") : String(s.values[i]), "aria-label": `${label}・${s.name}`, oninput: (event) => {
+          // 箱ひげ図・ヒストグラム: an empty cell stays empty (a group may hold fewer values than the others).
+          const text = String(event.target.value).replace(/[,，]/g, "").trim();
+          const v = Number(text);
+          data.series[j].values[i] = gappy() && !text ? null : Number.isFinite(v) ? v : 0;
+          scheduleDraw();
+        } })))));
       sheet.replaceChildren(h("table", { class: "tb-sheet", onpaste: onPaste }, h("thead", {}, head), h("tbody", {}, body)),
         h("div", { class: "tb-sheet-btns" },
           h("button", { type: "button", class: "btn btn-sm", disabled: data.labels.length >= E.CHART_MAX_LABELS || null, onclick: () => { data.labels.push(`項目${data.labels.length + 1}`); for (const s of data.series) s.values.push(0); draw(); } }, "＋ 項目（行）"),
@@ -149,6 +176,7 @@ export function createTableUi(editor, app, kit) {
       h("div", { class: "dialog-body tb-sheet-body" },
         h("div", { class: "tb-sheet-side" },
           h("label", { class: "field" }, h("span", {}, "種類"), kind),
+          kindHint,
           h("label", { class: "field" }, h("span", {}, "タイトル"), title),
           h("label", { class: "field" }, h("span", {}, "単位"), unit),
           preview),
@@ -219,7 +247,7 @@ export function createTableUi(editor, app, kit) {
     const o = chart();
     if (!o) return;
     const opts = { ...(o.chart.opts || {}), ...patch };
-    for (const [k, v] of Object.entries(opts)) if (v == null || (k === "labels" && v === true) || (k === "grid" && v === true) || (k === "legend" && v === "top")) delete opts[k];
+    for (const [k, v] of Object.entries(opts)) if (v == null || v === "" || (k === "labels" && v === true) || (k === "grid" && v === true) || (k === "legend" && v === "top") || (k === "trend" && v === false)) delete opts[k];
     editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: { ...x.chart, opts: Object.keys(opts).length ? opts : undefined } } : x)), { select: [o.id] });
   }
   function elementsMenu() {
@@ -233,7 +261,20 @@ export function createTableUi(editor, app, kit) {
       "-", { head: "目盛線" },
       { label: "表示する", on: opts.grid !== false, run: () => setOpts({ grid: true }) },
       { label: "なし", on: opts.grid === false, run: () => setOpts({ grid: false }) },
+      "-", { head: "軸ラベル・近似曲線" },
+      { label: opts.axisX || opts.axisY ? `軸ラベル（${[opts.axisX, opts.axisY].filter(Boolean).join("・")}）…` : "軸ラベル…", run: () => axisTitles() },
+      { label: "近似曲線（線形）", on: opts.trend === "linear", disabled: !TREND_CHARTS.has(chart()?.chart.type), title: "縦棒・折れ線・散布図で使えます", run: () => setOpts({ trend: opts.trend === "linear" ? false : "linear" }) },
     ]);
+  }
+  const TREND_CHARTS = new Set(["bar", "line", "multi-line", "scatter"]);
+  /** 軸ラベル: the titles of the value axis (縦) and the category axis (横). */
+  async function axisTitles() {
+    const opts = chart()?.chart.opts || {};
+    const x = await app.ask("軸ラベル（横軸）", "横軸の名前（空にすると表示しません）", opts.axisX || "");
+    if (x == null) return;
+    const y = await app.ask("軸ラベル（縦軸）", "縦軸の名前（空にすると表示しません）", opts.axisY || "");
+    if (y == null) return;
+    setOpts({ axisX: x.trim() || null, axisY: y.trim() || null });
   }
   /** 行/列の切り替え: the labels become the series and the series the labels. */
   function transpose() {
