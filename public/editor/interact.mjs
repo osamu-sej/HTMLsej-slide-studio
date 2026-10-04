@@ -142,6 +142,7 @@ export function createInteractions(editor, app, kit) {
       if (o?.tip) parts.push("説明あり");
       if (o?.action && E.IX_CLICKS[o.action.type]) parts.push(`クリック：${E.IX_CLICKS[o.action.type]}`);
       if (o?.loop) parts.push(`ずっと：${E.IX_LOOPS[o.loop]}`);
+      if (o?.overAction) parts.push("マウスの通過で動作");
       status.textContent = !any() ? "部品を選ぶと設定できます" : selected().length > 1 ? `${selected().length}個を選択中` : parts.join("・") || "まだ設定していません";
     });
     const clickBtn = drop("popup", "クリック|したとき", "クリックしたとき：詳細を開く・拡大・裏返す・表示の切り替え（タブ）・スポットライト", () => clickMenu(), { big: true, enabled: () => Boolean(one()) });
@@ -169,7 +170,7 @@ export function createInteractions(editor, app, kit) {
     const out = [];
     for (const o of list) {
       if (o.hidden) continue;
-      const marks = [o.hover ? "マウス" : "", o.tip ? "説明" : "", o.action && E.IX_CLICKS[o.action.type] ? "クリック" : "", o.loop ? "ずっと" : ""].filter(Boolean);
+      const marks = [o.hover ? "マウス" : "", o.tip ? "説明" : "", o.action && E.IX_CLICKS[o.action.type] ? "クリック" : "", o.loop ? "ずっと" : "", o.overAction ? "通過" : ""].filter(Boolean);
       const targetOf = list.filter((x) => x.action?.type === "reveal" && x.action.targets.includes(o.id));
       if (targetOf.length) marks.push("クリックで出る");
       if (!marks.length) continue;

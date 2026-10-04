@@ -1766,9 +1766,8 @@
     // Clicking the object while presenting
     const action = raw.action;
     if (action && typeof action === "object") {
-      if (["next", "prev", "first", "last", "end"].includes(action.type)) o.action = { type: action.type };
-      else if (action.type === "slide" && /^[A-Za-z0-9_-]{1,32}$/.test(action.to ?? "")) o.action = { type: "slide", to: action.to };
-      else if (action.type === "url" && /^(https?:\/\/|mailto:)/i.test(String(action.href || "").trim())) o.action = { type: "url", href: String(action.href).trim().slice(0, 2000) };
+      const jump = jumpAction(action);
+      if (jump) o.action = jump;
       else if (action.type === "popup") {
         // A card (or, with a breakdown or a source, a panel from the right) with words of its own.
         const pop = { type: "popup" };
@@ -1793,10 +1792,26 @@
         if (targets.length) o.action = { type: "reveal", targets, ...(action.only === true ? { only: true } : {}) };
       }
     }
+    // マウスの通過 (PowerPoint's Mouse Over action): moving the pointer onto the object while presenting jumps to a
+    // slide (next, previous, first, last, one of them), ends the show or plays a sound — not a link (a browser opens
+    // a page only for a click).
+    const over = raw.overAction && typeof raw.overAction === "object" ? jumpAction(raw.overAction) : null;
+    if (over && over.type !== "url") o.overAction = over;
     if (IX_HOVERS[raw.hover]) o.hover = raw.hover;
     if (IX_LOOPS[raw.loop]) o.loop = raw.loop;
     if (typeof raw.tip === "string" && raw.tip.trim()) o.tip = raw.tip.trim().slice(0, 200);
     return o;
+  }
+
+  /** A click or mouse-over action that moves the show (or opens a link, or only plays a sound), with its sound:
+   *  PowerPoint's 動作設定 (ハイパーリンク・サウンドの再生). null for anything else. */
+  function jumpAction(action) {
+    const sound = typeof action.sound === "string" && Object.hasOwn(E.TRANSITION_SOUNDS || {}, action.sound) ? { sound: action.sound } : {};
+    if (["next", "prev", "first", "last", "end"].includes(action.type)) return { type: action.type, ...sound };
+    if (action.type === "slide" && /^[A-Za-z0-9_-]{1,32}$/.test(action.to ?? "")) return { type: "slide", to: action.to, ...sound };
+    if (action.type === "url" && /^(https?:\/\/|mailto:)/i.test(String(action.href || "").trim())) return { type: "url", href: String(action.href).trim().slice(0, 2000), ...sound };
+    if (action.type === "sound" && sound.sound) return { type: "sound", ...sound };
+    return null;
   }
 
   /** Column widths or row heights: n positive shares that add up to 1 (equal when unusable). */
@@ -3551,6 +3566,7 @@
     fillFields(el, ctx);
     if (ctx.live) {
       if (o.action) { el.dataset.action = o.action.type; el.title = o.action.type === "url" ? o.action.href : ""; }
+      if (o.overAction) el.dataset.over = o.overAction.type;
       if (o.action?.type === "popup") el.dataset.detail = `obj:${o.id}`;
       if (o.hover) el.dataset.hover = o.hover;
       if (o.loop) el.dataset.loop = o.loop;

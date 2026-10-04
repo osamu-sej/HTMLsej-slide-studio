@@ -109,6 +109,8 @@ class SejDeckTest(unittest.TestCase):
         back = by_text(self.slides[3], "全体像へ戻る")
         self.assertEqual(back["action"], {"type": "slide", "to": "p2"})
         self.assertEqual(by_text(self.slides[3], "終わる")["action"], {"type": "end"})
+        self.assertEqual(back.get("overAction"), {"type": "next"}, "マウスの通過")
+        self.assertNotIn("overAction", by_text(self.slides[3], "終わる"))
 
     def test_animations_and_the_transition(self):
         slide = self.slides[1]

@@ -1,7 +1,8 @@
-// 図として保存 (PowerPoint's Save as Picture, on the right-click menu): one object as a file of its own. A picture
-// is drawn as it shows on the slide (its trimming, adjustments, shape and outline) into a PNG or JPEG; any other object
-// (a shape with its text, a chart, an icon, a line, SmartArt…) becomes an SVG that holds it as drawn — its styles
-// written into it — or a PNG made from that SVG. A turned object keeps its turn, in a box just big enough.
+// 図として保存 (PowerPoint's Save as Picture, on the right-click menu): the chosen objects as a file of their own. One
+// picture is drawn as it shows on the slide (its trimming, adjustments, shape and outline) into a PNG or JPEG; anything
+// else (a shape with its text, a chart, an icon, a line, SmartArt, or several objects together) becomes an SVG that
+// holds it as drawn — its styles written into it — or a PNG / JPEG made from that SVG, in a box just big enough for
+// what shows (turned objects, arrowheads). 図として貼り付け uses the same drawing for copied objects (objectsPicture).
 
 /** The box a w × h object turned by deg degrees needs (its middle stays in the middle). */
 export function rotatedBox(w, h, deg = 0) {
@@ -51,26 +52,70 @@ export function createPictureSaver(app) {
     }
   }
 
-  /** The object as a standalone SVG document (text), turned as on the slide. */
-  async function svgOf(o, node) {
-    const turn = o.kind === "line" ? 0 : o.rot || 0;
-    const box = node.dataset.bbox ? node.dataset.bbox.split(",").map(Number) : [o.x, o.y, o.w, o.h];
-    const [w, hh] = [box[2], box[3]];
-    const out = rotatedBox(w, hh, turn);
-    const copy = node.cloneNode(true);
-    inlineStyles(node, copy);
-    copy.style.position = "absolute";
-    copy.style.left = `${(out.w - w) / 2}px`;
-    copy.style.top = `${(out.h - hh) / 2}px`;
-    copy.style.margin = "0";
-    for (const el of copy.querySelectorAll("[contenteditable]")) el.removeAttribute("contenteditable");
-    await embedBlobs(copy);
+  /** Objects drawn on a slide (their .hs-obj nodes, in stacking order) as a standalone SVG document, each where it is
+   *  on the slide. The box is the objects' own (`list`, exact), widened only where what they show sticks out more than
+   *  a pixel (outlines, arrowheads, words) — measured on the page, which a zoomed-out stage rounds. */
+  async function svgOfNodes(nodes, list = []) {
+    const root = nodes[0].closest(".hs-slide");
+    const base = root.getBoundingClientRect();
+    const k = base.width / (root.offsetWidth || base.width) || 1;
+    let box = null;
+    for (const node of nodes) {
+      for (const el of [node, ...node.querySelectorAll("*")]) {
+        const r = el.getBoundingClientRect();
+        if (r.width < 0.5 && r.height < 0.5) continue;
+        const b = [(r.left - base.left) / k, (r.top - base.top) / k, (r.right - base.left) / k, (r.bottom - base.top) / k];
+        box = box ? [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])] : b;
+      }
+    }
+    if (!box) throw new Error("nothing drawn");
+    const own = nodes.map((n) => list.find((o) => o.id === n.dataset.el)).filter(Boolean).map((o) => app.E.bounds(o, list));
+    if (own.length) {
+      const exact = [Math.min(...own.map((b) => b.x)), Math.min(...own.map((b) => b.y)), Math.max(...own.map((b) => b.x + b.w)), Math.max(...own.map((b) => b.y + b.h))];
+      box = [box[0] < exact[0] - 1 ? box[0] : exact[0], box[1] < exact[1] - 1 ? box[1] : exact[1], box[2] > exact[2] + 1 ? box[2] : exact[2], box[3] > exact[3] + 1 ? box[3] : exact[3]];
+    }
+    const [x, y] = [Math.floor(box[0] + 0.01), Math.floor(box[1] + 0.01)];
+    const [w, hh] = [Math.max(1, Math.ceil(box[2] - 0.01) - x), Math.max(1, Math.ceil(box[3] - 0.01) - y)];
     const holder = document.createElement("div");
     holder.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-    holder.setAttribute("style", `position:relative;width:${out.w}px;height:${out.h}px;overflow:visible`);
-    holder.append(copy);
+    holder.setAttribute("style", `position:relative;width:${w}px;height:${hh}px;overflow:visible`);
+    for (const node of nodes) {
+      const copy = node.cloneNode(true);
+      inlineStyles(node, copy);
+      copy.style.position = "absolute";
+      copy.style.left = `${node.offsetLeft - x}px`;
+      copy.style.top = `${node.offsetTop - y}px`;
+      copy.style.margin = "0";
+      for (const el of copy.querySelectorAll("[contenteditable]")) el.removeAttribute("contenteditable");
+      await embedBlobs(copy);
+      holder.append(copy);
+    }
     const xml = new XMLSerializer().serializeToString(holder);
-    return { text: `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${out.w}" height="${out.h}" viewBox="0 0 ${out.w} ${out.h}"><foreignObject x="0" y="0" width="${out.w}" height="${out.h}">${xml}</foreignObject></svg>`, w: out.w, h: out.h };
+    return { text: `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${hh}" viewBox="0 0 ${w} ${hh}"><foreignObject x="0" y="0" width="${w}" height="${hh}">${xml}</foreignObject></svg>`, x, y, w, h: hh };
+  }
+
+  /** 図として貼り付け: objects (copied, maybe from another slide) drawn off the screen into a PNG at twice the size,
+   *  with where they sit on the slide. */
+  async function objectsPicture(objects) {
+    const probe = { type: "blank", title: "", hideTitle: true, elements: objects.map((o) => ({ ...o, hidden: undefined })) };
+    const el = app.E.render(probe, { ...app.renderOptions(), mode: "thumb" });
+    const host = document.createElement("div");
+    host.setAttribute("aria-hidden", "true");
+    host.style.cssText = "position:fixed;left:-30000px;top:0;width:1920px;height:1080px;overflow:hidden;pointer-events:none;";
+    host.append(el);
+    document.body.append(host);
+    try {
+      await document.fonts?.ready;
+      await Promise.all([...el.querySelectorAll("img")].map((img) => img.decode?.().catch(() => {})));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const ids = new Set(objects.map((o) => o.id));
+      const nodes = [...el.querySelectorAll(".hs-obj[data-el]")].filter((n) => ids.has(n.dataset.el));
+      if (!nodes.length) throw new Error("nothing drawn");
+      const svg = await svgOfNodes(nodes, objects);
+      return { blob: await rasterize(svg, "image/png"), x: svg.x, y: svg.y, w: svg.w, h: svg.h };
+    } finally {
+      host.remove();
+    }
   }
 
   /** A canvas as a PNG or JPEG blob (JPEG on white). */
@@ -138,43 +183,50 @@ export function createPictureSaver(app) {
     return blobOf(canvas, type);
   }
 
-  async function write(o, format) {
-    const node = document.querySelector(`#stageBody .hs-obj[data-el="${CSS.escape(o.id)}"]`);
-    if (!node) { app.toast("スライド上にこのオブジェクトが見つかりません"); return; }
-    const name = app.E.objectName(o, app.editorObjects().indexOf(o));
+  const stageNode = (id) => document.querySelector(`#stageBody .hs-obj[data-el="${CSS.escape(id)}"]`);
+  /** The chosen objects as a file: one picture as its own pixels, anything else through an SVG. */
+  async function write(chosen, format) {
+    const nodes = chosen.map((o) => stageNode(o.id)).filter(Boolean);
+    if (!nodes.length) { app.toast("スライド上にこのオブジェクトが見つかりません"); return; }
+    const all = app.editorObjects();
+    const name = chosen.length === 1 ? app.E.objectName(chosen[0], all.indexOf(chosen[0])) : "図";
+    const ext = format === "jpeg" ? "jpg" : format;
+    const type = format === "jpeg" ? "image/jpeg" : "image/png";
+    const picture = chosen.length === 1 && chosen[0].kind === "image";
     try {
-      if (o.kind === "image") {
-        const type = format === "jpeg" ? "image/jpeg" : "image/png";
-        app.download(await pictureBlob(o, node, type), pictureFileName(name, format === "jpeg" ? "jpg" : "png"));
-      } else {
-        const svg = await svgOf(o, node);
+      if (picture) app.download(await pictureBlob(chosen[0], nodes[0], type), pictureFileName(name, ext));
+      else {
+        // In the order they lie on the slide (the front one last).
+        nodes.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+        const svg = await svgOfNodes(nodes, all);
         if (format === "svg") app.download(new Blob([svg.text], { type: "image/svg+xml" }), pictureFileName(name, "svg"));
-        else app.download(await rasterize(svg, format === "jpeg" ? "image/jpeg" : "image/png"), pictureFileName(name, format === "jpeg" ? "jpg" : "png"));
+        else app.download(await rasterize(svg, type), pictureFileName(name, ext));
       }
-      app.toast(`「${name}」を図として保存しました`);
+      app.toast(chosen.length === 1 ? `「${name}」を図として保存しました` : `${chosen.length}個のオブジェクトを1つの図として保存しました`);
     } catch (error) {
-      app.toast(o.kind === "image" ? "この画像は図として保存できません（ほかのサイトの画像はブラウザが書き出しを許しません）" : `図として保存できませんでした（${error.message || error}）。SVG ならたいてい保存できます`);
+      app.toast(picture ? "この画像は図として保存できません（ほかのサイトの画像はブラウザが書き出しを許しません）" : `図として保存できませんでした（${error.message || error}）。SVG ならたいてい保存できます`);
     }
   }
 
   /** The 図として保存 dialog: the file's kind, then the browser's download. */
-  function open(id) {
-    const o = app.editorObjects().find((x) => x.id === id);
-    if (!o) return;
-    const picture = o.kind === "image";
+  function open(ids) {
+    const all = app.editorObjects();
+    const chosen = (Array.isArray(ids) ? ids : [ids]).map((id) => all.find((x) => x.id === id)).filter(Boolean);
+    if (!chosen.length) return;
+    const picture = chosen.length === 1 && chosen[0].kind === "image";
     const choices = picture ? [["png", "PNG（透過を保つ）"], ["jpeg", "JPEG（軽い）"]] : [["png", "PNG（画像）"], ["svg", "SVG（拡大しても粗くならない）"], ["jpeg", "JPEG（軽い）"]];
     const format = h("select", { "aria-label": "ファイルの種類", class: "ps-format" }, choices.map(([v, l]) => h("option", { value: v }, l)));
     const dialog = h("dialog", { class: "ps-dialog", "aria-label": "図として保存" },
       h("div", { class: "dialog-head" }, h("h3", {}, "図として保存"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
       h("div", { class: "dialog-body sh-form-col" },
         h("label", { class: "sh-inline" }, "ファイルの種類 ", format),
-        h("p", { class: "hint" }, picture ? "トリミング・明るさなどの修整・図形での切り抜き・回転を、スライドに見えるとおりに入れます。" : "スライドに見えるとおりの形・文字・色で保存します（回転もそのまま）。")),
+        h("p", { class: "hint" }, picture ? "トリミング・明るさなどの修整・図形での切り抜き・枠線・回転を、スライドに見えるとおりに入れます。" : chosen.length > 1 ? `選んだ${chosen.length}個のオブジェクトを、スライドでの並びのまま1つの図にします。` : "スライドに見えるとおりの形・文字・色で保存します（回転もそのまま）。")),
       h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"),
-        h("button", { type: "button", class: "btn btn-primary ps-go", onclick: () => { const f = format.value; dialog.close(); write(o, f); } }, "保存")));
+        h("button", { type: "button", class: "btn btn-primary ps-go", onclick: () => { const f = format.value; dialog.close(); write(chosen, f); } }, "保存")));
     document.body.append(dialog);
     dialog.addEventListener("close", () => dialog.remove());
     dialog.showModal();
   }
 
-  return { open, write };
+  return { open, write, objectsPicture };
 }

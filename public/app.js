@@ -655,6 +655,8 @@ function normalizeDeck(value, base = null) {
     motion: normalizeMotion(meta.motion ?? base?.motion ?? DEFAULT_MOTION),
     memo: String(meta.memo ?? base?.memo ?? "").slice(0, 2000),
     ...(guidesOf(meta.guides ?? base?.guides) ? { guides: guidesOf(meta.guides ?? base?.guides) } : {}),
+    // 既定の図形・テキスト ボックス・線.
+    ...(objectDefaultsIn(meta.objectDefaults ?? base?.objectDefaults) ? { objectDefaults: objectDefaultsIn(meta.objectDefaults ?? base?.objectDefaults) } : {}),
     // スライド ショーの設定・目的別スライド ショー.
     ...(showOf(meta.show ?? base?.show) ? { show: showOf(meta.show ?? base?.show) } : {}),
     ...(customShowsOf(meta.customShows ?? base?.customShows) ? { customShows: customShowsOf(meta.customShows ?? base?.customShows) } : {}),
@@ -669,6 +671,36 @@ function guidesOf(value) {
   const list = (axis, max) => (Array.isArray(value?.[axis]) ? value[axis] : []).map(Number).filter((v) => Number.isFinite(v) && v >= 0 && v <= max).slice(0, 20).map((v) => Math.round(v * 2) / 2);
   const guides = { x: list("x", E.W), y: list("y", E.H) };
   return guides.x.length || guides.y.length ? guides : null;
+}
+
+/** 既定の図形・テキスト ボックス・線 (deck.objectDefaults): each look checked as an object's would be, in SEJ colours. */
+function objectDefaultsIn(value) {
+  return ops.objectDefaultsOf(value, (kind, style) => {
+    const probe = kind === "line" ? { id: "dflt", kind: "line", x1: 0, y1: 0, x2: 100, y2: 0, ...style } : { id: "dflt", kind, x: 0, y: 0, w: 100, h: 100, ...(kind === "shape" ? { shape: "rect" } : {}), text: "<p>a</p>", ...style };
+    const o = E.normalizeObject(probe);
+    return o ? ops.snapToPalette(o, E.PALETTE) : null;
+  });
+}
+
+/** 既定の図形に設定 (and テキスト ボックス・線): new ones in this deck start with this object's look (one ⌘Z). */
+function setObjectDefault(kind, o) {
+  if (!state.deck || isFinal(state.deck)) return;
+  const next = objectDefaultsIn({ ...(state.deck.objectDefaults || {}), [kind]: ops.defaultStyleOf(kind, E.withDefaults(o)) });
+  pushUndo();
+  if (next) state.deck.objectDefaults = next; else delete state.deck.objectDefaults;
+  saveCurrent();
+  scheduleVersion();
+  toast({ shape: "既定の図形に設定しました。この資料で新しく描く図形がこの書式になります", text: "既定のテキスト ボックスに設定しました。この資料で新しく置くテキスト ボックスがこの書式になります", line: "既定の線に設定しました。この資料で新しく引く線がこの書式になります" }[kind]);
+}
+
+/** 背景の保存: the slide's background picture as a file. */
+async function saveBackground() {
+  const bg = state.deck?.slides[state.selected]?.background;
+  const blob = bg?.image ? await mediaBlob(bg.image).catch(() => null) : null;
+  if (!blob) { toast("保存できる背景の図がありません"); return; }
+  const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif", "image/svg+xml": "svg" }[blob.type] || "png";
+  await downloadBlob(blob, `背景.${ext}`);
+  toast("背景の図を保存しました");
 }
 
 /** Make the deck acceptable to the server schema without changing what the user sees. */
@@ -1205,6 +1237,7 @@ function insertSlides(raw) {
   if (renamed.size) {
     for (const o of slides.flatMap((slide) => slide.elements || [])) {
       if (o.action?.type === "slide" && renamed.has(o.action.to)) o.action = { ...o.action, to: renamed.get(o.action.to) };
+      if (o.overAction?.type === "slide" && renamed.has(o.overAction.to)) o.overAction = { ...o.overAction, to: renamed.get(o.overAction.to) };
       if (o.kind === "zoom" && renamed.has(o.target)) o.target = renamed.get(o.target);
     }
   }
@@ -2471,9 +2504,16 @@ const editorApp = {
   openVideoExport: () => videoExport.openDialog(),
   // 画像として保存 (public/editor/imagexport.mjs).
   openImageExport: () => imageExport.openDialog(),
-  // 図として保存 (public/editor/picsave.mjs): one object as a PNG / JPEG / SVG.
-  saveAsPicture: (id) => pictureSaver.open(id),
+  // 図として保存 (public/editor/picsave.mjs): the chosen objects as a PNG / JPEG / SVG; 図として貼り付け draws copied
+  // objects into a picture the same way.
+  saveAsPicture: (ids) => pictureSaver.open(ids),
+  objectsPicture: (objects) => pictureSaver.objectsPicture(objects),
   editorObjects: () => editor.objects(),
+  // 既定の図形・テキスト ボックス・線に設定 (deck.objectDefaults), and 背景の保存.
+  objectDefaults: () => state.deck?.objectDefaults || null,
+  setObjectDefault: (kind, o) => setObjectDefault(kind, o),
+  clearObjectDefaults: () => { if (!state.deck?.objectDefaults) return; pushUndo(); delete state.deck.objectDefaults; saveCurrent(); scheduleVersion(); toast("既定の図形・テキスト ボックス・線を元に戻しました"); },
+  saveBackground: () => saveBackground(),
   openGifExport: () => gifExport.openDialog(),
   exportLockedHtml: () => exportLockedHtml(),
   formatBackground: () => background.open(),

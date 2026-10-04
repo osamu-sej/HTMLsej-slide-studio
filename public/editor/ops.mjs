@@ -31,6 +31,39 @@ export function newId() {
   return `o${Date.now().toString(36).slice(-5)}${seed.toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 }
 
+// 既定の図形に設定・既定のテキスト ボックスに設定・既定の線に設定 (kept on the deck as deck.objectDefaults): which
+// parts of an object's look a new shape, text box or line starts with — never its words, place or size.
+export const DEFAULT_STYLE_KEYS = {
+  shape: ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
+  text: ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
+  line: ["stroke", "strokeW", "dash", "head", "tail", "headSize", "tailSize", "route", "opacity"],
+};
+
+/** The look of an object (with its defaults filled in) to keep as the default for `kind`. */
+export function defaultStyleOf(kind, o) {
+  const keys = DEFAULT_STYLE_KEYS[kind];
+  if (!keys || !o) return null;
+  const out = {};
+  for (const key of keys) if (o[key] !== undefined && o[key] !== null) out[key] = clone(o[key]);
+  return Object.keys(out).length ? out : null;
+}
+
+/** deck.objectDefaults made safe: only the three kinds, only their look keys, each value passed by `check`
+ *  (kind, style) → style (the studio runs it through the object normalizer and the SEJ colours). null when empty. */
+export function objectDefaultsOf(value, check = (kind, style) => style) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out = {};
+  for (const kind of Object.keys(DEFAULT_STYLE_KEYS)) {
+    const raw = value[kind];
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const picked = defaultStyleOf(kind, raw);
+    const checked = picked && check(kind, picked);
+    const kept = checked && defaultStyleOf(kind, checked);
+    if (kept) out[kind] = kept;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /** A new object of a kind at a box (slide pixels); lines take x1,y1,x2,y2. */
 export function makeObject(kind, box, extra = {}) {
   const base = { id: newId(), kind };

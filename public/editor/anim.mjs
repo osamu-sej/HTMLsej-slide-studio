@@ -515,10 +515,10 @@ export function createAnimations(editor, app, kit) {
     return sec;
   }
 
-  const ACTION_WORDS = { next: "次のスライド", prev: "前のスライド", first: "最初のスライド", last: "最後のスライド", end: "スライドショーの終了", slide: "スライドへ移動", url: "Webページを開く" };
+  const ACTION_WORDS = { next: "次のスライド", prev: "前のスライド", first: "最初のスライド", last: "最後のスライド", end: "スライドショーの終了", slide: "スライドへ移動", url: "Webページを開く", sound: "サウンドの再生" };
   /** The objects that answer the mouse, a click or keep moving (HTML only): each setting a chip, × takes it off. */
   function interactionSection() {
-    const list = objects().filter((o) => !o.hidden && (o.hover || o.tip || o.loop || o.action));
+    const list = objects().filter((o) => !o.hidden && (o.hover || o.tip || o.loop || o.action || o.overAction));
     const sec = h("div", { class: "an-sec an-ix" }, h("div", { class: "an-sec-head" }, ico("hover", 14), h("b", {}, "インタラクション（HTML）"), h("small", {}, "マウス・クリック・ずっと動く")));
     if (!list.length) {
       sec.append(h("p", { class: "hint" }, "マウスを乗せたとき・クリックしたとき・ずっと動く動きは、まだありません。"),
@@ -533,6 +533,7 @@ export function createAnimations(editor, app, kit) {
       if (o.hover) chips.push(["hover", `マウス：${E.IX_HOVERS[o.hover]}`, { hover: undefined }]);
       if (o.tip) chips.push(["tip", `説明「${o.tip.length > 10 ? `${o.tip.slice(0, 10)}…` : o.tip}」`, { tip: undefined }]);
       if (o.action) chips.push(["click", `クリック：${E.IX_CLICKS[o.action.type] || ACTION_WORDS[o.action.type] || o.action.type}`, { action: undefined }]);
+      if (o.overAction) chips.push(["over", `マウスの通過：${ACTION_WORDS[o.overAction.type] || o.overAction.type}`, { overAction: undefined }]);
       if (o.loop) chips.push(["loop", `ずっと：${E.IX_LOOPS[o.loop]}`, { loop: undefined }]);
       ul.append(h("li", { class: ["an-ix-row", editor.selection.includes(o.id) ? "on" : ""], "data-id": o.id },
         h("button", { type: "button", class: "an-ix-name", title: "選んで、リボンの「インタラクション」で変える", onclick: () => { editor.select([o.id]); app.showTab("interact"); } }, E.objectName(o, objects().indexOf(o))),

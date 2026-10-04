@@ -716,24 +716,28 @@ export function createCanvas(app) {
       else if (tool.kind === "text") box = { x, y, w: tool.vertical ? 90 : 520, h: tool.vertical ? 420 : 70 };
       else { const [w, hh] = ops.defaultSize(tool.shape); box = { x: x - w / 2, y: y - hh / 2, w, h: hh }; }
     }
-    setTool(null);
+    // 描画モードのロック keeps the tool for the next one (Esc ends it).
+    if (!tool.lock) setTool(null);
     const o = newObjectFor(tool, box);
     commit([...objects(), o], { select: [o.id] });
     if (o.kind === "text") requestAnimationFrame(() => startTyping(o.id, { caret: "end" }));
   }
 
   function newObjectFor(tool, box) {
+    // 既定の図形・テキスト ボックス・線に設定 (the deck's own): the look a new one starts with.
+    const own = app.objectDefaults?.() || {};
     if (tool.kind === "line") {
       const extra = { line: {}, arrow: { tail: "triangle" }, double: { head: "triangle", tail: "triangle" }, elbow: { route: "elbow", tail: "triangle" }, curve: { route: "curve", tail: "triangle" } }[tool.variant || "line"] || {};
-      return ops.makeObject("line", box, extra);
+      return ops.makeObject("line", box, { ...(own.line || {}), ...extra });
     }
-    if (tool.kind === "text") return ops.makeObject("text", box, { text: "<p><br></p>", ...(tool.vertical ? { vertical: true, autofit: "none" } : {}) });
+    if (tool.kind === "text") return ops.makeObject("text", box, { ...(own.text || {}), text: "<p><br></p>", ...(tool.vertical ? { vertical: true, autofit: "none" } : {}) });
     // 動作設定ボタン come with their click (次へ・前へ・最初へ…) set, as in PowerPoint.
     const preset = E.SHAPES[tool.shape]?.action;
-    return ops.makeObject("shape", box, { shape: tool.shape || "rect", ...(preset ? { action: { ...preset } } : {}) });
+    return ops.makeObject("shape", box, { ...(own.shape || {}), shape: tool.shape || "rect", ...(preset ? { action: { ...preset } } : {}) });
   }
 
   function setTool(tool) {
+    if (ed.tool?.lock && !tool) app.toast("描画モードのロックを解除しました");
     ed.tool = tool;
     ed.wrap?.classList.toggle("ed-drawing", Boolean(tool));
     emit();
@@ -1291,6 +1295,7 @@ export function createCanvas(app) {
   function pasteObjects(payload, { at = null, mode = "keep" } = {}) {
     let pasted = payloadObjects(payload);
     if (!pasted.length) return;
+    if (mode === "picture") { pasteAsPicture(pasted, at); return; }
     if (mode === "text") {
       const words = pasted.map((o) => E.objectText(o)).filter(Boolean).join("\n").trim();
       if (!words) { app.toast("貼り付ける文字がありません"); return; }
@@ -1313,6 +1318,21 @@ export function createCanvas(app) {
     }
     const anims = copiedAnims(payload?.anims, idMap, groupMap);
     commit(out, { select: ids, ...(anims.length ? { timeline: [...timeline(), ...anims] } : {}) });
+  }
+  /** 図として貼り付け: the copied objects drawn into one PNG picture, put where they were (or at `at`). */
+  async function pasteAsPicture(pasted, at) {
+    let made;
+    try { made = await app.objectsPicture?.(pasted); } catch (error) { app.toast(`図として貼り付けられませんでした（${error.message || error}）`); return; }
+    if (!made) return;
+    const src = await app.storeBlob(made.blob, "図.png");
+    const words = pasted.map((o) => E.objectText(o)).filter(Boolean).join(" ").replace(/\s+/g, " ").trim().slice(0, 200);
+    ed.pasteCount += 1;
+    const list = objects();
+    const step = list.some((o) => pasted.some((x) => x.id === o.id)) ? ed.pasteCount * 20 : (ed.pasteCount - 1) * 20;
+    const box = at ? { x: at[0] - made.w / 2, y: at[1] - made.h / 2, w: made.w, h: made.h } : { x: made.x + step, y: made.y + step, w: made.w, h: made.h };
+    const o = ops.makeObject("image", box, { src, fileName: "図.png", ...(words ? { alt: words } : {}) });
+    commit([...list, o], { select: [o.id] });
+    app.toast("図として貼り付けました（文字や形はもう直せません。元の部品はコピーしたまま）");
   }
   function pasteFromMemory(mode = "keep") {
     let payload = ed.clipboard;
@@ -1621,6 +1641,7 @@ export function createCanvas(app) {
       any && { label: "切り取り", keys: "⌘X", run: () => { const payload = copyPayload(); ed.clipboard = payload; ed.pasteCount = 0; try { localStorage.setItem("hsej-editor-clipboard", JSON.stringify(payload)); } catch { /* full */ } removeSelection(); } },
       any && { label: "コピー", keys: "⌘C", run: () => { ed.clipboard = copyPayload(); ed.pasteCount = 0; try { localStorage.setItem("hsej-editor-clipboard", JSON.stringify(ed.clipboard)); } catch { /* full */ } app.toast("コピーしました"); } },
       { label: "貼り付け", keys: "⌘V", run: () => { if (ed.clipboard || localStorage.getItem("hsej-editor-clipboard")) { const payload = ed.clipboard || JSON.parse(localStorage.getItem("hsej-editor-clipboard")); pasteObjects(payload, { at: hit ? null : p }); } else app.toast("貼り付けるオブジェクトがありません"); } },
+      { label: "図として貼り付け", run: () => { const payload = ed.clipboard || (() => { try { return JSON.parse(localStorage.getItem("hsej-editor-clipboard") || "null"); } catch { return null; } })(); if (payload) pasteObjects(payload, { at: hit ? null : p, mode: "picture" }); else app.toast("貼り付けるオブジェクトがありません"); } },
       any && { label: "複製", keys: "⌘D", run: duplicateSelection },
       any && !locked && { label: "削除", keys: "Delete", run: removeSelection },
       "-",
@@ -1642,7 +1663,11 @@ export function createCanvas(app) {
       // A link on the object: open it, or take it away.
       one?.action?.type === "url" && { label: "リンクを開く", run: () => window.open(one.action.href, "_blank", "noopener") },
       one?.action?.type === "url" && !one.locked && { label: "リンクの削除", run: () => commit(ops.update(objects(), [one.id], () => ({ action: undefined }))) },
-      one && { label: "図として保存…", run: () => app.saveAsPicture?.(one.id) },
+      any && { label: "図として保存…", run: () => app.saveAsPicture?.(ed.sel.slice()) },
+      // 既定の図形・テキスト ボックス・線に設定: new ones in this deck start with this one's look.
+      one?.kind === "shape" && { label: "既定の図形に設定", run: () => app.setObjectDefault?.("shape", one) },
+      one?.kind === "text" && { label: "既定のテキスト ボックスに設定", run: () => app.setObjectDefault?.("text", one) },
+      one?.kind === "line" && { label: "既定の線に設定", run: () => app.setObjectDefault?.("line", one) },
       any && { label: "アニメーション…", run: () => { app.showTab("animation", { open: true }); app.openAnimationPane(); } },
       one?.kind === "shape" && one.shape === "custom" && !one.locked && { label: "頂点の編集", run: () => app.editPoints?.(one.id) },
       one?.kind === "image" && !one.locked && { label: "トリミング", run: () => app.startCrop?.(one.id) },
@@ -1656,6 +1681,7 @@ export function createCanvas(app) {
       one?.kind === "ink" && { label: "描画タブ（ペン・消しゴム・インクを図形に変換）", run: () => app.showTab?.("draw") },
       !any && { label: "すべて選択", keys: "⌘A", run: () => { ed.sel = visible().map((o) => o.id); draw(); emit(); } },
       !any && { label: "図形を描く…", run: () => app.showTab?.("insert") },
+      !any && slide()?.background?.image && { label: "背景の保存…", run: () => app.saveBackground?.() },
       !any && app.canConvert?.() && "-",
       !any && app.canConvert?.() && { label: "図形に変換（レイアウトを部品に分ける）", run: () => app.convertSlide() },
       !any && "-",

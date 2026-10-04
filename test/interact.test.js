@@ -196,3 +196,29 @@ test("おまかせ leaves the template's furniture alone: the same object in the
   assert.equal(chromeOf([page(1)]).size, 0, "one slide has no furniture");
   assert.equal(chromeOf([page(1), { ...page(2), hidden: true }]).size, 0, "hidden slides do not count");
 });
+
+test("動作設定: a click plays a sound with its jump, マウスの通過 jumps or plays a sound (never opens a link)", async () => {
+  const { E } = await loadEngine();
+  const [a, b, c, d, e] = E.normalizeObjects([
+    box("a", { action: { type: "next", sound: "chime" }, overAction: { type: "slide", to: "s3", sound: "nope" } }),
+    box("b", { action: { type: "sound", sound: "applause" }, overAction: { type: "url", href: "https://example.com/" } }),
+    box("c", { action: { type: "sound" }, overAction: { type: "sound", sound: "bell" } }),
+    box("d", { action: { type: "url", href: "https://example.com/", sound: "click" }, overAction: { type: "end" } }),
+    box("e", { overAction: "next" }),
+  ]);
+  assert.deepEqual(plain(a.action), { type: "next", sound: "chime" });
+  assert.deepEqual(plain(a.overAction), { type: "slide", to: "s3" }, "an unknown sound is left out");
+  assert.deepEqual(plain(b.action), { type: "sound", sound: "applause" });
+  assert.equal(b.overAction, undefined, "a browser opens a page only for a click");
+  assert.equal(c.action, undefined, "a sound action needs a sound");
+  assert.deepEqual(plain(c.overAction), { type: "sound", sound: "bell" });
+  assert.deepEqual(plain(d.action), { type: "url", href: "https://example.com/", sound: "click" });
+  assert.deepEqual(plain(d.overAction), { type: "end" });
+  assert.equal(e.overAction, undefined);
+  const slide = { type: "blank", title: "検証", elements: [a, c] };
+  const live = E.render(slide, { deck: deckWith(slide), index: 1, mode: "present" });
+  assert.equal(live.querySelector('.hs-obj[data-el="a"]').dataset.over, "slide");
+  assert.equal(live.querySelector('.hs-obj[data-el="c"]').dataset.over, "sound");
+  const edit = E.render(slide, { deck: deckWith(slide), index: 1, mode: "edit" });
+  assert.equal(edit.querySelectorAll("[data-over]").length, 0, "the editor does not act on the pointer");
+});
