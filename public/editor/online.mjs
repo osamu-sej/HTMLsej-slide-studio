@@ -9,6 +9,15 @@ const newClientId = () => `v${(globalThis.crypto?.randomUUID?.() || `${Date.now(
 const mediaIds = (slides) => [...new Set((slides || []).flatMap((s) => [s?.media?.src, ...(s?.elements || []).map((o) => o?.src)]).filter((src) => typeof src === "string" && src.startsWith("idb:")))];
 const api = (id, rest = "") => `/api/rooms/${encodeURIComponent(id)}${rest}`;
 
+/** The link as a QR code (an SVG), for phones to join. */
+export async function qrSvg(text) {
+  const { default: qrcode } = await import("/vendor/qrcode.mjs");
+  const qr = qrcode(0, "M");
+  qr.addData(text);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+}
+
 export function createOnline(app) {
   const { h } = app;
   // The presenter's side: { id, key, es, client, viewers, sent (deck JSON when connected), chain, last }.
@@ -39,7 +48,8 @@ export function createOnline(app) {
     const response = await fetch("/api/rooms", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ deck: app.deck(), fits, show: true }) });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    live = { id: result.id, key: result.key, es: null, client: newClientId(), viewers: 0, sent: JSON.stringify(app.deck()), chain: Promise.resolve(), last: null, presenting: false };
+    live = { id: result.id, key: result.key, es: null, client: newClientId(), viewers: 0, sent: JSON.stringify(app.deck()), chain: Promise.resolve(), last: null, presenting: false, votes: new Map(), qr: "" };
+    live.qr = await qrSvg(link()).catch(() => "");
     await uploadMedia(app.deck());
     const params = new URLSearchParams({ client: live.client, name: `${userName() || "発表者"}（発表者）` });
     const es = new EventSource(api(live.id, `?${params}`));
@@ -47,6 +57,14 @@ export function createOnline(app) {
     const count = (people) => { if (!live) return; live.viewers = (people || []).filter((p) => p.id !== live.client).length; refresh(); };
     es.addEventListener("snapshot", (event) => count(JSON.parse(event.data).people));
     es.addEventListener("people", (event) => count(JSON.parse(event.data).people));
+    // PowerPoint Live: the audience's reactions float up on the presenter's screen; their answers fill the polls.
+    es.addEventListener("react", (event) => { if (live?.presenting) app.player()?.react?.(JSON.parse(event.data).emoji); });
+    es.addEventListener("votes", (event) => {
+      const { poll, counts } = JSON.parse(event.data);
+      live?.votes.set(poll, counts);
+      if (live?.presenting) app.player()?.setVotes?.(poll, counts);
+      refresh();
+    });
     app.refreshRibbon();
     return true;
   }
@@ -61,15 +79,31 @@ export function createOnline(app) {
     });
   }
 
+  // The presenter's captions go out a few times a second at most (the last words always).
+  let captionTimer = 0;
+  let captionText = "";
+  function sendCaption(text) {
+    captionText = text;
+    if (captionTimer) return;
+    captionTimer = setTimeout(() => { captionTimer = 0; if (live) post("/caption", { text: captionText }).catch(() => {}); }, 350);
+  }
+
   /** プレゼンテーションの開始: present here; every slide and click goes to the viewers. */
   async function present(start = app.index(), { custom = null } = {}) {
     if (!live) return;
     live.presenting = true;
     await app.openPresenter(start, {
       custom,
-      extra: { onChange: ({ index, step }) => sendState({ index, step: Number.isFinite(step) ? step : 10_000, sid: app.deck()?.slides[index]?.sid }) },
+      extra: {
+        onChange: ({ index, step }) => sendState({ index, step: Number.isFinite(step) ? step : 10_000, sid: app.deck()?.slides[index]?.sid }),
+        onCaption: (text) => sendCaption(text),
+        // The presenter's clicks on a poll do not answer it: the viewers do.
+        onVote: () => { app.toast("アンケートの回答は視聴者から集めています"); return false; },
+        joinCard: { url: link(), svg: live.qr },
+      },
       onClosed: (index) => { if (!live) return; live.presenting = false; sendState({ index: index ?? 0, step: 0, ended: true }); refresh(); },
     });
+    for (const [poll, counts] of live?.votes || []) app.player()?.setVotes?.(poll, counts);
   }
 
   /** 資料の更新: the deck as it is now (after editing during the show) goes to the viewers. */
@@ -113,13 +147,17 @@ export function createOnline(app) {
       ];
     }
     const input = h("input", { class: "op-link", readonly: true, value: link(), onfocus: (event) => event.target.select() });
+    const qr = h("div", { class: "op-qr", title: "スマートフォンで読み取ると参加できます" });
+    if (live.qr) qr.innerHTML = live.qr;
+    const answers = [...live.votes.values()].reduce((n, counts) => n + counts.reduce((a, b) => a + b, 0), 0);
     const changed = JSON.stringify(app.deck()) !== live.sent;
     return [
       h("p", {}, "このリンクを視聴者に送ってください。"),
       h("div", { class: "op-row" }, input,
         h("button", { type: "button", class: "btn btn-sm op-copy", onclick: async () => { try { await navigator.clipboard.writeText(link()); app.toast("リンクをコピーしました"); } catch { input.select(); } } }, "リンクのコピー"),
         h("a", { class: "btn btn-sm", href: `mailto:?subject=${encodeURIComponent(`オンライン プレゼンテーション：${app.deck()?.title || ""}`)}&body=${encodeURIComponent(link())}` }, "メールで送信")),
-      h("p", { class: "op-status" }, h("span", { class: ["op-dot", live.presenting ? "on" : ""] }), live.presenting ? "発表中" : "接続済み（発表はまだ始まっていません）", `・視聴者 ${live.viewers}人`),
+      h("div", { class: "op-join" }, live.qr ? qr : null, h("p", { class: "hint" }, "QR コードを読み取るとスマートフォンからも参加できます。発表中は Q キー（またはバーの「参加」）で画面に出せます。視聴者はリアクションを送ったり、アンケートに答えたりできます。")),
+      h("p", { class: "op-status" }, h("span", { class: ["op-dot", live.presenting ? "on" : ""] }), live.presenting ? "発表中" : "接続済み（発表はまだ始まっていません）", `・視聴者 ${live.viewers}人`, answers ? `・アンケートの回答 ${answers}件` : ""),
       changed ? h("p", { class: "hint" }, "接続したあとに資料を変更しました。「資料の更新」で視聴者にも反映できます。") : null,
     ].filter(Boolean);
   }
@@ -175,10 +213,18 @@ export function createOnline(app) {
       if (!state.live) return say("発表者がスライド ショーを始めるのを待っています。");
       return say("");
     };
+    let votes = {};
+    const send = (path, body) => fetch(api(id, path), { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ client, ...body }) }).catch(() => {});
     const mount = () => {
       player?.destroy();
-      player = app.openViewer(deck, { fits, start: state?.index ?? 0, step: state?.step ?? 0, label: deck.title ? `${deck.title}：発表者に合わせて表示しています` : null });
+      player = app.openViewer(deck, {
+        fits, start: state?.index ?? 0, step: state?.step ?? 0, label: deck.title ? `${deck.title}：発表者に合わせて表示しています` : null,
+        // PowerPoint Live: reactions and answers go to the presenter (and everyone watching).
+        onReact: (emoji) => send("/react", { emoji }),
+        onVote: (poll, option) => { send("/vote", { poll, option }); return true; },
+      });
       player?.el.append(banner);
+      for (const [poll, counts] of Object.entries(votes)) player?.setVotes(poll, counts);
     };
     const es = new EventSource(api(id, `?${new URLSearchParams({ client, name: "視聴者" })}`));
     es.addEventListener("snapshot", (event) => {
@@ -187,8 +233,9 @@ export function createOnline(app) {
       deck = data.deck;
       fits = data.fits;
       state = data.show;
+      votes = data.votes || {};
       placeMedia(deck.slides);
-      if (!player) mount(); else player.follow(state.index, state.step);
+      if (!player) mount(); else { player.follow(state.index, state.step); for (const [poll, counts] of Object.entries(votes)) player.setVotes(poll, counts); }
       status();
     });
     es.addEventListener("show", (event) => {
@@ -197,6 +244,9 @@ export function createOnline(app) {
       status();
       if (state.over) es.close();
     });
+    es.addEventListener("react", (event) => { const data = JSON.parse(event.data); if (data.from !== client) player?.react(data.emoji); });
+    es.addEventListener("votes", (event) => { const { poll, counts } = JSON.parse(event.data); votes[poll] = counts; player?.setVotes(poll, counts); });
+    es.addEventListener("caption", (event) => player?.caption(JSON.parse(event.data).text));
     es.addEventListener("deck", (event) => {
       const data = JSON.parse(event.data);
       deck = data.deck;

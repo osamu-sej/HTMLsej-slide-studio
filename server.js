@@ -141,6 +141,9 @@ function loadStatic() {
   // Polygon boolean operations (polygon-clipping, MIT) for 図形の結合, loaded by the editor on first use.
   const clipping = join(here, "node_modules", "polygon-clipping", "dist", "polygon-clipping.umd.min.js");
   if (existsSync(clipping)) add("/vendor/polygon-clipping.js", readFileSync(clipping), TYPES[".js"]);
+  // QR codes (qrcode-generator, MIT) for the link to an online presentation.
+  const qrcode = join(here, "node_modules", "qrcode-generator", "dist", "qrcode.mjs");
+  if (existsSync(qrcode)) add("/vendor/qrcode.mjs", readFileSync(qrcode), TYPES[".js"]);
   // 3D models (three.js, MIT): the core and the glTF loader, with their imports pointed at each other (no import map).
   for (const [name, code] of threeFiles()) add(`/vendor/three/${name}`, code, TYPES[".js"]);
   return files;
@@ -921,7 +924,7 @@ async function roomRoute(req, res, url) {
   const action = parts[3] || "";
   // オンライン プレゼンテーション: anyone with the link may watch a show (its stream and its pictures), as in
   // PowerPoint; making, editing and presenting still need the team passcode in team mode.
-  const watching = rooms.get(parts[2])?.kind === "show" && (((req.method === "GET" || req.method === "HEAD") && (!action || action === "media")) || action === "leave");
+  const watching = rooms.get(parts[2])?.kind === "show" && (((req.method === "GET" || req.method === "HEAD") && (!action || action === "media")) || ["leave", "react", "vote"].includes(action));
   if (!watching && !roomAllowed(req, res)) return json(res, 403, { error: "チームのパスコードを入れると共同編集できます" });
   try {
     if (parts.length === 2 && req.method === "POST") {
@@ -945,6 +948,19 @@ async function roomRoute(req, res, url) {
     if (action === "show" && req.method === "POST") {
       const body = await readJson(req, 4_000);
       return json(res, 200, { show: rooms.setShow(room, body.key, body) });
+    }
+    if (action === "react" && req.method === "POST") {
+      const body = await readJson(req, 2_000);
+      return json(res, 200, { ok: rooms.react(room, String(body.client || ""), String(body.emoji || "")) });
+    }
+    if (action === "vote" && req.method === "POST") {
+      const body = await readJson(req, 2_000);
+      return json(res, 200, { counts: rooms.vote(room, String(body.client || ""), { poll: String(body.poll || ""), option: body.option }) });
+    }
+    if (action === "caption" && req.method === "POST") {
+      const body = await readJson(req, 4_000);
+      rooms.caption(room, body.key, body.text);
+      return res.writeHead(204).end();
     }
     if (action === "deck" && req.method === "PUT") {
       const body = await readJson(req, 25_000_000);

@@ -101,7 +101,7 @@ export function createRooms({ maxRooms = 60, maxDeckBytes = 20_000_000, maxMedia
     const entry = { id: client, res, name: clean(name, 40) || "名前なし", uid: clean(uid, 24), color, slide: old?.slide || null, sel: old?.sel || [], at: now() };
     room.clients.set(client, entry);
     room.touched = now();
-    send(entry, "snapshot", { deck: room.deck, version: room.version, people: people(room), you: { id: client, color }, kind: room.kind || "edit", show: room.show || null, fits: room.fits || null });
+    send(entry, "snapshot", { deck: room.deck, version: room.version, people: people(room), you: { id: client, color }, kind: room.kind || "edit", show: room.show || null, fits: room.fits || null, votes: room.kind === "show" ? Object.fromEntries([...(room.votes?.keys() || [])].map((poll) => [poll, tally(room, poll)])) : undefined });
     broadcast(room, "people", { people: people(room) }, client);
     return entry;
   }
@@ -221,6 +221,50 @@ export function createRooms({ maxRooms = 60, maxDeckBytes = 20_000_000, maxMedia
     return room.version;
   }
 
+  // PowerPoint Live: what the audience sends (reactions, votes) and the presenter's captions, passed to everyone.
+  const REACTIONS = ["👍", "❤️", "👏", "😮", "💡", "😂"];
+  function allowed(room, client, kind, perWindow, windowMs = 4000) {
+    const entry = room.clients.get(client);
+    if (!entry) return false;
+    const t = now();
+    entry.sent = (entry.sent || []).filter((x) => x.kind !== kind || t - x.at < windowMs);
+    if (entry.sent.filter((x) => x.kind === kind).length >= perWindow) return false;
+    entry.sent.push({ kind, at: t });
+    return true;
+  }
+  /** A viewer's reaction (one of REACTIONS), a few every few seconds at most: everyone sees it float up. */
+  function react(room, client, emoji) {
+    if (room.kind !== "show" || !REACTIONS.includes(emoji)) throw new Error("リアクションが読めません");
+    if (!allowed(room, client, "react", 6)) return false;
+    broadcast(room, "react", { emoji, from: client });
+    return true;
+  }
+  /** A vote in a poll (アンケート) on the deck's slides: one answer per viewer per poll (a new one replaces it). */
+  function vote(room, client, { poll, option } = {}) {
+    if (room.kind !== "show") throw new Error("投票できません");
+    const object = room.deck.slides.flatMap((s) => s.elements || []).find((o) => o.kind === "poll" && o.id === poll);
+    if (!object || !Number.isInteger(option) || option < 0 || option >= (object.options || []).length) throw new Error("投票が読めません");
+    if (!room.clients.has(client) || !allowed(room, client, "vote", 10)) return null;
+    room.votes = room.votes || new Map();
+    const answers = room.votes.get(poll) || new Map();
+    answers.set(client, option);
+    room.votes.set(poll, answers);
+    const counts = tally(room, poll);
+    broadcast(room, "votes", { poll, counts });
+    return counts;
+  }
+  function tally(room, poll) {
+    const object = room.deck.slides.flatMap((s) => s.elements || []).find((o) => o.kind === "poll" && o.id === poll);
+    const counts = new Array((object?.options || []).length).fill(0);
+    for (const option of room.votes?.get(poll)?.values() || []) if (option < counts.length) counts[option] += 1;
+    return counts;
+  }
+  /** The presenter's live captions (字幕), shown on every viewer's screen. */
+  function caption(room, key, text) {
+    if (!isPresenter(room, key)) throw new Error("発表者だけが字幕を送れます");
+    broadcast(room, "caption", { text: clean(text, 300) });
+  }
+
   function putMedia(room, mid, type, body) {
     if (!MEDIA_ID.test(mid)) throw new Error("bad media id");
     if (room.media.has(mid)) return;
@@ -245,5 +289,5 @@ export function createRooms({ maxRooms = 60, maxDeckBytes = 20_000_000, maxMedia
     for (const room of rooms.values()) for (const client of room.clients.values()) { try { client.res.end(); } catch { /* gone */ } }
   }
 
-  return { create, get, join, leave, apply, presence, setShow, replaceDeck, isPresenter, putMedia, getMedia, people, sweep, heartbeat, closeAll, rooms };
+  return { create, get, join, leave, apply, presence, setShow, replaceDeck, isPresenter, react, vote, caption, putMedia, getMedia, people, sweep, heartbeat, closeAll, rooms };
 }

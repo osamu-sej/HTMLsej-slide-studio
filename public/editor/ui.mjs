@@ -14,8 +14,9 @@ import { MERGE_HINTS, MERGE_MODES, canMerge, clippingLib, mergeObjects } from ".
 import { createSmartArt } from "./smartart.mjs";
 import { createInk } from "./ink.mjs";
 import { createExtras } from "./extras.mjs";
-import { createPictureTools } from "./picture.mjs";
+import { ART_EFFECTS, RECOLORS, createPictureTools } from "./picture.mjs";
 import { createModels } from "./model3d.mjs";
+import { createPolls } from "./poll.mjs";
 
 const SIZES_PT = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const LINE_WIDTHS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 8, 12];
@@ -391,6 +392,7 @@ export function createEditorUi(editor, app) {
       { label: "JSONで保存", icon: "down", run: () => app.saveJson() },
       { label: "レビュー用ファイル", icon: "review", run: () => app.exportReview() },
       { label: "ビデオの作成（WebM）…", icon: "video2", run: () => app.openVideoExport() },
+      { label: "画像として保存（PNG・JPEG）…", icon: "image", run: () => app.openImageExport() },
       "-",
       { label: "JSONを読み込む…", icon: "up", run: () => app.openJson() },
       { label: "版の履歴・過去の資料…", icon: "clock", run: () => app.openHistory() },
@@ -474,7 +476,9 @@ export function createEditorUi(editor, app) {
   function fold(g) {
     const items = g.querySelector(":scope > .rb-items");
     const label = g.querySelector(":scope > .rb-label")?.textContent || "";
-    const button = h("button", { type: "button", class: "rb-btn big rb-drop rb-folded", title: label, "aria-haspopup": "true",
+    // Opening a folded group keeps the caret and the words picked while typing (its リンク, フォント… act on them).
+    const button = h("button", { type: "button", class: "rb-btn big rb-drop rb-folded", title: label, "aria-haspopup": "true", "data-keeps-text": "",
+      onmousedown: (event) => event.preventDefault(),
       onclick: (event) => { event.preventDefault(); openPop(button, () => h("div", { class: "rb-fold" }, items, h("div", { class: "rb-label" }, label))); } },
     ico(GROUP_ICONS[label] || "chevron", 26), caption(label), h("b", { class: "rb-caret" }, "▾"));
     g.classList.add("folded");
@@ -754,6 +758,8 @@ export function createEditorUi(editor, app) {
         drop("audio", "オーディオ", "音声を入れる：ファイル・この場で録音・URL", () => media.audioMenu(), { big: true }),
         btn("screenRec", "画面|録画", "画面・ウィンドウ・タブを録画して、ビデオとして入れる（マイクの音声も）", () => media.recorder("screen"), { big: true }),
         btn("camera", "カメオ", "カメラの映像（発表中にライブで映る。丸や角丸に切り抜けます）", () => extras.insertCamera(), { big: true })),
+      group("フォーム",
+        btn("poll", "アンケート", "質問と選択肢：発表中にクリックで回答、オンライン プレゼンテーションでは視聴者の回答がその場で棒グラフに", () => polls.insert(), { big: true })),
       group("数式と記号",
         btn("equation", "数式", "数式を入れる（TeXの書き方。分数・ルート・Σ…）", () => extras.equationDialog(), { big: true }),
         col(drop("symbol", "記号と特殊文字", "記号を入れる（文字の入力中はカーソルの位置に）", () => symbolGallery(), { keep: true }),
@@ -945,6 +951,8 @@ export function createEditorUi(editor, app) {
           { head: "明るさ / コントラスト" },
           ...[[-0.4, 0], [-0.2, 0], [0, 0], [0.2, 0], [0.4, 0], [0, 0.2], [0, 0.4], [0.2, 0.2], [-0.2, 0.2]].map(([b, c]) => ({ label: `明るさ ${b > 0 ? "+" : ""}${Math.round(b * 100)}% / コントラスト ${c > 0 ? "+" : ""}${Math.round(c * 100)}%`, run: () => editor.apply((o) => (o.kind === "image" ? { bright: b || undefined, contrast: c || undefined } : null)) })),
         ]), { big: true, enabled: hasImage }),
+        drop("magic", "アート|効果", "ぼかし・鉛筆スケッチ・線画・モザイク・セピア・ポスター（新しい画像として保存、⌘Zで戻せます）", () => menu([{ head: "アート効果" }, ...Object.entries(ART_EFFECTS).map(([k, label]) => ({ label, run: () => pictureTools.art(k) }))]), { big: true, enabled: hasImage }),
+        drop("fill", "色", "色の変更（グレースケール・セピア・ウォッシュアウト・SEJの色調）と透明色", () => menu([{ head: "色の変更" }, ...Object.entries(RECOLORS).map(([k, label]) => ({ label, run: () => pictureTools.colorize(k) })), "-", { label: "透明色を指定", icon: "transparency", run: () => pictureTools.transparentColor() }]), { big: true, enabled: hasImage }),
         col(btn("gray", "グレースケール", "白黒にする（もう一度で戻す）", () => editor.apply((o) => (o.kind === "image" ? { gray: !o.gray || undefined } : null)), { enabled: hasImage, pressed: () => img()?.gray }),
           drop("transparency", "透明度", "図の透明度", () => menu([0, 0.15, 0.3, 0.5, 0.7].map((t) => ({ label: `${Math.round(t * 100)}%`, run: () => editor.apply({ opacity: t ? Math.round((1 - t) * 100) / 100 : undefined }) }))), { enabled: hasImage })),
         col(btn("transparency", "透明色を指定", "図の上でクリックした色を透明にする", () => pictureTools.transparentColor(), { enabled: hasImage }),
@@ -1274,7 +1282,7 @@ export function createEditorUi(editor, app) {
   }
   function kindIcon(o) {
     if (o.kind === "shape") return E.SHAPES[o.shape] ? shapeThumb(o.shape, 18, 14) : freeformThumb(o.path?.closed ? "polygon" : "curve");
-    return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", audio: "audio", lottie: "lottie", table: "table", chart: "chartBar", smartart: "smartart", ink: "pen", zoom: "zoomSlide", camera: "camera", equation: "equation", model: "model3d" }[o.kind] || "shapes", 16);
+    return ico({ text: "textbox", image: "image", line: "line", icon: "icon", video: "video", audio: "audio", lottie: "lottie", table: "table", chart: "chartBar", smartart: "smartart", ink: "pen", zoom: "zoomSlide", camera: "camera", equation: "equation", model: "model3d", poll: "poll" }[o.kind] || "shapes", 16);
   }
 
   // アニメーション・画面切り替え (anim.mjs) build their tabs and the animation pane with these same parts.
@@ -1296,6 +1304,8 @@ export function createEditorUi(editor, app) {
   const pictureTools = createPictureTools(editor, app);
   // 挿入 → 3D モデル and the 3D モデル tab (model3d.mjs).
   const models3d = createModels(editor, app, { btn, drop, group, col, row, menu, openPop, closePop, updater: (fn) => updaters.push(fn), refreshRibbon: () => refresh() });
+  // 挿入 → アンケート (poll.mjs).
+  const polls = createPolls(editor, app);
 
   editor.subscribe(() => { renderRibbon(); renderPane(); });
 
@@ -1305,6 +1315,7 @@ export function createEditorUi(editor, app) {
     showTab, closePop, openPop, shapeGallery, iconGallery, photoGallery, toggleRibbon, setRibbonMode, zoomMenu,
     popMenu: (anchor, items) => openPop(anchor, menu(items)),
     editEquation: (id) => { const o = editor.objects().find((x) => x.id === id); if (o?.kind === "equation") extras.equationDialog(o); },
+    editPoll: (id) => polls.edit(id),
     stopInk: () => ink.stop(), get inkTool() { return ink.tool; },
     get tab() { return tab; }, get ribbonMode() { return ribbonMode; }, get floating() { return floating; },
   };

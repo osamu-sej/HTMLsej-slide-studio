@@ -979,7 +979,7 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .slide-wrap.ed-drawing, .slide-wrap.ed-drawing * { cursor: crosshair !important; }
 .slide-wrap.ed-copying .hs-obj { cursor: copy; }
 .slide-wrap .hs-slide.hs-editable .hs-obj-geom path { pointer-events: visiblePainted; cursor: move; }
-.slide-wrap .hs-slide.hs-editable :is(.hs-obj-text, .hs-obj-img, .hs-obj-media, .hs-obj-tablebox, .hs-obj-chart, .hs-equation, .hs-zoom, .hs-camera) { pointer-events: auto; cursor: move; }
+.slide-wrap .hs-slide.hs-editable :is(.hs-obj-text, .hs-obj-img, .hs-obj-media, .hs-obj-tablebox, .hs-obj-chart, .hs-equation, .hs-zoom, .hs-camera, .hs-poll) { pointer-events: auto; cursor: move; }
 .slide-wrap .hs-slide.hs-editable .ed-typing .hs-obj-tablebox { cursor: text; }
 .slide-wrap .hs-slide.hs-editable .hs-obj .hs-obj-icon { pointer-events: bounding-box; cursor: move; }
 .slide-wrap .hs-slide.hs-editable .ed-hit { pointer-events: stroke; cursor: move; }
@@ -1574,3 +1574,9 @@ audio.trim-media { background: transparent; }
 .m3d-r { transform: rotateY(90deg) translateZ(13px); }
 .m3d-t { transform: rotateX(90deg) translateZ(13px); background: rgba(238, 242, 248, .95); }
 .m3d-d { transform: rotateX(-90deg) translateZ(13px); }
+.op-join { display: flex; gap: 14px; align-items: center; }
+.op-qr svg { display: block; width: 132px; height: 132px; }
+/* アンケート (public/editor/poll.mjs) */
+.poll-dialog { width: min(560px, calc(100vw - 32px)); }
+.pl-field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
+.pl-field input, .pl-field textarea { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font: 14px/1.6 inherit; font-weight: 400; color: var(--ink); }

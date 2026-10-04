@@ -22,6 +22,7 @@ import { createVideoExport } from "./editor/video.mjs?v=__APP_VERSION__";
 import { createCompare } from "./editor/compare.mjs?v=__APP_VERSION__";
 import { createOnline } from "./editor/online.mjs?v=__APP_VERSION__";
 import { createCoach } from "./editor/coach.mjs?v=__APP_VERSION__";
+import { createImageExport } from "./editor/imagexport.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -2332,6 +2333,7 @@ const editorApp = {
   select: (index) => select(index),
   onSlide: () => state.mode === "edit" && state.view === "single" && Boolean(state.deck?.slides[state.selected]),
   editEquation: (id) => editorUi.editEquation(id),
+  editPoll: (id) => editorUi.editPoll(id),
   duplicateSlide: () => { const i = state.selected; if (i > 0 && i < state.deck.slides.length - 1) insertSlide(i + 1, copyOf(state.deck.slides[i])); else toast("表紙と最後のスライドは複製できません"); },
   openTypeDialog: (mode) => openTypeDialog(mode),
   setView: (view) => setView(view),
@@ -2442,6 +2444,8 @@ const editorApp = {
   patchObjects: (changes) => patchObjects(changes),
   // ビデオの作成: the show played once by itself while the tab is recorded.
   openVideoExport: () => videoExport.openDialog(),
+  // 画像として保存 (public/editor/imagexport.mjs).
+  openImageExport: () => imageExport.openDialog(),
   showOrder: () => showSlides(state.deck, showOf(state.deck?.show) || {}) || E.storyMap(state.deck.slides).order.filter((i) => !state.deck.slides[i].hidden),
   presentForVideo: (extra) => openPresenter(0, { extra }),
   // オンライン プレゼンテーション (public/editor/online.mjs).
@@ -2489,6 +2493,8 @@ const fileInfo = createFileInfo(editorApp);
 const slideTools = createSlideTools(editorApp);
 // ファイル → エクスポート → ビデオの作成 (public/editor/video.mjs).
 const videoExport = createVideoExport(editorApp);
+// ファイル → エクスポート → 画像として保存 (public/editor/imagexport.mjs).
+const imageExport = createImageExport(editorApp);
 // 校閲 → 比較 (public/editor/compare.mjs).
 const compareTool = createCompare(editorApp);
 // スライド ショー → オンライン プレゼンテーション (public/editor/online.mjs).
@@ -5514,7 +5520,7 @@ async function openCheckDialog(forExport) {
 
 // ---------------------------------------------------------------- presenting
 
-async function openPresenter(start = state.selected, { custom = null, extra = null, onClosed = null } = {}) {
+async function openPresenter(start = state.selected, { custom = null, extra = null, onClosed = null, fullscreen = true } = {}) {
   if (!state.deck || state.player) return;
   // While presenting online, every slide show goes to the viewers too.
   if (online?.active && !extra && !onClosed) return online.present(start, { custom });
@@ -5530,7 +5536,7 @@ async function openPresenter(start = state.selected, { custom = null, extra = nu
   const host = $("presenter");
   host.classList.remove("hidden");
   host.replaceChildren();
-  host.requestFullscreen?.().catch(() => {});
+  if (fullscreen) host.requestFullscreen?.().catch(() => {});
   useFonts([state.deck.theme]);
   await measureAll();
   state.player = E.createPlayer(host, {
@@ -5692,7 +5698,7 @@ function closePresenter(index, { ink = [], sidsAtStart = null } = {}) {
  * オンライン プレゼンテーション, the viewer's side (public/editor/online.mjs): someone else's deck fills the window
  * and follows its presenter. This browser's own deck is not touched.
  */
-function openViewer(deck, { fits = null, start = 0, step = 0, label = null } = {}) {
+function openViewer(deck, { fits = null, start = 0, step = 0, label = null, onReact = null, onVote = null } = {}) {
   state.player?.destroy?.();
   document.body.classList.add("is-viewer");
   const host = $("presenter");
@@ -5709,6 +5715,8 @@ function openViewer(deck, { fits = null, start = 0, step = 0, label = null } = {
     viewer: true,
     viewerLabel: label,
     closable: false,
+    onReact,
+    onVote,
   });
   if (step) state.player.follow(first, step);
   return state.player;
