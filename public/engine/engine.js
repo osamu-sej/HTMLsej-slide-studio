@@ -424,15 +424,15 @@
   }
 
   /** Bars side by side for each label, one colour per series (集合縦棒). */
-  function clusteredChart(svg, model, w, h) {
-    if (model.series.length < 2) { barChart(svg, model, w, h); return; }
+  function clusteredChart(svg, model, w, h, opts = {}) {
+    if (model.series.length < 2) { barChart(svg, model, w, h, opts); return; }
     const labels = model.labels;
     const n = Math.max(1, labels.length);
     const k = model.series.length;
     const top = 56;
     const bottom = 64;
     const plotH = h - top - bottom;
-    const max = niceMax(Math.max(...model.series.flatMap((serie) => serie.values), 0) * 1.05);
+    const max = axisBounds(opts, 0, niceMax(Math.max(...model.series.flatMap((serie) => serie.values), 0) * 1.05))[1];
     const slot = w / n;
     const groupW = Math.min(slot * 0.74, 110 * k);
     const bw = groupW / k;
@@ -443,7 +443,7 @@
       const x0 = slot * i + (slot - groupW) / 2;
       model.series.forEach((serie, si) => {
         const value = serie.values[i] ?? 0;
-        const bh = (Math.max(0, value) / max) * plotH;
+        const bh = (Math.min(max, Math.max(0, value)) / max) * plotH;
         const x = x0 + si * bw;
         svg.append(markTip(s("path", { class: "hs-bar", d: roundTop(x + 2, y0 - bh, Math.max(2, bw - 4), bh, Math.min(8, bw / 4)), fill: SERIES[si % SERIES.length] }), `${label}・${serie.name}：${fmt(value)}`, i * k + si));
         if (showValues) svg.append(s("text", { class: "hs-val", x: x + bw / 2, y: y0 - bh - 12, "text-anchor": "middle", style: { "font-size": "22px" } }, fmt(value)));
@@ -480,23 +480,23 @@
     const plotH = h - top - bottom;
     const combo = model.type === "combo" && model.series[1];
     const all = combo ? [...values, ...model.series[1].values] : values;
-    const max = niceMax(Math.max(...all, 0) * 1.05);
+    const max = axisBounds(opts, 0, niceMax(Math.max(...all, 0) * 1.05))[1];
     const slot = w / n;
     const bw = Math.min(110, slot * 0.54);
     const y0 = top + plotH;
     svg.append(s("line", { class: "hs-axisline", x1: 0, x2: w, y1: y0, y2: y0 }));
     values.forEach((value, i) => {
       const x = slot * i + (slot - bw) / 2;
-      const bh = (Math.max(0, value) / max) * plotH;
+      const bh = (Math.min(max, Math.max(0, value)) / max) * plotH;
       const isHot = i === hot && !combo;
       svg.append(markTip(s("path", { class: `hs-bar${isHot ? " is-hot" : ""}`, d: roundTop(x, y0 - bh, bw, bh, 10), fill: combo ? "var(--c-muted)" : isHot ? "var(--accent)" : "var(--c-muted)" }), `${labels[i]}：${fmt(value)}`, i));
       if (!combo) svg.append(s("text", { class: `hs-val${isHot ? " hot" : ""}`, x: x + bw / 2, y: y0 - bh - 16, "text-anchor": "middle" }, fmt(value)));
       svg.append(s("text", { x: x + bw / 2, y: y0 + 40, "text-anchor": "middle" }, labels[i]));
     });
-    if (opts.trend === "linear" && !combo) trendLine(svg, values.map((v, i) => [slot * i + slot / 2, y0 - (Math.max(0, v) / max) * plotH]));
+    if (opts.trend === "linear" && !combo) trendLine(svg, values.map((v, i) => [slot * i + slot / 2, y0 - (Math.min(max, Math.max(0, v)) / max) * plotH]));
     if (combo) {
       const line = model.series[1].values;
-      const pts = line.map((value, i) => [slot * i + slot / 2, y0 - (Math.max(0, value) / max) * plotH]);
+      const pts = line.map((value, i) => [slot * i + slot / 2, y0 - (Math.min(max, Math.max(0, value)) / max) * plotH]);
       const len = pathLength(pts);
       svg.append(s("polyline", { class: "hs-draw", points: pts.map((p) => p.join(",")).join(" "), fill: "none", stroke: "var(--accent)", "stroke-width": 5, "stroke-linejoin": "round", "stroke-linecap": "round", style: { "--len": len } }));
       pts.forEach(([x, y], i) => {
@@ -528,12 +528,14 @@
     const minAll = Math.min(...all);
     let lo = rawMin < 0 ? rawMin : minAll > rawMax * 0.45 ? Math.floor((minAll - (rawMax - minAll) * 0.4) / niceStep(rawMax - minAll)) * niceStep(rawMax - minAll) : 0;
     lo = Math.max(lo, rawMin < 0 ? rawMin : 0);
-    const hi = lo + niceMax((rawMax - lo) * 1.08 || 1);
+    let hi = lo + niceMax((rawMax - lo) * 1.08 || 1);
+    [lo, hi] = axisBounds(opts, lo, hi);
     const plotW = w - left - right;
     const plotH = h - top - bottom;
     const n = Math.max(1, labels.length);
     const xOf = (i) => left + (n === 1 ? plotW / 2 : (plotW * i) / (n - 1));
-    const yOf = (v) => top + plotH - ((v - lo) / (hi - lo || 1)) * plotH;
+    // Values beyond the axis (軸の書式) stay on its edge.
+    const yOf = (v) => top + plotH - ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo || 1)) * plotH;
     for (let k = 0; k <= 4; k += 1) {
       const v = lo + ((hi - lo) * k) / 4;
       const y = yOf(v);
@@ -562,6 +564,13 @@
         svg.append(s("text", { x: x + 22, y: y + 8, style: { "font-weight": si === 0 ? 800 : 600, fill: "var(--ink)" } }, `${serie.name}  `, s("tspan", { class: "hs-val" }, fmt(serie.values.at(-1)))));
       }
     });
+  }
+
+  /** 軸の書式 (グラフ要素): the value axis's own bounds when set, else the automatic ones. */
+  function axisBounds(opts, lo, hi) {
+    const min = Number.isFinite(opts?.axisMin) ? opts.axisMin : lo;
+    const max = Number.isFinite(opts?.axisMax) && opts.axisMax > min ? opts.axisMax : hi > min ? hi : min + Math.max(1, Math.abs(min));
+    return [min, max];
   }
 
   function niceStep(range) {
@@ -609,7 +618,7 @@
   /** Value axis shared by the area, scatter and waterfall charts: nice limits, a few gridlines with their numbers. */
   function valueAxis(svg, lo, hi, { left, right, top, bottom, ticks = 4 }) {
     const plotH = bottom - top;
-    const yOf = (v) => bottom - ((v - lo) / (hi - lo || 1)) * plotH;
+    const yOf = (v) => bottom - ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo || 1)) * plotH;
     for (let k = 0; k <= ticks; k += 1) {
       const v = lo + ((hi - lo) * k) / ticks;
       const y = yOf(v);
@@ -620,12 +629,12 @@
   }
 
   /** 面 (area): each series a filled area under its line, see-through so the ones behind still show. */
-  function areaChart(svg, model, w, h) {
+  function areaChart(svg, model, w, h, opts = {}) {
     const labels = model.labels;
     const series = model.series.filter((serie) => serie.values.length);
     const all = series.flatMap((serie) => serie.values);
-    const lo = Math.min(0, ...all);
-    const hi = lo + niceMax((Math.max(...all, 0) - lo) * 1.08 || 1);
+    const autoLo = Math.min(0, ...all);
+    const [lo, hi] = axisBounds(opts, autoLo, autoLo + niceMax((Math.max(...all, 0) - autoLo) * 1.08 || 1));
     const left = 90;
     const top = 40;
     const bottom = h - 64;
@@ -647,8 +656,8 @@
   function scatterChart(svg, model, w, h, opts = {}) {
     const xs = model.labels.map((label, i) => { const v = Number(String(label).replace(/[,，]/g, "")); return Number.isFinite(v) && String(label).trim() !== "" ? v : i + 1; });
     const ys = model.series.flatMap((serie) => serie.values);
-    const ylo = Math.min(0, ...ys);
-    const yhi = ylo + niceMax((Math.max(...ys, 0) - ylo) * 1.08 || 1);
+    const autoYlo = Math.min(0, ...ys);
+    const [ylo, yhi] = axisBounds(opts, autoYlo, autoYlo + niceMax((Math.max(...ys, 0) - autoYlo) * 1.08 || 1));
     const xlo = Math.min(0, ...xs);
     const xhi = xlo + niceMax((Math.max(...xs, 0) - xlo) * 1.05 || 1);
     const left = 90;
@@ -1143,7 +1152,7 @@
       row.classList.toggle("is-top", rank === 0 && value != null);
       row.classList.toggle("is-empty", value == null);
       row.querySelector(".hs-rank-no").textContent = value == null ? "—" : String(rank + 1);
-      row.querySelector(".hs-rank-bar").style.width = `${value == null ? 0 : Math.max(0.8, (Math.max(0, value) / max) * 100)}%`;
+      row.querySelector(".hs-rank-bar").style.width = `${value == null ? 0 : Math.max(0.8, (Math.min(max, Math.max(0, value)) / max) * 100)}%`;
       row.querySelector(".hs-rank-val").textContent = text;
       row.dataset.tip = `${row.dataset.label}：${text}${value == null ? "" : `（${rank + 1}位）`}`;
     });
@@ -1160,7 +1169,7 @@
     const max = niceMax(Math.max(...pairs.flatMap((p) => [p.before, p.after]), 0) * 1.02);
     const deltas = pairs.map((p) => p.after - p.before);
     const biggest = Math.max(...deltas.map(Math.abs), 0);
-    const pct = (v) => `${(Math.max(0, v) / max) * 100}%`;
+    const pct = (v) => `${(Math.min(max, Math.max(0, v)) / max) * 100}%`;
     const signed = (d) => `${d > 0 ? "+" : d < 0 ? "−" : "±"}${fmt(Math.abs(d))}`;
     return h("div", { class: "hs-shift", "data-field": key },
       h("div", { class: "hs-legend hs-shift-legend" },

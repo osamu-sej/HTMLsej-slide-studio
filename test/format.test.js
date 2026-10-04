@@ -131,3 +131,73 @@ test("均等割り付け on a box, a cell and a paragraph; a cell's text can be 
   assert.ok(cell.classList.contains("is-vertical"));
   assert.match(cell.getAttribute("style"), /text-align-last: ?justify/);
 });
+
+test("罫線: outside, inside, a side, none; the cell across an edge gets the same line; a merge only on its own edges", () => {
+  const grid = (n, m) => ({ kind: "table", cells: Array.from({ length: n }, () => Array.from({ length: m }, () => ({}))) });
+  const pen = { c: "#1f3864", w: 3 };
+  const out = ops.tableBorders(grid(3, 3), 0, 0, 1, 1, "outside", pen);
+  assert.deepEqual(out.cells[0][0].bt, pen);
+  assert.deepEqual(out.cells[0][0].bl, pen);
+  assert.equal(out.cells[0][0].br, undefined, "no inside line");
+  assert.deepEqual(out.cells[1][1].bb, pen);
+  assert.deepEqual(out.cells[2][1].bt, pen, "the cell under the range takes the same edge");
+  assert.deepEqual(out.cells[0][2].bl, pen, "and the one to its right");
+  assert.notEqual(out.cells[0][0].bt, out.cells[0][1].bt, "each cell its own copy");
+  const inside = ops.tableBorders(grid(2, 2), 0, 0, 1, 1, "inside", pen);
+  assert.deepEqual(inside.cells[0][0].br, pen);
+  assert.deepEqual(inside.cells[0][0].bb, pen);
+  assert.equal(inside.cells[0][0].bt, undefined);
+  const bottom = ops.tableBorders(grid(2, 2), 0, 0, 0, 1, "bottom", pen);
+  assert.deepEqual([bottom.cells[0][0].bb, bottom.cells[0][1].bb, bottom.cells[1][0].bt], [pen, pen, pen]);
+  assert.equal(bottom.cells[0][0].bt, undefined);
+  const none = ops.tableBorders(out, 0, 0, 1, 1, "none", pen);
+  assert.equal(none.cells[0][0].bt, "none");
+  assert.equal(none.cells[2][1].bt, "none", "the shared edge goes too");
+  // A cell merged across two rows: an inside line across the merge is not drawn through it.
+  const merged = grid(2, 2);
+  merged.cells[0][0] = { rs: 2 };
+  merged.cells[1][0] = { merged: true };
+  const m = ops.tableBorders(merged, 0, 0, 1, 1, "insideH", pen);
+  assert.equal(m.cells[0][0].bb, undefined, "no line through the merged cell");
+  assert.deepEqual(m.cells[0][1].bb, pen, "but between the cells beside it");
+  assert.equal(m.cells[0][0].rs, 2, "still merged");
+});
+
+/** The first list's tag and attributes, sorted (linkedom writes attributes in another order than browsers). */
+const listTag = (html) => { const m = String(html).match(/^<(ul|ol)\b([^>]*)>/); return m ? `${m[1]} ${[...m[2].matchAll(/([\w-]+)="([^"]*)"/g)].map((a) => `${a[1]}=${a[2]}`).sort().join(" ")}`.trim() : null; };
+
+test("箇条書きと段落番号: the first number, the marks' colour and size kept on the list (and through a change of style)", async () => {
+  const { E, window } = await loadEngine();
+  assert.equal(listTag(E.sanitizeRich('<ol start="3" data-mark="navy" data-msize="125"><li>あ</li></ol>')), "ol data-mark=navy data-msize=125 start=3");
+  assert.equal(E.sanitizeRich('<ul start="3" data-mark="red" data-msize="300"><li>あ</li></ul>'), "<ul><li>あ</li></ul>", "no start on bullets; only SEJ colours and the sizes offered");
+  assert.equal(E.sanitizeRich('<ol start="1"><li>あ</li></ol>'), "<ol><li>あ</li></ol>", "1 is the start anyway");
+  globalThis.document = window.document;
+  try {
+    const list = ops.setListProps(E, "<ol><li>一</li><li>二</li></ol>", { start: 5, mark: "gray", msize: "150" });
+    assert.equal(listTag(list), "ol data-mark=gray data-msize=150 start=5");
+    assert.match(list, /<li>一<\/li><li>二<\/li><\/ol>$/);
+    assert.deepEqual(ops.listPropsOf(list), { type: "number", start: 5, mark: "gray", msize: "150" });
+    assert.equal(ops.listStyleOf('<ol data-style="circled" start="5"><li>一</li></ol>'), "circled", "the style read with other marks on the list");
+    const restyled = ops.setList(E, list, "number", "circled");
+    assert.equal(listTag(restyled), "ol data-mark=gray data-msize=150 data-style=circled start=5", "kept through a change of style");
+    const bullets = ops.setList(E, list, "bullet", "diamond");
+    assert.equal(listTag(bullets), "ul data-mark=gray data-msize=150 data-style=diamond", "bullets keep the colour and size, not the number");
+    assert.equal(ops.setListProps(E, list, { start: 1, mark: "", msize: "100" }), "<ol><li>一</li><li>二</li></ol>", "all back to plain");
+  } finally { delete globalThis.document; }
+});
+
+test("下線の種類・二重取り消し線: kept on the words and on the box, nothing else let through", async () => {
+  const { E } = await loadEngine();
+  assert.equal(E.sanitizeRich('<p><u data-line="wavy">波</u><s data-line="double">消</s></p>'), '<p><u data-line="wavy">波</u><s data-line="double">消</s></p>');
+  assert.equal(E.sanitizeRich('<p><u data-line="zigzag">a</u><s data-line="wavy">b</s></p>'), "<p><u>a</u><s>b</s></p>", "only the kinds offered");
+  const o = E.normalizeObject({ id: "t", kind: "text", x: 0, y: 0, w: 400, h: 100, text: "<p>見出し</p>", underline: true, uline: "double", strike: true, sline: "double" });
+  assert.equal(o.uline, "double");
+  assert.equal(o.sline, "double");
+  assert.equal(E.normalizeObject({ id: "u", kind: "text", x: 0, y: 0, w: 400, h: 100, text: "<p>a</p>", uline: "zigzag" }).uline, undefined);
+  const slide = { type: "blank", elements: [o] };
+  const tx = E.render(slide, { mode: "present", index: 0, deck: { slides: [slide], theme: "sej" } }).querySelector(".hs-obj-tx");
+  assert.match(tx.getAttribute("style"), /text-decoration-style: ?double/);
+  const thick = E.normalizeObject({ id: "v", kind: "text", x: 0, y: 0, w: 400, h: 100, text: "<p>a</p>", underline: true, uline: "thick" });
+  const s2 = { type: "blank", elements: [thick] };
+  assert.match(E.render(s2, { mode: "present", index: 0, deck: { slides: [s2], theme: "sej" } }).querySelector(".hs-obj-tx").getAttribute("style"), /text-decoration-thickness/);
+});

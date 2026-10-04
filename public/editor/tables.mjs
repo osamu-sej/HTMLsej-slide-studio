@@ -198,6 +198,13 @@ export function createTableUi(editor, app, kit) {
     for (let r = 0; r < 4; r += 1) t.append(h("i", { class: r === 0 ? "head" : r % 2 === 0 ? "band" : "" }));
     return t;
   }
+  // 罫線の作成: the pen (its colour from the SEJ's line colours, its width in points) and the borders it draws.
+  const PEN_WIDTHS = [[1, "0.5 pt"], [2, "1 pt"], [3, "1.5 pt"], [4.5, "2.25 pt"], [6, "3 pt"], [9, "4.5 pt"], [12, "6 pt"]];
+  const pen = { c: "#1f3864", w: 2 };
+  function bordersMenu() {
+    return menu([{ head: `罫線（ペン：${PEN_WIDTHS.find(([w]) => w === pen.w)?.[1] || ""}・${E.PALETTE.line.find(([c]) => c === pen.c)?.[1] || pen.c}）` },
+      ...ops.TABLE_BORDERS.map(([kind, label]) => ({ label, run: () => change((o, t) => ops.tableBorders(o, t.r0, t.c0, t.r1, t.c1, kind, pen)) }))]);
+  }
   function designTab() {
     const styles = Object.entries(E.TABLE_STYLES).map(([key, name]) => {
       const b = h("button", { type: "button", class: "tb-style", title: name, "data-keeps-text": "", onmousedown: (event) => event.preventDefault(), onclick: () => change((o) => ({ ...o, style: key === "sej" ? undefined : key })) }, styleThumb(key), h("small", {}, name));
@@ -213,6 +220,10 @@ export function createTableUi(editor, app, kit) {
         col(drop("fill", "塗りつぶし", "選んだセルの色（SEJの面の色）", () => colors(E.PALETTE.fill, "", (c) => change((o, t) => ops.tableCells(o, t.r0, t.c0, t.r1, t.c1, { fill: c === "none" ? undefined : c })), { none: "塗りつぶしなし" }), { enabled: isTable, keep: true }),
           drop("fontColor", "文字の色", "選んだセルの文字の色（黒・濃紺・グレー）", () => colors(E.PALETTE.text, "", (c) => editor.textFormat("color", c), { custom: false }), { enabled: isTable, keep: true }),
           btn("clear", "書式のクリア", "選んだセルの太字・色を戻す", () => editor.textFormat("clear"), { enabled: isTable, keep: true }))),
+      group("罫線の作成",
+        col(drop("weight", "ペンの太さ", "罫線を引くペンの太さ", () => menu([{ head: "ペンの太さ" }, ...PEN_WIDTHS.map(([w, label]) => ({ label, on: pen.w === w, run: () => { pen.w = w; } }))]), { enabled: isTable, keep: true }),
+          drop("outline", "ペンの色", "罫線を引くペンの色（SEJの線の色）", () => colors(E.PALETTE.line, pen.c, (c) => { if (c !== "none") pen.c = c; }, { custom: false }), { enabled: isTable, keep: true, swatch: () => pen.c })),
+        drop("borders", "罫線", "選んだセル（なければ表全体）に罫線を引く・消す：下・上・左・右・枠なし・格子・外枠・内側（ペンの色と太さで）", () => bordersMenu(), { big: true, enabled: isTable, keep: true })),
     ];
   }
   // セルの余白 (PowerPoint's cell margins): 標準 is the style's own; the others set each cell's padding (cm).
@@ -289,9 +300,32 @@ export function createTableUi(editor, app, kit) {
       "-", { head: "軸ラベル・近似曲線" },
       { label: opts.axisX || opts.axisY ? `軸ラベル（${[opts.axisX, opts.axisY].filter(Boolean).join("・")}）…` : "軸ラベル…", run: () => axisTitles() },
       { label: "近似曲線（線形）", on: opts.trend === "linear", disabled: !TREND_CHARTS.has(chart()?.chart.type), title: "縦棒・折れ線・散布図で使えます", run: () => setOpts({ trend: opts.trend === "linear" ? false : "linear" }) },
+      { label: opts.axisMin != null || opts.axisMax != null ? `軸の書式（${opts.axisMin ?? "自動"} 〜 ${opts.axisMax ?? "自動"}）…` : "軸の書式（最小値・最大値）…", disabled: !BOUND_CHARTS.has(chart()?.chart.type), title: "縦棒・集合縦棒・折れ線・面・散布図で使えます（空にすると自動）", run: () => axisFormat() },
     ]);
   }
   const TREND_CHARTS = new Set(["bar", "line", "multi-line", "scatter"]);
+  // 軸の書式: the charts whose value axis takes its own minimum and maximum (bars keep their zero line).
+  const BOUND_CHARTS = new Set(["bar", "combo", "clustered-bar", "line", "multi-line", "area", "scatter"]);
+  async function axisFormat() {
+    const o = chart();
+    if (!o) return;
+    const opts = o.chart.opts || {};
+    const bars = ["bar", "combo", "clustered-bar"].includes(o.chart.type);
+    const read = (text) => { const t = String(text ?? "").replace(/[,，\s]/g, ""); if (!t) return null; const v = Number(t); return Number.isFinite(v) ? v : undefined; };
+    let min = null;
+    if (!bars) {
+      const answer = await app.ask("軸の書式（最小値）", "縦軸の最小値（空にすると自動）", opts.axisMin ?? "");
+      if (answer == null) return;
+      min = read(answer);
+      if (min === undefined) { app.toast("数字を入れてください"); return; }
+    }
+    const answer = await app.ask("軸の書式（最大値）", bars ? "縦軸の最大値（空にすると自動。縦棒は0から）" : "縦軸の最大値（空にすると自動）", opts.axisMax ?? "");
+    if (answer == null) return;
+    const max = read(answer);
+    if (max === undefined) { app.toast("数字を入れてください"); return; }
+    if (max != null && max <= (min ?? (bars ? 0 : -Infinity))) { app.toast("最大値は最小値より大きくしてください"); return; }
+    setOpts({ axisMin: min, axisMax: max });
+  }
   /** 軸ラベル: the titles of the value axis (縦) and the category axis (横). */
   async function axisTitles() {
     const opts = chart()?.chart.opts || {};

@@ -973,6 +973,8 @@
 
   const INLINE = { B: "b", STRONG: "b", I: "i", EM: "i", U: "u", S: "s", STRIKE: "s", DEL: "s", SUB: "sub", SUP: "sup", SPAN: "span", FONT: "span", A: "a" };
   const BLOCKS = new Set(["P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "LI"]);
+  // 下線の種類 besides the plain line: 二重線・太線・点線・破線・波線.
+  const U_LINES = new Set(["double", "thick", "dotted", "dashed", "wavy"]);
   const ALIGN = new Set(["left", "center", "right", "justify"]);
   // 均等割り付け (distributed): justified, the last line too — kept on a box, a cell or a paragraph.
   const ALIGN_ALL = new Set([...ALIGN, "distributed"]);
@@ -1075,6 +1077,9 @@
         continue;
       }
       const el = doc.createElement(mapped);
+      // 下線の種類・二重取り消し線 (PowerPoint's フォント dialog).
+      const line = String(node.getAttribute?.("data-line") || "");
+      if ((mapped === "u" && U_LINES.has(line)) || (mapped === "s" && line === "double")) el.setAttribute("data-line", line);
       el.append(...children);
       out.push(el);
     }
@@ -1094,6 +1099,9 @@
   }
 
   // 箇条書き・段落番号の種類 (PowerPoint's galleries): a list's own marker, kept on the ul / ol as data-style.
+  // A list's marks may take the SEJ's navy or grey (black is the text's own) and another size (%).
+  const LIST_MARKS = { navy: "#1f3864", gray: "#808080" };
+  const LIST_MARK_SIZES = ["75", "125", "150"];
   const LIST_STYLES = {
     ul: { disc: "●", circle: "○", square: "■", diamond: "◆", arrow: "➢", check: "✓", star: "★", dash: "–" },
     ol: { decimal: ["1.", "2.", "3."], paren: ["1)", "2)", "3)"], circled: ["①", "②", "③"], "lower-alpha": ["a.", "b.", "c."], "upper-alpha": ["A.", "B.", "C."], "lower-roman": ["i.", "ii.", "iii."], "upper-roman": ["I.", "II.", "III."], kanji: ["一、", "二、", "三、"] },
@@ -1103,6 +1111,13 @@
     const list = doc.createElement(tag);
     const style = String(src.getAttribute?.("data-style") || "");
     if (LIST_STYLES[tag][style] && style !== (tag === "ul" ? "disc" : "decimal")) list.setAttribute("data-style", style);
+    // 箇条書きと段落番号: the first number, and the marks' colour (the SEJ's text colours) and size.
+    const start = Math.round(Number(src.getAttribute?.("start")));
+    if (tag === "ol" && Number.isInteger(start) && start > 1 && start < 10000) list.setAttribute("start", String(start));
+    const mark = String(src.getAttribute?.("data-mark") || "");
+    if (LIST_MARKS[mark]) list.setAttribute("data-mark", mark);
+    const msize = String(src.getAttribute?.("data-msize") || "");
+    if (LIST_MARK_SIZES.includes(msize)) list.setAttribute("data-msize", msize);
     for (const child of [...src.childNodes]) {
       if (child.nodeType === 1 && ["UL", "OL"].includes(child.tagName.toUpperCase()) && depth < 4) {
         const nested = cleanList(child, doc, depth + 1);
@@ -1571,6 +1586,8 @@
       if (raw.textRot === 90 || raw.textRot === 270) o.textRot = raw.textRot;
       if (raw.lockRatio === true) o.lockRatio = true;
       if (typeof raw.wrap === "boolean") o.wrap = raw.wrap;
+      if (U_LINES.has(raw.uline)) o.uline = raw.uline;
+      if (raw.sline === "double") o.sline = "double";
       if (ALIGN_ALL.has(raw.align)) o.align = raw.align;
       if (["top", "middle", "bottom"].includes(raw.valign)) o.valign = raw.valign;
       if (FONTS[raw.font] && raw.font !== "body") o.font = raw.font;
@@ -1831,6 +1848,11 @@
     // 軸ラベル and 近似曲線 (グラフ要素).
     for (const key of ["axisX", "axisY"]) if (typeof raw.opts?.[key] === "string" && raw.opts[key].trim()) opts[key] = raw.opts[key].trim().slice(0, 40);
     if (raw.opts?.trend === "linear") opts.trend = "linear";
+    // 軸の書式: the value axis's own minimum and maximum (a maximum above the minimum).
+    const axisMin = raw.opts?.axisMin != null && raw.opts.axisMin !== "" ? Number(raw.opts.axisMin) : NaN;
+    const axisMax = raw.opts?.axisMax != null && raw.opts.axisMax !== "" ? Number(raw.opts.axisMax) : NaN;
+    if (Number.isFinite(axisMin) && Math.abs(axisMin) < 1e12) opts.axisMin = axisMin;
+    if (Number.isFinite(axisMax) && Math.abs(axisMax) < 1e12 && axisMax > (opts.axisMin ?? -Infinity)) opts.axisMax = axisMax;
     // ウォーターフォール: the bars that show the running total (PowerPoint's 合計として設定), besides labels like 合計.
     if (Array.isArray(raw.opts?.totals)) {
       const totals = [...new Set(raw.opts.totals.map(Number).filter((i) => Number.isInteger(i) && i >= 0 && i < labels.length))].sort((a, b) => a - b).slice(0, 50);
@@ -2577,6 +2599,8 @@
       "font-size": `calc(${o.fs}px * var(--os, 1))`, color: o.color, "line-height": String(o.lh), "text-align": alignCss(o.align), "text-align-last": alignLastCss(o.align),
       "font-weight": o.bold ? "700" : null, "font-style": o.italic ? "italic" : null,
       "text-decoration": [o.underline ? "underline" : "", o.strike ? "line-through" : ""].filter(Boolean).join(" ") || null,
+      "text-decoration-style": (o.underline && o.uline && o.uline !== "thick" ? o.uline : null) || (o.strike && o.sline === "double" && !o.underline ? "double" : null),
+      "text-decoration-thickness": o.underline && o.uline === "thick" ? ".12em" : null,
       "letter-spacing": o.ls ? `${o.ls}em` : null, "--psp": o.psp ? `${o.psp}em` : null,
       "font-family": o.fontFace ? `"${o.fontFace}", sans-serif` : o.font ? FONTS[o.font][1] : null, "white-space": o.wrap === false ? "pre" : null,
     };
@@ -3495,7 +3519,7 @@
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
-    TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
+    LIST_MARKS, LIST_MARK_SIZES, U_LINES, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, mediaPlay, mediaPause, mediaToggle, mediaSpan,

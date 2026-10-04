@@ -10,7 +10,7 @@ import { autoCorrect, autoCorrectOptions } from "./autocorrect.mjs";
 const SNAP_SCREEN = 7; // px on screen
 const NUDGE = { plain: 5, fine: 1, big: 25 };
 const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96, 120, 150, 200];
-const STYLE_KEYS = ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "strike", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity", "head", "tail", "headSize", "tailSize", "route", "vertical"];
+const STYLE_KEYS = ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity", "head", "tail", "headSize", "tailSize", "route", "vertical"];
 
 const stored = (key, fallback) => { try { const v = localStorage.getItem(`hsej-editor-${key}`); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } };
 const store = (key, value) => { try { localStorage.setItem(`hsej-editor-${key}`, JSON.stringify(value)); } catch { /* private window */ } };
@@ -913,6 +913,19 @@ export function createCanvas(app) {
       selection.addRange(caret);
     }
   }
+  /** 下線の種類・二重取り消し線 on the words chosen while typing: underlined (struck) first, then the line's kind. */
+  function markLine(tag, value) {
+    const t = ed.typing;
+    const selection = window.getSelection();
+    if (!t || !selection.rangeCount || selection.isCollapsed) return;
+    const command = tag === "u" ? "underline" : "strikeThrough";
+    if (!document.queryCommandState(command)) document.execCommand(command);
+    const range = selection.getRangeAt(0);
+    for (const el of t.tx.querySelectorAll(tag)) {
+      if (!range.intersectsNode(el)) continue;
+      if (value && value !== "single") el.setAttribute("data-line", value); else el.removeAttribute("data-line");
+    }
+  }
   /** The paragraphs the caret or the selection is in (while typing). */
   function typedBlocks() {
     const t = ed.typing;
@@ -1351,13 +1364,14 @@ export function createCanvas(app) {
       else if (kind === "highlight") document.execCommand("hiliteColor", false, value || "transparent");
       else if (kind === "link") document.execCommand("createLink", false, value);
       else if (kind === "unlink") document.execCommand("unlink");
+      else if (kind === "uline" || kind === "sline") markLine(kind === "uline" ? "u" : "s", value);
       else if (kind === "align") {
         document.execCommand({ left: "justifyLeft", center: "justifyCenter", right: "justifyRight", justify: "justifyFull", distributed: "justifyFull" }[value]);
         // 均等割り付け: justified to the last line too, on the paragraphs being typed in.
         for (const block of typedBlocks()) block.style.textAlignLast = value === "distributed" ? "justify" : "";
       }
       else if (kind === "size" || kind === "grow" || kind === "shrink") sizeSelectedWords(kind, value);
-      else if (["valign", "lh", "vertical", "direction", "font", "autofit", "pad", "wrap", "psp", "ls", "listStyle"].includes(kind)) { stopTyping(true); applyText(kind, value); return; }
+      else if (["valign", "lh", "vertical", "direction", "font", "autofit", "pad", "wrap", "psp", "ls", "listStyle", "listProps"].includes(kind)) { stopTyping(true); applyText(kind, value); return; }
       growWhileTyping();
       emit();
       return;
@@ -1419,7 +1433,17 @@ export function createCanvas(app) {
       const o = E.withDefaults(raw);
       const text = raw.text;
       switch (kind) {
-        case "bold": case "italic": case "underline": case "strike": { const on = toggle(kind); return { [kind]: on || undefined, text: ops.clearInline(E, text, kind) || undefined }; }
+        case "bold": case "italic": case "underline": case "strike": {
+          const on = toggle(kind);
+          const patch = { [kind]: on || undefined, text: ops.clearInline(E, text, kind) || undefined };
+          // Off: the line's kind goes with it.
+          if (!on && kind === "underline") patch.uline = undefined;
+          if (!on && kind === "strike") patch.sline = undefined;
+          return patch;
+        }
+        // 下線の種類・二重取り消し線: the whole box underlined (struck) with that line.
+        case "uline": return { underline: true, uline: value === "single" ? undefined : value, text: ops.clearInline(E, text, "underline") || undefined };
+        case "sline": return { strike: true, sline: value === "double" ? "double" : undefined, text: ops.clearInline(E, text, "strike") || undefined };
         case "color": return { color: value, text: ops.clearInline(E, text, "color") || undefined };
         case "size": return { fs: ops.fromPt(value), text: ops.clearInline(E, text, "size") || undefined };
         case "grow": case "shrink": return { fs: ops.fromPt(stepSize(o.fs / ops.PX_PER_PT, kind === "grow" ? 1 : -1)), text: ops.clearInline(E, text, "size") || undefined };
@@ -1428,6 +1452,7 @@ export function createCanvas(app) {
         case "bullet": case "number": { const type = kind === "bullet" ? "bullet" : "number"; return { text: ops.setList(E, text, ops.listOf(text) === type ? null : type) }; }
         // 箇条書き・段落番号の種類: the list with that marker (the text made a list of that kind if it was not).
         case "listStyle": { const [type, style] = value; return { text: ops.setList(E, text, type, style) }; }
+        case "listProps": return ops.listPropsOf(text) || /<(ul|ol)[ >]/.test(text) ? { text: ops.setListProps(E, text, value) } : null;
         case "lh": return { lh: Number(value) };
         case "psp": return { psp: Number(value) || undefined };
         case "ls": return { ls: Number(value) || undefined };
@@ -1467,7 +1492,7 @@ export function createCanvas(app) {
     const chosen = selected(list).filter((o) => ["shape", "text"].includes(o.kind) || (o.kind === "table" && ed.typing?.cell)).map((o) => E.withDefaults(o));
     if (!chosen.length) return null;
     const o = chosen[0];
-    const out = { fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, textRot: o.textRot || null, list: ops.listOf(o.text), listStyle: ops.listStyleOf(o.text), pad: o.pad, wrap: o.wrap !== false };
+    const out = { fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, textRot: o.textRot || null, list: ops.listOf(o.text), listStyle: ops.listStyleOf(o.text), listProps: ops.listPropsOf(o.text), uline: o.underline ? o.uline || "single" : null, sline: o.strike ? o.sline || "single" : null, pad: o.pad, wrap: o.wrap !== false };
     if (ed.typing) {
       try {
         out.bold = document.queryCommandState("bold");
