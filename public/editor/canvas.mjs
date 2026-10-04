@@ -5,6 +5,7 @@
 // Objects are slide.elements (see public/engine/objects.js); every change is one undo step.
 
 import * as ops from "./ops.mjs";
+import { autoCorrect, autoCorrectOptions } from "./autocorrect.mjs";
 
 const SNAP_SCREEN = 7; // px on screen
 const NUDGE = { plain: 5, fine: 1, big: 25 };
@@ -885,7 +886,83 @@ export function createCanvas(app) {
     return true;
   }
 
-  function onTypingInput() { growWhileTyping(); }
+  /**
+   * A list made while typing in a paragraph lands inside it (<p><ol>…</ol></p>, which HTML does not allow and the
+   * sanitizer splits into empty paragraphs): the list is lifted out, the caret staying at the end of its item.
+   */
+  function unnestLists() {
+    const t = ed.typing;
+    if (!t) return;
+    const selection = window.getSelection();
+    const range = selection.rangeCount ? selection.getRangeAt(0) : null;
+    const at = range && (range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement);
+    const item = at?.closest?.("li");
+    let moved = false;
+    for (const list of t.tx.querySelectorAll("p > ul, p > ol, div > ul, div > ol")) {
+      const holder = list.parentElement;
+      if (holder === t.tx || !t.tx.contains(holder)) continue;
+      const others = [...holder.childNodes].filter((n) => n !== list && n.nodeName !== "BR" && !(n.nodeType === 3 && !n.textContent.trim()));
+      if (others.length) holder.after(list); else holder.replaceWith(list);
+      moved = true;
+    }
+    if (moved && item?.isConnected) {
+      const caret = document.createRange();
+      // An empty item (just its line break): before the break, or the first letters typed would go on a new line.
+      if (item.textContent) { caret.selectNodeContents(item); caret.collapse(false); } else caret.setStart(item, 0);
+      selection.removeAllRanges();
+      selection.addRange(caret);
+    }
+  }
+  /** The paragraphs the caret or the selection is in (while typing). */
+  function typedBlocks() {
+    const t = ed.typing;
+    const selection = window.getSelection();
+    if (!t || !selection.rangeCount) return [];
+    const range = selection.getRangeAt(0);
+    const blocks = [...t.tx.querySelectorAll("p, div, li")].filter((b) => range.intersectsNode(b) && !b.querySelector("p, div, li"));
+    if (!blocks.length) {
+      const node = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+      const block = node?.closest?.("p, div, li");
+      if (block && block !== t.tx && t.tx.contains(block)) blocks.push(block);
+    }
+    return blocks;
+  }
+  function onTypingInput(event) {
+    if (event?.inputType === "insertText" && event.data && !event.isComposing) runAutoCorrect(event.data);
+    growWhileTyping();
+  }
+  /**
+   * オートコレクト: what was just typed may finish "(c)" (→ ©) or a list marker at a paragraph's start ("・ ", "1. ").
+   * The correction is typed like any other text, so ⌘Z brings back what was typed.
+   */
+  function runAutoCorrect(typed) {
+    const t = ed.typing;
+    const selection = window.getSelection();
+    if (!t || !selection.rangeCount || !selection.isCollapsed) return;
+    const range = selection.getRangeAt(0);
+    const at = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+    if (!at || !t.tx.contains(at)) return;
+    const block = at.closest("p, div, li");
+    const root = block && block !== t.tx && t.tx.contains(block) ? block : t.tx;
+    const head = document.createRange();
+    head.setStart(root, 0);
+    head.setEnd(range.startContainer, range.startOffset);
+    const fix = autoCorrect(head.toString(), typed, { inList: Boolean(at.closest("li")), options: autoCorrectOptions() });
+    if (!fix) return;
+    const back = (n) => { for (let i = 0; i < n; i += 1) selection.modify("extend", "backward", "character"); };
+    if (fix.replace) {
+      back(fix.replace);
+      document.execCommand("insertText", false, fix.with);
+      return;
+    }
+    back(fix.remove);
+    document.execCommand("delete");
+    document.execCommand(fix.list === "bullet" ? "insertUnorderedList" : "insertOrderedList");
+    unnestLists();
+    const node = selection.anchorNode;
+    const list = (node?.nodeType === 1 ? node : node?.parentElement)?.closest?.("ul, ol");
+    if (list && t.tx.contains(list) && fix.style !== (fix.list === "bullet" ? "disc" : "decimal")) list.setAttribute("data-style", fix.style);
+  }
   function onTypingKey(event) {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); stopTyping(true); return; }
     if (event.key === "Tab" && ed.typing?.cell) {
@@ -1084,6 +1161,7 @@ export function createCanvas(app) {
     if (meta && event.shiftKey && (key === ">" || key === ".")) { event.preventDefault(); textFormat("grow"); return true; }
     if (meta && event.shiftKey && (key === "<" || key === ",")) { event.preventDefault(); textFormat("shrink"); return true; }
     if (meta && ["l", "e", "r", "j"].includes(key.toLowerCase()) && !event.shiftKey) { event.preventDefault(); textFormat("align", { l: "left", e: "center", r: "right", j: "justify" }[key.toLowerCase()]); return true; }
+    if (meta && event.shiftKey && key.toLowerCase() === "j") { event.preventDefault(); textFormat("align", "distributed"); return true; }
     // Typing a letter on a selected shape replaces its text, as in PowerPoint.
     if (!meta && !event.altKey && key.length === 1 && ed.sel.length === 1) {
       const o = byId(ed.sel[0], list);
@@ -1268,12 +1346,16 @@ export function createCanvas(app) {
     if (t) {
       restoreRange();
       const cmd = { bold: "bold", italic: "italic", underline: "underline", strike: "strikeThrough", sup: "superscript", sub: "subscript", clear: "removeFormat", bullet: "insertUnorderedList", number: "insertOrderedList", indent: "indent", outdent: "outdent" }[kind];
-      if (cmd) document.execCommand(cmd);
+      if (cmd) { document.execCommand(cmd); if (kind === "bullet" || kind === "number") unnestLists(); }
       else if (kind === "color") document.execCommand("foreColor", false, value);
       else if (kind === "highlight") document.execCommand("hiliteColor", false, value || "transparent");
       else if (kind === "link") document.execCommand("createLink", false, value);
       else if (kind === "unlink") document.execCommand("unlink");
-      else if (kind === "align") document.execCommand({ left: "justifyLeft", center: "justifyCenter", right: "justifyRight", justify: "justifyFull" }[value]);
+      else if (kind === "align") {
+        document.execCommand({ left: "justifyLeft", center: "justifyCenter", right: "justifyRight", justify: "justifyFull", distributed: "justifyFull" }[value]);
+        // 均等割り付け: justified to the last line too, on the paragraphs being typed in.
+        for (const block of typedBlocks()) block.style.textAlignLast = value === "distributed" ? "justify" : "";
+      }
       else if (kind === "size" || kind === "grow" || kind === "shrink") sizeSelectedWords(kind, value);
       else if (["valign", "lh", "vertical", "direction", "font", "autofit", "pad", "wrap", "psp", "ls", "listStyle"].includes(kind)) { stopTyping(true); applyText(kind, value); return; }
       growWhileTyping();

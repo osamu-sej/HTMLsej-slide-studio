@@ -43,6 +43,8 @@ const P = {
   textCenter: '<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',
   textRight: '<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',
   textJustify: '<path d="M4 6h16M4 10h16M4 14h16M4 18h16"/>',
+  cellMargin: '<rect x="3" y="3" width="18" height="18" rx="1"/><rect x="7" y="7" width="10" height="10" stroke-dasharray="2 2"/>',
+  textDistributed: '<path d="M4 6h16M4 10h16M4 14h16M4 18h16M2 16l2 2-2 2M22 16l-2 2 2 2"/>',
   valignTop: '<path d="M4 4h16M12 20V9M8 12l4-4 4 4"/>',
   valignMiddle: '<path d="M4 12h16M12 3v5M9 6l3 3 3-3M12 21v-5M9 18l3-3 3 3"/>',
   valignBottom: '<path d="M4 20h16M12 4v11M8 12l4 4 4-4"/>',

@@ -413,3 +413,21 @@ class ChartExTest(unittest.TestCase):
         self.assertEqual(wf["opts"], {"totals": [0, 3]})
         self.assertEqual(deck["stats"]["charts"], 3)
         self.assertEqual(len([x for x in els if x["kind"] != "chart"]), 1, "the map keeps PowerPoint's picture")
+
+
+class DistributedAlignTest(unittest.TestCase):
+    """均等割り付け (algn="dist") comes over as distributed, not as justified."""
+
+    def test_a_distributed_paragraph_stays_distributed(self):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+        box.text_frame.text = "均等割り付け"
+        box.text_frame.add_paragraph().text = "左揃え"
+        box.text_frame.paragraphs[0]._p.get_or_add_pPr().set("algn", "dist")
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        imported = by_text(deck["slideData"][0], "均等割り付け")
+        self.assertEqual(imported["align"], "distributed")
+        self.assertIn('style="text-align: justify; text-align-last: justify"', imported["text"])

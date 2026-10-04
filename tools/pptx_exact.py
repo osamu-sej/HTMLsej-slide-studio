@@ -699,7 +699,7 @@ class SlideReader:
                         return d.find(A + tag)
                 return None
 
-            align = {"ctr": "center", "r": "right", "just": "justify", "dist": "justify"}.get(ppr_get("algn") or "l", "left")
+            align = {"ctr": "center", "r": "right", "just": "justify", "dist": "distributed", "thaiDist": "distributed"}.get(ppr_get("algn") or "l", "left")
             base_sz = def_rpr("sz")
             base_size = (int(base_sz) / 100 if base_sz else 18.0) * font_scale
             base_bold = def_rpr("b") in ("1", "true")
@@ -849,7 +849,9 @@ class SlideReader:
                     html_text = f'<a href="{esc(link)}">{html_text}</a>'
                 parts.append(html_text)
             attrs = []
-            if para["align"] != "left":
+            if para["align"] == "distributed":
+                attrs.append('style="text-align: justify; text-align-last: justify"')
+            elif para["align"] != "left":
                 attrs.append(f'style="text-align: {para["align"]}"')
             if para["level"]:
                 attrs.append(f'data-indent="{min(4, para["level"])}"')
@@ -1313,6 +1315,9 @@ class SlideReader:
                         cell["align"] = settings["align"]
                 anchor = tcpr.get("anchor") if tcpr is not None else None
                 cell["valign"] = {"ctr": "middle", "b": "bottom"}.get(anchor or "t", "top")
+                # 文字列の方向: vertical text in the cell (縦書き).
+                if tcpr is not None and tcpr.get("vert") in ("vert", "eaVert", "wordArtVertRtl"):
+                    cell["vertical"] = True
                 span, rspan = int(tc.get("gridSpan", 1)), int(tc.get("rowSpan", 1))
                 if span > 1:
                     cell["cs"] = span

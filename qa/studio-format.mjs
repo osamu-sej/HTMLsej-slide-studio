@@ -2,7 +2,7 @@
 // 図の圧縮 (a 3000-pixel picture comes back 1280 wide), グラフ要素を追加 (data labels, legend) and 行/列の切り替え,
 // 比較 with a deck in the library (a changed slide taken back), and インクの非表示.
 // Usage: node qa/studio-format.mjs [--base=http://127.0.0.1:8787]   (with `npm start` running)
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -314,6 +314,150 @@ await step("トリミング ▾: 縦横比 16:9 crops the middle of a 4:3 pictur
   assert(!o.crop && Math.abs(o.w / o.h - 4 / 3) < 0.02, `fit: ${o.w}×${o.h} ${JSON.stringify(o.crop)}`);
 });
 
+await step("デザイン → 背景の書式設定: an SEJ light colour, a picture at 50%, すべてに適用, 背景のリセット", async () => {
+  await page.locator(".film-item").nth(2).click();
+  await tab("デザイン");
+  await byTitle("このスライドの背景");
+  await page.waitForSelector(".bg-dialog[open]");
+  await page.click('.bg-dialog .bg-sw[data-color="#dce4f2"]');
+  await page.waitForTimeout(250);
+  assert((await slide()).background?.color === "#dce4f2", `the colour: ${JSON.stringify((await slide()).background)}`);
+  const painted = await page.evaluate(() => getComputedStyle(document.querySelector("#stageBody .slide-wrap .hs-bg")).backgroundColor);
+  assert(/220, 228, 242/.test(painted), `drawn under the slide: ${painted}`);
+  await withFiles([logo], () => page.click(".bg-dialog .bg-file"));
+  await page.waitForFunction(() => window.__hsej.slide().background?.image, null, { timeout: 8000 });
+  await page.locator(".bg-dialog .bg-transparency").fill("50");
+  await page.waitForTimeout(250);
+  let bg = (await slide()).background;
+  assert(bg.image?.startsWith("idb:") && bg.transparency === 0.5 && !bg.color, `the picture at 50%: ${JSON.stringify(bg)}`);
+  assert(await page.evaluate(() => getComputedStyle(document.querySelector("#stageBody .slide-wrap .hs-bg-img")).opacity) === "0.5", "drawn at half");
+  assert(await page.locator("#stageBody .slide-wrap .hs-sej").count(), "the SEJ master stays on top");
+  await shot("background");
+  await page.click(".bg-dialog .bg-all");
+  await page.waitForTimeout(250);
+  assert((await deck()).slides.every((s) => s.background?.image === bg.image), "every slide");
+  await page.click(".bg-dialog .bg-reset");
+  await page.waitForTimeout(250);
+  assert(!(await slide()).background, "this slide's background reset");
+  await page.click('.bg-dialog .btn-primary');
+  await undo();
+  await undo();
+  bg = (await slide()).background;
+  assert(!(await deck()).slides.some((s) => s.background), `two undos: as before (${JSON.stringify(bg)})`);
+});
+
+await step("均等割り付け (⇧⌘J), オートコレクト ((c) → ©, 「・ 」で箇条書き, 「1. 」で段落番号)", async () => {
+  await tab("挿入");
+  await ribbonBtn("テキスト ボックス");
+  await menuItem("横書きテキスト ボックス");
+  const r = await page.locator(".slide-wrap .hs-slide").first().boundingBox();
+  await page.mouse.click(r.x + r.width * 0.25, r.y + r.height * 0.6);
+  await page.waitForTimeout(200);
+  await page.keyboard.type("著作権 (c) と --> 矢印");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("・ 一つ目");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const o = (await slide()).elements.at(-1);
+  assert(/著作権 © と → 矢印/.test(o.text), `symbols: ${o.text}`);
+  assert(/<ul><li>一つ目<\/li><\/ul>/.test(o.text), `a bullet from 「・ 」: ${o.text}`);
+  await page.keyboard.press("Control+Shift+j");
+  await page.waitForTimeout(200);
+  assert((await slide()).elements.find((x) => x.id === o.id).align === "distributed", "⇧⌘J: 均等割り付け");
+  const css = await page.evaluate((id) => { const s = getComputedStyle(document.querySelector(`#stageBody .hs-obj[data-el="${id}"] .hs-obj-tx`)); return `${s.textAlign}|${s.textAlignLast}`; }, o.id);
+  assert(css === "justify|justify", `drawn justified to the last line: ${css}`);
+  // A numbered paragraph from 「1. 」, in a new box; turned off, it stays as typed.
+  await tab("挿入");
+  await ribbonBtn("テキスト ボックス");
+  await menuItem("横書きテキスト ボックス");
+  await page.mouse.click(r.x + r.width * 0.25, r.y + r.height * 0.8);
+  await page.waitForTimeout(200);
+  await page.keyboard.type("① 最初");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const n = (await slide()).elements.at(-1);
+  assert(/^<ol data-style="circled"><li>最初<\/li><\/ol>$/.test(n.text), `numbers from 「① 」: ${n.text}`);
+  await tab("校閲");
+  await byTitle("入力中に (c)");
+  await page.waitForSelector(".ac-dialog[open]");
+  await page.uncheck('.ac-dialog input[data-ac="replace"]');
+  await page.click(".ac-dialog .ac-ok");
+  assert(JSON.parse(await page.evaluate(() => localStorage.getItem("hsej-autocorrect"))).replace === false, "kept");
+  await page.locator(`#stageBody .hs-obj[data-el="${n.id}"]`).dblclick();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" (c)");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  assert(/最初 \(c\)/.test((await slide()).elements.find((x) => x.id === n.id).text), "off: typed as it is");
+  await page.evaluate(() => localStorage.removeItem("hsej-autocorrect"));
+});
+
+await step("表: 均等割り付け, セルの余白 (狭い・ユーザー設定), 文字列の方向 (縦書き)", async () => {
+  await tab("挿入");
+  await ribbonBtn("表");
+  await page.waitForSelector(".tb-pick");
+  await page.locator(".tb-pick button").nth(1 * 10 + 2).click();
+  await page.waitForTimeout(400);
+  await page.keyboard.type("見出し");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  const cell = async () => (await slide()).elements.find((x) => x.id === id).cells[0][0];
+  assert(JSON.stringify(await page.evaluate(() => window.__hsej.selection())) === JSON.stringify([id]), "the table is chosen (typing ended)");
+  await tab("レイアウト");
+  await byTitle("均等割り付け");
+  await page.waitForTimeout(200);
+  assert((await cell()).align === "distributed", `the cells distributed: ${JSON.stringify(await cell())}`);
+  await byTitle("セルの余白");
+  await menuItem("狭い");
+  await page.waitForTimeout(200);
+  assert(JSON.stringify((await cell()).pad) === JSON.stringify([7.37, 7.37, 7.37, 7.37]), `狭い (0.13 cm): ${JSON.stringify((await cell()).pad)}`);
+  await byTitle("セルの余白");
+  await menuItem("ユーザー設定の余白");
+  await page.waitForSelector("#askDialog[open]");
+  await page.fill("#askInput", "0.2 0.5");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  const pad = (await cell()).pad;
+  assert(Math.abs(pad[0] - 11.34) < 0.1 && Math.abs(pad[1] - 28.35) < 0.1 && Math.abs(pad[2] - pad[0]) < 0.01 && Math.abs(pad[3] - pad[1]) < 0.01, `上下 0.2・左右 0.5 cm: ${JSON.stringify(pad)}`);
+  await byTitle("文字列の方向");
+  await page.waitForTimeout(200);
+  assert((await cell()).vertical === true, "縦書き");
+  assert(await page.locator(`#stageBody .hs-obj[data-el="${id}"] .hs-cell-tx.is-vertical`).count(), "drawn vertical");
+  await shot("table-cells");
+});
+
+await step("パスワードを使用して暗号化: the file asks the password, a wrong one is refused, the right one opens the show", async () => {
+  await page.click(".rb-file");
+  await page.locator('.rb-pop .rb-menu button:has-text("情報")').click();
+  await page.waitForSelector(".fileinfo-dialog[open]");
+  await page.click(".fileinfo-dialog .fi-lock");
+  await page.waitForSelector(".lock-dialog[open]");
+  await page.fill(".lock-dialog .lock-pw", "sej-2026");
+  await page.fill(".lock-dialog .lock-again", "sej-2025");
+  await page.click(".lock-dialog .lock-go");
+  assert((await page.textContent(".lock-dialog .lock-msg")).includes("違います"), "the two must match");
+  await page.fill(".lock-dialog .lock-again", "sej-2026");
+  const [download] = await Promise.all([page.waitForEvent("download", { timeout: 120000 }), page.click(".lock-dialog .lock-go")]);
+  const file = join(outDir, "format-locked.html");
+  await download.saveAs(file);
+  const html = await readFile(file, "utf8");
+  const words = [(await deck()).title, ...(await deck()).slides.map((x) => x.title)].filter((w) => typeof w === "string" && w.length >= 3);
+  assert(html.includes('id="hs-locked"') && !html.includes("sej-2026"), "locked, the password not kept");
+  assert(!words.some((w) => html.includes(w)), `nothing of the deck readable: ${words.filter((w) => html.includes(w)).join(" / ")}`);
+  const viewer = await context.newPage();
+  viewer.on("pageerror", (error) => errors.push(`locked pageerror: ${error.message}`));
+  await viewer.goto(`file://${file}`);
+  await viewer.fill("#pw", "wrong");
+  await viewer.click("#go");
+  await viewer.waitForFunction(() => document.getElementById("msg")?.textContent.includes("違います"), null, { timeout: 20000 });
+  await viewer.fill("#pw", "sej-2026");
+  await viewer.click("#go");
+  await viewer.waitForSelector(".hs-player .hs-slide", { timeout: 30000 });
+  assert(await viewer.locator(".hs-player .hs-slide").count(), "the show opens");
+  await viewer.close();
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {
@@ -359,6 +503,38 @@ print(json.dumps({"w": w, "h": h, "colors": colors, "corner": im.getpixel((5, 5)
   await zip.saveAs(zipFile);
   const names = execFileSync("python3", ["-c", "import zipfile,sys;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;print('|'.join(z.namelist()))", zipFile]).toString().trim().split("|");
   assert(names.length === total && names[0] === "スライド01.png", `a picture a slide: ${names.length} of ${total} (${names[0]})`);
+  await cap.close();
+});
+await step("アニメーション GIF の作成: 2 slides at 極小 play into a looping GIF of the slides (frames that changed only)", async () => {
+  const cap = await (await capBrowser.newContext({ viewport: { width: 1600, height: 900 }, acceptDownloads: true })).newPage();
+  cap.on("pageerror", (error) => errors.push(`gif pageerror: ${error.message}`));
+  await cap.goto(base);
+  await cap.evaluate(() => localStorage.clear());
+  await cap.goto(base);
+  await cap.click("#sampleDeckBtn");
+  await cap.waitForSelector(".film-item");
+  await cap.click(".rb-file");
+  await cap.locator('.rb-pop button:has-text("アニメーション GIF の作成")').first().click();
+  await cap.waitForSelector(".gif-dialog[open]");
+  await cap.selectOption(".gif-dialog .gif-size", "xs");
+  await cap.fill(".gif-dialog .gif-secs", "1.5");
+  await cap.fill(".gif-dialog .gif-from", "2");
+  await cap.fill(".gif-dialog .gif-to", "3");
+  assert((await cap.textContent(".gif-dialog .gif-estimate")).includes("2枚"), "two slides");
+  const [gif] = await Promise.all([cap.waitForEvent("download", { timeout: 120000 }), cap.click(".gif-dialog .gif-go")]);
+  const gifFile = join(outDir, "format-show.gif");
+  await gif.saveAs(gifFile);
+  const facts = JSON.parse(execFileSync("python3", ["-c", `
+from PIL import Image; import json, sys
+im = Image.open(sys.argv[1]); w, h = im.size; n = im.n_frames; total = 0
+for i in range(n): im.seek(i); total += im.info.get("duration", 0)
+im.seek(n - 1); last = im.convert("RGB")
+px = last.load(); green = sum(1 for x in range(0, w, 2) for y in range(int(h * .08), int(h * .2)) if px[x, y][1] > 100 and px[x, y][0] < 90 and px[x, y][2] < 110)
+print(json.dumps({"format": im.format, "w": w, "h": h, "n": n, "loop": im.info.get("loop"), "ms": total, "green": green, "colors": len(set(last.resize((64, 36)).getdata()))}))`, gifFile]).toString());
+  assert(facts.format === "GIF" && facts.w === 320 && facts.h === 180, `a 320×180 GIF: ${JSON.stringify(facts)}`);
+  assert(facts.n >= 2 && facts.loop === 0, `animated and looping: ${facts.n} frames, loop ${facts.loop}`);
+  assert(facts.ms >= 2000 && facts.ms <= 12000, `about the two slides' time: ${facts.ms} ms`);
+  assert(facts.green > 20 && facts.colors > 8, `the slide drawn (the SEJ green line): ${JSON.stringify(facts)}`);
   await cap.close();
 });
 await capBrowser.close();
