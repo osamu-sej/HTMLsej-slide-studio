@@ -686,6 +686,15 @@
         openDetail(host.dataset.detail);
         return;
       }
+      // A bookmark's mark jumps there (and plays from it).
+      const mark = event.target.closest?.(".hs-mark[data-t]");
+      if (mark) {
+        event.stopPropagation();
+        event.preventDefault();
+        const el = mark.closest(".hs-obj")?.querySelector("video, audio");
+        if (el) { el.currentTime = Number(mark.dataset.t); if (el.paused) { el.muted = el.tagName === "VIDEO" && el.hasAttribute("data-muted"); E.mediaPlay?.(el); } }
+        return;
+      }
       const video = event.target.closest?.("video");
       if (video) {
         event.stopPropagation();
@@ -1159,6 +1168,8 @@
       const el = E.render(slides[i], { ...(opts.renderOptions || {}), deck, index: i, mode: "present", fit: opts.fitFor?.(i) });
       // アニメーションのサウンド: an effect's sound rings as it starts (unless the show plays without sounds).
       if (opts.sounds !== false && !opts.static) el.hsAnimSound = (kind) => playSound(kind);
+      // メディア コントロールの表示 turned off: no video controls and no sound bar (a click on either still plays it).
+      if (opts.mediaControls === false) { el.classList.add("hs-no-controls"); for (const v of el.querySelectorAll("video[controls]")) v.controls = false; }
       return E.mount(el, { contain: true, className: "hs-player-slide" });
     };
 
@@ -1604,6 +1615,18 @@
       setTimeout(() => note.remove(), 2600);
     }
 
+    function jumpMark(dir) {
+      const all = [...(current?.firstElementChild?.querySelectorAll("video[data-bookmarks], audio[data-bookmarks]") || [])];
+      const el = all.find((x) => !x.paused) || (all.length === 1 ? all[0] : null);
+      if (!el || !E.mediaMarks) return;
+      const times = E.mediaMarks(el).map((b) => b.t).sort((a, b) => a - b);
+      const now = el.currentTime;
+      const t = dir > 0 ? times.find((x) => x > now + 0.05) : [...times].reverse().find((x) => x < now - 0.5);
+      if (t == null) return;
+      el.currentTime = t;
+      if (el.paused) E.mediaPlay?.(el);
+    }
+
     // ---- input
     let digits = "";
     function onKey(event) {
@@ -1620,7 +1643,8 @@
         if (k === "a") { event.preventDefault(); if (penMode) setPen(penMode); return; }
         return;
       }
-      if (event.altKey) return;
+      // Alt+End / Alt+Home: the next / previous bookmark of the media playing (or the slide's only one).
+      if (event.altKey) { if (event.key === "End" || event.key === "Home") { event.preventDefault(); jumpMark(event.key === "End" ? 1 : -1); } return; }
       const key = event.key;
       if (kiosk && key !== "Escape") return;
       if (penMode && key === "Escape") { event.preventDefault(); setPen(penMode); return; }

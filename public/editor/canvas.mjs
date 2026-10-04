@@ -10,7 +10,9 @@ import { autoCorrect, autoCorrectOptions } from "./autocorrect.mjs";
 const SNAP_SCREEN = 7; // px on screen
 const NUDGE = { plain: 5, fine: 1, big: 25 };
 const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96, 120, 150, 200];
-const STYLE_KEYS = ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity", "head", "tail", "headSize", "tailSize", "route", "vertical"];
+// グリッドとガイド → 間隔 (cm).
+export const GRID_STEPS = [0.1, 0.2, 0.25, 0.5, 1, 2];
+const STYLE_KEYS = ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity", "head", "tail", "headSize", "tailSize", "route", "vertical"];
 
 const stored = (key, fallback) => { try { const v = localStorage.getItem(`hsej-editor-${key}`); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } };
 const store = (key, value) => { try { localStorage.setItem(`hsej-editor-${key}`, JSON.stringify(value)); } catch { /* private window */ } };
@@ -20,7 +22,7 @@ export function createCanvas(app) {
   const ed = {
     sel: [], slideIndex: -1, entered: null, typing: null, tool: null, drag: null,
     wrap: null, slideEl: null, layer: null, painter: null, clipboard: null, pasteCount: 0, suppressClick: false,
-    zoom: stored("zoom", "fit"), grid: stored("grid", false), snapGrid: stored("snapGrid", false), smart: stored("smart", true), guides: stored("guides", true),
+    zoom: stored("zoom", "fit"), grid: stored("grid", false), snapGrid: stored("snapGrid", false), smart: stored("smart", true), guides: stored("guides", true), gridStep: GRID_STEPS.includes(stored("gridStep", 0.25)) ? stored("gridStep", 0.25) : 0.25, alignTo: stored("alignTo", "auto") === "slide" ? "slide" : "auto",
     menu: null, range: null, picker: null, cellRange: null,
   };
   const subs = new Set();
@@ -36,10 +38,19 @@ export function createCanvas(app) {
   const ends = (list) => (o) => E.lineEnds(o, list);
 
   // `timeline` replaces the slide's animations in the same undo step (copies of animated objects bring theirs).
+  // While a dialog applies several settings (フォント・段落), they make one undo step together.
+  let batching = null;
   function commit(next, { select = null, undo = true, timeline = undefined } = {}) {
     if (select) ed.sel = [...select];
-    app.setObjects(next.map((o) => E.normalizeObject(o) || o).filter(Boolean), { undo, timeline });
+    const step = undo && !batching?.done;
+    if (batching && undo) batching.done = true;
+    app.setObjects(next.map((o) => E.normalizeObject(o) || o).filter(Boolean), { undo: step, timeline });
     emit();
+  }
+  function batch(fn) {
+    const outer = batching;
+    batching = outer || { done: false };
+    try { fn(); } finally { batching = outer; }
   }
   const timeline = () => (Array.isArray(slide()?.timeline) ? slide().timeline : []);
   function change(fn, opts) {
@@ -66,7 +77,7 @@ export function createCanvas(app) {
   // The overlay follows the slide whenever its size changes (window, ribbon, side panels, zoom), and in
   // 「全体表示」 the slide follows the room the stage has.
   const watch = typeof ResizeObserver === "function" ? {
-    slide: new ResizeObserver(() => { if (!ed.drag && ed.layer?.isConnected) { ed.wrap.querySelector(".ed-grid")?.style.setProperty("--grid", `${ops.PX_PER_CM * scale()}px`); draw(); } }),
+    slide: new ResizeObserver(() => { if (!ed.drag && ed.layer?.isConnected) { ed.wrap.querySelector(".ed-grid")?.style.setProperty("--grid", `${gridPx()}px`); draw(); } }),
     room: new ResizeObserver(() => { if (ed.wrap?.isConnected) applyZoom(); }),
     wrap: null,
     body: null,
@@ -121,10 +132,15 @@ export function createCanvas(app) {
     }
   }
 
-  function gridLayer() {
+  // グリッドとガイド: lines every gridStep cm (doubled until they are at least 10 px apart on the screen).
+  function gridPx() {
     const k = scale();
-    const step = ops.PX_PER_CM;
-    return h("div", { class: "ed-grid", style: { "--grid": `${step * k}px` } });
+    let step = ops.PX_PER_CM * ed.gridStep;
+    while (step * k < 10) step *= 2;
+    return step * k;
+  }
+  function gridLayer() {
+    return h("div", { class: "ed-grid", style: { "--grid": `${gridPx()}px` } });
   }
 
   // ---------------------------------------------------------------- zoom
@@ -508,7 +524,7 @@ export function createCanvas(app) {
     const b0 = ops.bounds(moving, ends(drag.list));
     let lines = [];
     if (snapping || ed.snapGrid) {
-      const snap = ops.snapBox({ x: b0.x + dx, y: b0.y + dy, w: b0.w, h: b0.h }, snapping ? targetsFor(drag.list, ids) : [], { tolerance, guides: snapping && ed.guides ? allGuides() : null, grid: ed.snapGrid ? ops.PX_PER_CM / 4 : 0 });
+      const snap = ops.snapBox({ x: b0.x + dx, y: b0.y + dy, w: b0.w, h: b0.h }, snapping ? targetsFor(drag.list, ids) : [], { tolerance, guides: snapping && ed.guides ? allGuides() : null, grid: ed.snapGrid ? ops.PX_PER_CM * ed.gridStep : 0 });
       if (!(event.shiftKey && dx === 0)) dx += snap.dx;
       if (!(event.shiftKey && dy === 0)) dy += snap.dy;
       lines = snap.lines;
@@ -1220,7 +1236,10 @@ export function createCanvas(app) {
       const el = e.el?.startsWith("grp:") ? (groupMap.has(e.el.slice(4)) ? `grp:${groupMap.get(e.el.slice(4))}` : null) : idMap.get(e.el);
       if (!el) continue;
       const copy = { ...JSON.parse(JSON.stringify(e)), id: ops.newId().replace(/^o/, "a"), el };
-      if (copy.trigger) { if (idMap.has(copy.trigger)) copy.trigger = idMap.get(copy.trigger); else delete copy.trigger; }
+      if (copy.trigger) {
+        const [tid, mark] = String(copy.trigger).split("@");
+        if (idMap.has(tid)) copy.trigger = mark ? `${idMap.get(tid)}@${mark}` : idMap.get(tid); else delete copy.trigger;
+      }
       out.push(copy);
     }
     return out;
@@ -1310,11 +1329,24 @@ export function createCanvas(app) {
     if (!ids.length) return;
     commit(ops.remove(list, ids, ends(list)), { select: [] });
   }
+  // 複製 (⌘D) repeats a move: a copy moved after it was made sets where the next copy goes (as PowerPoint does).
+  let lastDup = null; // { to: ids of the copies, from: where the first source was, made: where its copy was put }
+  const posOf = (o) => (o?.kind === "line" ? [o.x1, o.y1] : [o?.x ?? 0, o?.y ?? 0]);
   function duplicateSelection() {
     const source = objects();
     const chosen = new Set(ed.sel);
     const groups = new Set(source.filter((o) => chosen.has(o.id)).map((o) => o.group).filter(Boolean));
-    const { list, ids, idMap, groupMap } = ops.duplicate(source, ed.sel);
+    const first = source.find((o) => chosen.has(o.id));
+    let offset = [24, 24];
+    if (lastDup && lastDup.to.length === ed.sel.length && lastDup.to.every((id) => chosen.has(id)) && first) {
+      const now = posOf(first);
+      if (Math.hypot(now[0] - lastDup.made[0], now[1] - lastDup.made[1]) > 0.5) offset = [now[0] - lastDup.from[0], now[1] - lastDup.from[1]];
+      else offset = lastDup.offset;
+    }
+    const made = ops.duplicate(source, ed.sel, 0);
+    const list = ops.moveBy(made.list, made.ids, offset[0], offset[1]);
+    const { ids, idMap, groupMap } = made;
+    if (first) { const [x, y] = posOf(first); lastDup = { to: ids, from: [x, y], made: [x + offset[0], y + offset[1]], offset }; }
     const anims = copiedAnims(timeline().filter((e) => chosen.has(e.el) || (e.el?.startsWith("grp:") && groups.has(e.el.slice(4)))), idMap, groupMap);
     commit(list, { select: ids, ...(anims.length ? { timeline: [...timeline(), ...anims] } : {}) });
   }
@@ -1330,7 +1362,8 @@ export function createCanvas(app) {
     commit(ops.ungroup(objects(), ed.sel));
   }
   function order(how) { commit(ops.reorder(objects(), ops.withGroups(objects(), ed.sel), how)); }
-  function alignSelection(how, toSlide = false) { const list = objects(); commit(ops.align(list, ed.sel, how, { toSlide: toSlide || ed.sel.length === 1, ends: ends(list) })); }
+  // 配置 → スライドに合わせて配置 / 選択したオブジェクトを揃える (one object always aligns to the slide).
+  function alignSelection(how, toSlide = false) { const list = objects(); commit(ops.align(list, ed.sel, how, { toSlide: toSlide || ed.alignTo === "slide" || ed.sel.length === 1, ends: ends(list) })); }
   function distributeSelection(axis) {
     if (ed.sel.length < 3) return app.toast("等間隔に並べるには3つ以上選んでください");
     const list = objects();
@@ -1371,7 +1404,9 @@ export function createCanvas(app) {
         for (const block of typedBlocks()) block.style.textAlignLast = value === "distributed" ? "justify" : "";
       }
       else if (kind === "size" || kind === "grow" || kind === "shrink") sizeSelectedWords(kind, value);
-      else if (["valign", "lh", "vertical", "direction", "font", "autofit", "pad", "wrap", "psp", "ls", "listStyle", "listProps"].includes(kind)) { stopTyping(true); applyText(kind, value); return; }
+      // 段落 → インデント on the paragraphs being typed in.
+      else if (kind === "paraIndent") for (const block of typedBlocks()) { block.style.marginLeft = value?.left ? `${value.left}px` : ""; block.style.textIndent = value?.first ? `${value.first}px` : ""; }
+      else if (["valign", "lh", "vertical", "direction", "font", "autofit", "pad", "wrap", "psp", "ls", "caps", "listStyle", "listProps"].includes(kind)) { stopTyping(true); applyText(kind, value); return; }
       growWhileTyping();
       emit();
       return;
@@ -1456,6 +1491,8 @@ export function createCanvas(app) {
         case "lh": return { lh: Number(value) };
         case "psp": return { psp: Number(value) || undefined };
         case "ls": return { ls: Number(value) || undefined };
+        case "caps": return { caps: value === "all" || value === "small" ? value : undefined };
+        case "paraIndent": return { text: ops.setIndent(E, text, value || {}) || undefined };
         case "vertical": return { vertical: !o.vertical || undefined };
         // 文字列の方向: "h" 横書き, "v" 縦書き, 90 / 270 the letters turned on their sides.
         case "direction": return value === "v" ? { vertical: true, textRot: undefined } : value === 90 || value === 270 ? { vertical: undefined, textRot: value } : { vertical: undefined, textRot: undefined };
@@ -1492,7 +1529,7 @@ export function createCanvas(app) {
     const chosen = selected(list).filter((o) => ["shape", "text"].includes(o.kind) || (o.kind === "table" && ed.typing?.cell)).map((o) => E.withDefaults(o));
     if (!chosen.length) return null;
     const o = chosen[0];
-    const out = { fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, textRot: o.textRot || null, list: ops.listOf(o.text), listStyle: ops.listStyleOf(o.text), listProps: ops.listPropsOf(o.text), uline: o.underline ? o.uline || "single" : null, sline: o.strike ? o.sline || "single" : null, pad: o.pad, wrap: o.wrap !== false };
+    const out = { fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, textRot: o.textRot || null, list: ops.listOf(o.text), listStyle: ops.listStyleOf(o.text), listProps: ops.listPropsOf(o.text), uline: o.underline ? o.uline || "single" : null, sline: o.strike ? o.sline || "single" : null, pad: o.pad, wrap: o.wrap !== false, caps: o.caps || null, ls: o.ls || 0, psp: o.psp || 0, indent: ops.indentOf(o.text) };
     if (ed.typing) {
       try {
         out.bold = document.queryCommandState("bold");
@@ -1661,6 +1698,7 @@ export function createCanvas(app) {
     get selection() { return [...ed.sel]; },
     get typing() { return Boolean(ed.typing); },
     selectedObjects: () => selected(),
+    batch,
     objects,
     attach, draw, emit,
     subscribe(fn) { subs.add(fn); return () => subs.delete(fn); },

@@ -3,6 +3,7 @@
 // galleries they open (shapes, colours in the SEJ palette, icons, photos).
 
 import * as ops from "./ops.mjs";
+import { GRID_STEPS } from "./canvas.mjs";
 import { ico } from "./icons.mjs";
 import { createAnimations } from "./anim.mjs";
 import { createInteractions } from "./interact.mjs";
@@ -215,7 +216,7 @@ export function createEditorUi(editor, app) {
   }
 
   /** Colour swatches of the SEJ palette (plus none and, for fills and lines, any colour with a warning). */
-  function colors(list, current, pick, { none = null, custom = true, note = "" } = {}) {
+  function colors(list, current, pick, { none = null, custom = true, note = "", extra = null } = {}) {
     return (close) => {
       const wrap = h("div", { class: "rb-colors" });
       if (none) wrap.append(h("button", { type: "button", class: ["rb-none", current === "none" ? "on" : ""], onmousedown: (e) => e.preventDefault(), onclick: () => { close(); pick("none"); } }, none));
@@ -236,6 +237,10 @@ export function createEditorUi(editor, app) {
         if (color !== got) app.toast(`スポイト：${got.toUpperCase()} にいちばん近いSEJの色（${color.toUpperCase()}）にしました`);
         pick(color);
       } }, ico("eyedrop", 16), h("span", {}, "スポイト")));
+      // More ways to fill (図・並べて表示), each closing the menu first.
+      for (const item of (typeof extra === "function" ? extra() : extra) || []) {
+        wrap.append(h("button", { type: "button", class: ["rb-extra", item.on ? "on" : ""], disabled: item.disabled || null, "data-fill": item.key || null, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); item.run(); } }, item.icon ? ico(item.icon, 16) : null, h("span", {}, item.label)));
+      }
       if (note) wrap.append(h("p", { class: "rb-note" }, note));
       return wrap;
     };
@@ -333,7 +338,24 @@ export function createEditorUi(editor, app) {
   const fillOf = () => { const o = selected().find((x) => ["shape", "text"].includes(x.kind)); return o ? E.withDefaults(o).fill : null; };
   const strokeOf = () => { const o = selected()[0]; return o ? E.withDefaults(o).stroke : null; };
   const textColorOf = () => editor.textState()?.color ?? "#1a1a1a";
-  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color } : null));
+  // A colour replaces a picture fill (図で塗りつぶし), as in PowerPoint.
+  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color, fillImg: undefined, fillTile: undefined } : null));
+  /** 図形の塗りつぶし → 図: a picture from this device fills the selected shapes (cut to their outline). */
+  async function pictureFill() {
+    const [file] = await app.pickFiles("image/png,image/jpeg,image/webp,image/gif");
+    if (!file) return;
+    try {
+      const { src } = await app.storePicture(file);
+      editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fillImg: src } : null));
+      app.toast("図で塗りつぶしました（図形の形に切り抜き。「並べて表示」で繰り返しにできます）");
+    } catch (error) { app.toast(`画像を読み込めませんでした（${error.message}）`); }
+  }
+  const pictureFilled = () => editor.selectedObjects().some((o) => o.fillImg);
+  const fillExtras = () => [
+    { key: "picture", label: "図…", icon: "image", run: () => pictureFill() },
+    { key: "tile", label: "図を並べて表示", icon: "grid", on: editor.selectedObjects().some((o) => o.fillTile), disabled: !pictureFilled(), run: () => { const on = !editor.selectedObjects().some((o) => o.fillTile); editor.apply((o) => (o.fillImg ? { fillTile: on || undefined } : null)); } },
+    { key: "nopicture", label: "図を外す", icon: "trash", disabled: !pictureFilled(), run: () => editor.apply((o) => (o.fillImg ? { fillImg: undefined, fillTile: undefined } : null)) },
+  ];
   const setStroke = (color) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { stroke: color, ...(color !== "none" && o.kind !== "line" && E.withDefaults(o).stroke === "none" ? { strokeW: E.withDefaults(o).strokeW || 2 } : {}) } : o.kind === "icon" ? { color } : null));
   const setStrokeWidth = (pt) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { strokeW: ops.fromPt(pt), ...(E.withDefaults(o).stroke === "none" && o.kind !== "line" ? { stroke: "#1f3864" } : {}) } : o.kind === "icon" ? { strokeW: Math.max(0.5, pt) } : null));
   const setDash = (dash) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { dash: dash === "solid" ? undefined : dash } : null));
@@ -545,6 +567,122 @@ export function createEditorUi(editor, app) {
     dialog.addEventListener("close", () => dialog.remove());
     dialog.showModal();
   }
+  // ---------------------------------------------------------------- フォント・段落・グリッドとガイド (dialogs)
+
+  function settingsDialog(cls, title, body, apply) {
+    const dialog = h("dialog", { class: ["fmt-dialog", cls], "aria-label": title },
+      h("div", { class: "dialog-head" }, h("h3", {}, title), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("form", { class: "dialog-body fmt-body", onsubmit: (event) => { event.preventDefault(); editor.batch(apply); dialog.close(); } }, body,
+        h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"), h("button", { type: "submit", class: "btn btn-primary fmt-ok" }, "OK"))));
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => { dialog.remove(); refresh(); });
+    dialog.showModal();
+    return dialog;
+  }
+  const fieldset = (legend, ...rows) => h("fieldset", { class: "opt-sec" }, h("legend", {}, legend), ...rows);
+  const labeled = (label, control) => h("label", { class: "sh-inline fmt-field" }, h("span", {}, label), control);
+  const select = (name, options, value) => h("select", { name, "aria-label": name }, options.map(([v, l]) => h("option", { value: String(v), selected: String(v) === String(value) || null }, l)));
+  const number = (name, value, { step = 0.1, min = 0, max = 100 } = {}) => h("input", { type: "number", name, "aria-label": name, value: String(value), step: String(step), min: String(min), max: String(max), class: "fmt-num" });
+  const checkbox = (name, label, on) => h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name, checked: on || null }), h("span", {}, label));
+
+  /** フォント (⇧⌘F): the font, its style and size, the SEJ text colour, the underline, effects and spacing at once. */
+  function fontDialog() {
+    const st = editor.textState();
+    if (!st) { app.toast("文字を入れた図形・テキスト ボックスを選んでください"); return; }
+    const style = st.bold && st.italic ? "bolditalic" : st.bold ? "bold" : st.italic ? "italic" : "regular";
+    const font = select("フォント", Object.entries(E.FONTS).map(([key, [label]]) => [key, label]), st.font || "body");
+    const styleSel = select("スタイル", [["regular", "標準"], ["bold", "太字"], ["italic", "斜体"], ["bolditalic", "太字 斜体"]], style);
+    const size = number("サイズ", st.fs, { step: 0.5, min: 6, max: 400 });
+    let color = String(st.color || "").toLowerCase();
+    const swatches = h("span", { class: "fp-swatches fmt-colors" }, E.PALETTE.text.map(([c, l]) => h("button", { type: "button", class: ["fp-sw", color === c ? "on" : ""], title: l, "aria-label": l, "data-color": c, style: { "--c": c }, onclick: (event) => { color = c; for (const b of swatches.children) b.classList.toggle("on", b === event.currentTarget); } })));
+    const uline = select("下線のスタイル", [["none", "（下線なし）"], ["single", "一重線"], ["double", "二重線"], ["thick", "太線"], ["dotted", "点線"], ["dashed", "破線"], ["wavy", "波線"]], st.underline ? st.uline || "single" : "none");
+    const strike = checkbox("strike", "取り消し線", st.strike && st.sline !== "double");
+    const dstrike = checkbox("dstrike", "二重取り消し線", st.strike && st.sline === "double");
+    const sup = checkbox("sup", "上付き", false);
+    const sub = checkbox("sub", "下付き", false);
+    if (!editor.typing) for (const el of [sup, sub]) { el.querySelector("input").disabled = true; el.title = "文字を入力しているときに、選んだ文字に付けます"; }
+    const allCaps = checkbox("allCaps", "すべて大文字", st.caps === "all");
+    const smallCaps = checkbox("smallCaps", "小型英大文字", st.caps === "small");
+    const one = (a, b) => a.querySelector("input").addEventListener("change", (event) => { if (event.target.checked) b.querySelector("input").checked = false; });
+    one(strike, dstrike); one(dstrike, strike); one(sup, sub); one(sub, sup); one(allCaps, smallCaps); one(smallCaps, allCaps);
+    const spacing = select("文字間隔", CHAR_SPACING.map(([v, l]) => [v, l]), CHAR_SPACING.find(([v]) => Math.abs(v - (st.ls || 0)) < 0.001)?.[0] ?? 0);
+    const body = h("div", { class: "fmt-cols" },
+      fieldset("フォント", labeled("フォント", font), labeled("スタイル", styleSel), labeled("サイズ（pt）", size), labeled("フォントの色", swatches), labeled("下線のスタイル", uline)),
+      fieldset("文字飾り", strike, dstrike, sup, sub, allCaps, smallCaps),
+      fieldset("文字幅と間隔", labeled("間隔", spacing)),
+      h("p", { class: "hint" }, "文字の色はSEJの文字色（黒・濃紺・グレー）だけです。すべて大文字・小型英大文字は英字に効きます。"));
+    settingsDialog("font-dialog", "フォント", body, () => {
+      const isOn = (el) => el.querySelector("input").checked;
+      // What reaches the words being typed first (bold, colour, size…), then what is set on the whole box.
+      const [wantBold, wantItalic] = [/bold/.test(styleSel.value), /italic/.test(styleSel.value)];
+      if (wantBold !== Boolean(st.bold)) editor.textFormat("bold");
+      if (wantItalic !== Boolean(st.italic)) editor.textFormat("italic");
+      const pt = parseFloat(size.value);
+      if (pt > 0 && Math.abs(pt - st.fs) > 0.01) editor.textFormat("size", pt);
+      if (color && color !== String(st.color || "").toLowerCase()) editor.textFormat("color", color);
+      if (uline.value === "none") { if (st.underline) editor.textFormat("underline"); } else if (uline.value !== (st.underline ? st.uline || "single" : "none")) editor.textFormat("uline", uline.value);
+      if (isOn(dstrike)) { if (!(st.strike && st.sline === "double")) editor.textFormat("sline", "double"); }
+      else if (isOn(strike)) { if (!st.strike || st.sline === "double") editor.textFormat("sline", "single"); }
+      else if (st.strike) editor.textFormat("strike");
+      if (isOn(sup)) editor.textFormat("sup");
+      if (isOn(sub)) editor.textFormat("sub");
+      if (font.value !== (st.font || "body")) editor.textFormat("font", font.value);
+      const caps = isOn(allCaps) ? "all" : isOn(smallCaps) ? "small" : null;
+      if (caps !== (st.caps || null)) editor.textFormat("caps", caps);
+      const ls = Number(spacing.value);
+      if (Math.abs(ls - (st.ls || 0)) > 0.001) editor.textFormat("ls", ls);
+    });
+  }
+
+  /** 段落: alignment, indents (before the text, the first line indented or hanging), spacing and line spacing. */
+  function paragraphDialog() {
+    const st = editor.textState();
+    if (!st) { app.toast("文字を入れた図形・テキスト ボックスを選んでください"); return; }
+    const ind = st.indent || { left: 0, first: 0 };
+    const kind = ind.first < 0 ? "hanging" : ind.first > 0 ? "first" : "none";
+    const before = Math.max(0, ind.left - (ind.first < 0 ? -ind.first : 0));
+    const align = select("配置", [["left", "左揃え"], ["center", "中央揃え"], ["right", "右揃え"], ["justify", "両端揃え"], ["distributed", "均等割り付け"]], st.align || "left");
+    const left = number("テキストの前", ops.toCm(before), { step: 0.1, min: 0, max: 20 });
+    const firstKind = select("最初の行", [["none", "（なし）"], ["first", "字下げ"], ["hanging", "ぶら下げ"]], kind);
+    const width = number("幅", ops.toCm(Math.abs(ind.first)), { step: 0.1, min: 0, max: 20 });
+    const fsPt = st.fs || 18;
+    const after = number("段落後", Math.round((st.psp || 0) * fsPt * 10) / 10, { step: 1, min: 0, max: 200 });
+    const lineSel = select("行間", [...LINE_HEIGHTS.map(([v, l]) => [v, l]), ["custom", "倍数…"]], LINE_HEIGHTS.some(([v]) => Math.abs(v - (st.lh || 0)) < 0.01) ? LINE_HEIGHTS.find(([v]) => Math.abs(v - st.lh) < 0.01)[0] : "custom");
+    const lineNum = number("倍数", st.lh || 1.35, { step: 0.05, min: 0.5, max: 5 });
+    const body = h("div", {},
+      fieldset("全般", labeled("配置", align)),
+      fieldset("インデント", labeled("テキストの前（cm）", left), labeled("最初の行", firstKind), labeled("幅（cm）", width)),
+      fieldset("間隔", labeled("段落後（pt）", after), labeled("行間", lineSel), labeled("倍数", lineNum)),
+      h("p", { class: "hint" }, "インデントは選んだ段落（入力中でなければ、選んだ図形のすべての段落）に付きます。"));
+    settingsDialog("para-dialog", "段落", body, () => {
+      if (align.value !== (st.align || "left")) editor.textFormat("align", align.value);
+      const w = ops.fromCm(Math.max(0, Number(width.value) || 0));
+      const b = ops.fromCm(Math.max(0, Number(left.value) || 0));
+      const next = firstKind.value === "hanging" ? { left: Math.round((b + w) * 100) / 100, first: -w } : firstKind.value === "first" ? { left: b, first: w } : { left: b, first: 0 };
+      if (Math.abs(next.left - ind.left) > 0.5 || Math.abs(next.first - ind.first) > 0.5) editor.textFormat("paraIndent", next);
+      const lh = lineSel.value === "custom" ? Number(lineNum.value) : Number(lineSel.value);
+      if (lh > 0 && Math.abs(lh - (st.lh || 0)) > 0.001) editor.textFormat("lh", Math.min(5, Math.max(0.5, lh)));
+      const psp = Math.round(((Number(after.value) || 0) / fsPt) * 100) / 100;
+      if (Math.abs(psp - (st.psp || 0)) > 0.005) editor.textFormat("psp", Math.min(4, psp));
+    });
+  }
+
+  /** グリッドとガイド: snapping to the grid and its spacing, showing the grid, the guides and the smart guides. */
+  function gridDialog() {
+    const st = editor.state;
+    const step = select("間隔", GRID_STEPS.map((v) => [v, `${v} cm`]), st.gridStep);
+    const body = h("div", {},
+      fieldset("オブジェクトの位置合わせ", checkbox("snapGrid", "描画オブジェクトをグリッド線に合わせる", st.snapGrid)),
+      fieldset("グリッドの設定", labeled("間隔", step), checkbox("grid", "グリッドを表示", st.grid)),
+      fieldset("ガイドの設定", checkbox("guides", "ガイドを表示", st.guides), checkbox("smart", "図形の整列時にスマート ガイドを表示する", st.smart)));
+    const dialog = settingsDialog("grid-dialog", "グリッドとガイド", body, () => {
+      const on = (name) => dialog.querySelector(`input[name="${name}"]`).checked;
+      const gridStep = Number(step.value);
+      if (gridStep !== st.gridStep) editor.setView("gridStep", gridStep);
+      for (const key of ["snapGrid", "grid", "guides", "smart"]) if (on(key) !== Boolean(st[key])) editor.setView(key, on(key));
+    });
+  }
+
   function ribbonOptions(anchor) {
     openPop(anchor, menu([
       { head: "リボンの表示オプション" },
@@ -626,7 +764,7 @@ export function createEditorUi(editor, app) {
   // A narrow window squeezes the ribbon as PowerPoint does, from the right-hand groups first: small buttons
   // lose their words (the tooltip keeps them), then whole groups fold into one button that opens them;
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
-  const GROUP_ICONS = { グラフィックの作成: "smartart", "SmartArt のスタイル": "fill", 文字: "font", リセット: "reset", プレビュー: "play", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
+  const GROUP_ICONS = { グラフィックの作成: "smartart", "SmartArt のスタイル": "fill", 文字: "font", リセット: "reset", プレビュー: "play", ブックマーク: "pin", グラフのレイアウト: "layout", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
     図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane",
     プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review", 描画ツール: "pen", 変換: "inkShape", 再生: "play", 音声: "mic", ズームのオプション: "zoomSlide", ズームのスタイル: "outline", 数式と記号: "equation", モニター: "presenter", キャプションと字幕: "subtitles", 文章校正: "spell", キャプション: "caption", 言語: "textCase", アクセシビリティ: "accessibility", 比較: "thumbs", インク: "pen" };
   function fold(g) {
@@ -730,7 +868,8 @@ export function createEditorUi(editor, app) {
           drop("highlight", "", "蛍光ペン（マーカー）", () => colors(E.PALETTE.highlight, "", (c) => editor.textFormat("highlight", c === "none" ? null : c), { none: "マーカーなし", custom: false }), { enabled: hasText, keep: true }),
           drop("spacing", "", "文字の間隔", () => menu(CHAR_SPACING.map(([v, label]) => ({ label, on: Math.abs((one()?.ls || 0) - v) < 0.001, run: () => editor.textFormat("ls", v) }))), { enabled: hasText, keep: true }),
           drop("textCase", "", "文字種の変換（大文字・小文字・全角・半角）", () => extras.caseMenu(), { enabled: hasText, keep: true }),
-          btn("clear", "", "書式のクリア", () => editor.textFormat("clear"), { enabled: hasText, keep: true }))),
+          btn("clear", "", "書式のクリア", () => editor.textFormat("clear"), { enabled: hasText, keep: true }),
+          btn("font", "", "フォントの設定（フォント・スタイル・サイズ・色・下線・文字飾り・文字間隔）。⇧⌘F", () => fontDialog(), { enabled: hasText, keep: true }))),
       group("段落",
         row(btn("bullet", "", "箇条書き", () => editor.textFormat("bullet"), { enabled: hasText, pressed: () => editor.textState()?.list === "bullet", keep: true }),
           caret("箇条書きの種類（●・■・◆・➢・✓…）", listGallery("bullet"), { enabled: hasText }),
@@ -744,6 +883,7 @@ export function createEditorUi(editor, app) {
           btn("textRight", "", "右揃え（⌘R）", () => editor.textFormat("align", "right"), { enabled: hasText, pressed: () => editor.textState()?.align === "right", keep: true }),
           btn("textJustify", "", "両端揃え（⌘J）", () => editor.textFormat("align", "justify"), { enabled: hasText, pressed: () => editor.textState()?.align === "justify", keep: true }),
           btn("textDistributed", "", "均等割り付け（⇧⌘J）", () => editor.textFormat("align", "distributed"), { enabled: hasText, pressed: () => editor.textState()?.align === "distributed", keep: true }),
+          btn("indentMore", "", "段落の設定（配置・インデント（字下げ・ぶら下げ）・段落の間隔・行間）", () => paragraphDialog(), { enabled: hasText, keep: true }),
           btn("vtext", "", "縦書き", () => editor.textFormat("vertical"), { enabled: hasText, pressed: tState("vertical") }),
           caret("文字列の方向（横書き・縦書き・90度／270度回転）", () => menu([
             { head: "文字列の方向" },
@@ -759,7 +899,7 @@ export function createEditorUi(editor, app) {
         drop("shapes", "図形", "図形を描く", () => shapeGallery(pickTool), { big: true }),
         col(drop("front", "配置", "前面・背面・整列・グループ・回転", () => arrangeMenu(), { enabled: any }),
           drop("style", "スタイル", "図形のクイックスタイル（SEJの色）", () => styleMenu(), { enabled: hasText })),
-        col(drop("fill", "塗り", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし" }), { enabled: hasText, swatch: fillOf }),
+        col(drop("fill", "塗り", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし", extra: fillExtras }), { enabled: hasText, swatch: fillOf }),
           drop("outline", "枠線", "図形の枠線", () => outlineMenu(), { enabled: () => any() && !kinds().has("icon") || kinds().has("icon"), swatch: strokeOf }))),
       group("編集",
         col(btn("find", "検索・置換", "資料全体の文字を検索・置換（⌘F）", () => app.openReplace()),
@@ -959,7 +1099,7 @@ export function createEditorUi(editor, app) {
       { label: "前面へ移動", icon: "front", keys: "⌘]", run: () => editor.order("forward") },
       { label: "背面へ移動", icon: "back", keys: "⌘[", run: () => editor.order("backward") },
       { label: "最背面へ移動", icon: "back", keys: "⇧⌘[", run: () => editor.order("back") },
-      "-", { head: "配置（1つならスライドに、複数なら互いに）" },
+      "-", { head: "配置（1つならスライドに。複数は下の基準で）" },
       { label: "左揃え", icon: "alignLeft", run: () => editor.alignSelection("left") },
       { label: "左右中央揃え", icon: "alignCenter", run: () => editor.alignSelection("center") },
       { label: "右揃え", icon: "alignRight", run: () => editor.alignSelection("right") },
@@ -969,6 +1109,8 @@ export function createEditorUi(editor, app) {
       { label: "左右に整列（等間隔）", icon: "distH", run: () => editor.distributeSelection("x") },
       { label: "上下に整列（等間隔）", icon: "distV", run: () => editor.distributeSelection("y") },
       { label: "スライドの中央に置く", icon: "alignCenter", run: () => { editor.alignSelection("center", true); editor.alignSelection("middle", true); } },
+      { label: "スライドに合わせて配置", on: editor.state.alignTo === "slide", run: () => editor.setView("alignTo", "slide") },
+      { label: "選択したオブジェクトを揃える", on: editor.state.alignTo !== "slide", run: () => editor.setView("alignTo", "auto") },
       "-", { head: "グループ化" },
       { label: "グループ化", icon: "group", keys: "⌘G", run: () => editor.groupSelection(), disabled: editor.selection.length < 2 },
       { label: "グループ解除", icon: "ungroup", keys: "⇧⌘G", run: () => editor.ungroupSelection(), disabled: !selected().some((o) => o.group) },
@@ -1050,7 +1192,7 @@ export function createEditorUi(editor, app) {
           drop("union", "図形の結合", "選んだ2つ以上の図形を1つにする：接合・型抜き/合成・切り出し・重なり抽出・単純型抜き（最初に選んだ図形の書式になります）", () => mergeMenu(), { enabled: () => canMerge(selected()) }))),
       group("図形のスタイル",
         drop("style", "クイック|スタイル", "SEJの色の組み合わせ", () => styleMenu(), { big: true, enabled: hasText }),
-        col(drop("fill", "塗りつぶし", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし" }), { enabled: hasText, swatch: fillOf }),
+        col(drop("fill", "塗りつぶし", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし", extra: fillExtras }), { enabled: hasText, swatch: fillOf }),
           drop("outline", "枠線", "図形の枠線（色・太さ・実線/点線）", () => outlineMenu(), { enabled: any, swatch: strokeOf }),
           drop("arrows", "矢印", "線の始点・終点の形", () => arrowMenu(), { enabled: () => kinds().has("line") })),
         col(drop("transparency", "透明度", "オブジェクトの透明度", () => menu([0, 0.15, 0.3, 0.5, 0.7].map((t) => ({ label: `${Math.round(t * 100)}%`, on: Math.abs((1 - (one()?.opacity ?? 1)) - t) < 0.01, run: () => editor.apply({ opacity: t ? Math.round((1 - t) * 100) / 100 : undefined }) }))), { enabled: any }),
@@ -1166,7 +1308,7 @@ export function createEditorUi(editor, app) {
         btn("notes", "ノート|表示", "スライドとノートを1ページにした表示で、ノートを書く（←→で前後のスライド）", () => app.openNotesView(), { big: true })),
       group("表示/非表示",
         col(btn("ruler", "ルーラー", "スライドの上と左に目盛り（cm、スライドの中央が0）を表示", () => app.toggleRulers(), { pressed: () => app.rulersShown() }),
-          btn("grid", "グリッド線", "1cmごとの線を表示", () => editor.setView("grid", !st.grid), { pressed: () => st.grid }),
+          btn("grid", "グリッド線", "グリッド線を表示（間隔はグリッドとガイドの設定で）", () => editor.setView("grid", !st.grid), { pressed: () => st.grid }),
           drop("guides", "ガイド", "ガイド：SEJの本文の領域・中央と、自分で置くガイド（ドラッグで移動・スライドの外へ出すと削除）", () => menu([
             { label: "ガイドを表示する（吸着）", icon: "guides", on: st.guides, run: () => editor.setView("guides", !st.guides) },
             "-",
@@ -1176,7 +1318,8 @@ export function createEditorUi(editor, app) {
           ]))),
         col(btn("notes", "ノート", "スライドの下にスピーカーノートを表示", () => app.toggleNotes(), { pressed: () => app.notesShown() }),
           btn("smart", "スマートガイド", "ほかの図形の端・中央・等間隔に吸着（Altで一時的に外す）", () => editor.setView("smart", !st.smart), { pressed: () => st.smart }),
-          btn("snapGrid", "グリッドに|合わせる", "0.25cmごとに吸着", () => editor.setView("snapGrid", !st.snapGrid), { pressed: () => st.snapGrid }))),
+          btn("snapGrid", "グリッドに|合わせる", "グリッド線に吸着（間隔はグリッドとガイドの設定で）", () => editor.setView("snapGrid", !st.snapGrid), { pressed: () => st.snapGrid })),
+        btn("guides", "グリッドと|ガイド…", "グリッドとガイドの設定（間隔・グリッドに合わせる・グリッドの表示・ガイド・スマートガイド）", () => gridDialog(), { big: true })),
       group("カラー/グレースケール",
         btn("grayView", "グレース|ケール", "スライドを白黒で見る（白黒印刷やコピーで読めるかの確認。資料は変わりません）", () => { grayView = !grayView; document.getElementById("stageBody")?.classList.toggle("view-gray", grayView); refresh(); }, { big: true, pressed: () => grayView })),
       group("ズーム",
@@ -1403,6 +1546,9 @@ export function createEditorUi(editor, app) {
       out.push(section("fill", "塗りつぶし", true,
         swatchRow(E.PALETTE.fill, fill, setFill, { none: "塗りつぶしなし" }),
         line("その他の色", h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(fill) ? fill : "#dce4f2", onchange: (event) => setFill(event.target.value) }), eyedrop(setFill), h("small", { class: "hint" }, "SEJの面の色以外はチェックで知らせます")),
+        line("図", h("button", { type: "button", class: "btn btn-sm fp-picfill", onclick: () => pictureFill() }, o.fillImg ? "図を変更…" : "図で塗りつぶし…"),
+          o.fillImg ? h("label", { class: "fp-check" }, h("input", { type: "checkbox", checked: o.fillTile || null, onchange: (event) => editor.apply((x) => (x.fillImg ? { fillTile: event.target.checked || undefined } : null)) }), "並べて表示") : null,
+          o.fillImg ? h("button", { type: "button", class: "btn btn-sm btn-ghost", onclick: () => editor.apply((x) => (x.fillImg ? { fillImg: undefined, fillTile: undefined } : null)) }, "外す") : null),
         line("透明度", slider((1 - (o.fillOpacity ?? 1)) * 100, (v) => editor.apply((x) => (["shape", "text"].includes(x.kind) ? { fillOpacity: v ? Math.round((1 - v / 100) * 100) / 100 : undefined } : null))))));
     }
     if (chosen.some((x) => ["shape", "text", "image", "line"].includes(x.kind))) {
@@ -1616,6 +1762,7 @@ export function createEditorUi(editor, app) {
     editEquation: (id) => { const o = editor.objects().find((x) => x.id === id); if (o?.kind === "equation") extras.equationDialog(o); },
     editPoll: (id) => polls.edit(id),
     readAloud: () => readAloud.toggle(), stopReading: () => readAloud.stop(),
+    fontDialog, paragraphDialog, gridDialog,
     ribbonCommands, runRibbonCommand, focusSearch: () => { if (ribbonMode === "auto" && !floating) openFloating(); quick.focusSearch(); }, customizeQat: () => quick.customize(),
     stopInk: () => ink.stop(), get inkTool() { return ink.tool; },
     get tab() { return tab; }, get ribbonMode() { return ribbonMode; }, get floating() { return floating; },

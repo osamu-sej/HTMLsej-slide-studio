@@ -21,6 +21,7 @@ import io
 import math
 import posixpath
 import re
+import struct
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -269,7 +270,7 @@ class Deck:
         self.images: dict[str, str | None] = {}
         self.themes: dict[str, Theme] = {}
         self.sids: dict[str, str] = {}
-        self.stats = {"slides": 0, "objects": 0, "pictures": 0, "tables": 0, "charts": 0, "animations": 0, "skipped": 0, "hidden": 0, "unsupported": 0, "comments": 0, "models": 0}
+        self.stats = {"slides": 0, "objects": 0, "pictures": 0, "tables": 0, "charts": 0, "animations": 0, "skipped": 0, "hidden": 0, "unsupported": 0, "comments": 0, "models": 0, "media": 0}
         self.sej = self._is_sej()
         self.comment_authors = comment_authors(prs)
 
@@ -326,6 +327,43 @@ def image_url(part, deck: Deck) -> str | None:
     return url
 
 
+# Videos and sounds a browser plays (others stay the poster picture).
+MEDIA_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/mp4", ".webm": "video/webm", ".ogv": "video/ogg",
+               ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".oga": "audio/ogg", ".ogg": "audio/ogg", ".aac": "audio/aac"}
+# A file named otherwise is still played when its content type is one of these.
+PLAYABLE_TYPES = {t: t for t in ("video/mp4", "video/webm", "video/ogg", "audio/mpeg", "audio/mp4", "audio/wav", "audio/ogg", "audio/aac")}
+PLAYABLE_TYPES.update({"audio/mp3": "audio/mpeg", "audio/x-wav": "audio/wav", "audio/x-m4a": "audio/mp4", "video/x-m4v": "video/mp4"})
+
+
+def media_duration(blob: bytes, ext: str) -> float | None:
+    """How long a video or sound is (seconds), read from its own header: MP4/MOV/M4A (mvhd) and WAV."""
+    try:
+        if ext in (".mp4", ".m4v", ".mov", ".m4a"):
+            at = blob.find(b"mvhd")
+            if at < 4:
+                return None
+            version = blob[at + 4]
+            if version == 1:
+                scale, length = struct.unpack(">IQ", blob[at + 24:at + 36])
+            else:
+                scale, length = struct.unpack(">II", blob[at + 16:at + 24])
+            return length / scale if scale else None
+        if ext == ".wav" and blob[:4] == b"RIFF" and blob[8:12] == b"WAVE":
+            pos, rate, size = 12, None, None
+            while pos + 8 <= len(blob):
+                cid, n = blob[pos:pos + 4], struct.unpack("<I", blob[pos + 4:pos + 8])[0]
+                if cid == b"fmt ":
+                    rate = struct.unpack("<I", blob[pos + 16:pos + 20])[0]
+                elif cid == b"data":
+                    size = n
+                    break
+                pos += 8 + n + (n & 1)
+            return size / rate if rate and size else None
+    except (struct.error, IndexError):
+        return None
+    return None
+
+
 # ---------------------------------------------------------------- a slide
 
 class SlideReader:
@@ -368,8 +406,8 @@ class SlideReader:
     def rel_target(self, part, rid: str):
         try:
             return part.related_part(rid)
-        except (KeyError, AttributeError):
-            return None
+        except (KeyError, AttributeError, ValueError):
+            return None  # missing, or a file outside the package (a linked video)
 
     # ---- placeholders: what the layout and master give
 
@@ -1110,6 +1148,18 @@ class SlideReader:
         spid = nv.get("id") if nv is not None else None
         hidden = nv is not None and nv.get("hidden") in ("1", "true")
         b = self.box(xf, tf)
+        # A video or a sound (its picture is the poster): played here when a browser can play its file.
+        nvpr = el.find(f"{P}nvPicPr/{P}nvPr")
+        kind = None
+        if nvpr is not None:
+            kind = "video" if nvpr.find(A + "videoFile") is not None else "audio" if nvpr.find(A + "audioFile") is not None else None
+        if kind:
+            media = self.media(el, nvpr, kind, b, spid, part, nv)
+            if media:
+                if hidden:
+                    media["hidden"] = True
+                self.add(media, spid, group)
+                return
         o = self.picture_from_blip(el.find(P + "blipFill"), b, nv.get("name") if nv is not None else None, part)
         if not o:
             return
@@ -1131,6 +1181,64 @@ class SlideReader:
         if hidden:
             o["hidden"] = True
         self.add(o, spid, group)
+
+    def media(self, el, nvpr, kind, b, spid, part, nv):
+        """
+        A video or a sound (挿入 → ビデオ・オーディオ): its file when a browser plays that kind, the poster PowerPoint
+        shows before it plays, and the 再生 settings kept with it (トリミング・フェード・ブックマーク). A file in a form
+        browsers cannot play (WMV, AVI…) or linked from outside stays a picture (the poster).
+        """
+        p14 = next(iter(nvpr.iter(f"{{{NS['p14']}}}media")), None)
+        rid = p14.get(R + "embed") if p14 is not None else None
+        if not rid:
+            link = nvpr.find(A + ("videoFile" if kind == "video" else "audioFile"))
+            rid = link.get(R + "link") if link is not None else None
+        target = self.rel_target(part or self.slide.part, rid) if rid else None
+        if target is None or not target.blob:
+            return None
+        ext = posixpath.splitext(str(target.partname))[1].lower()
+        mime = MEDIA_TYPES.get(ext) or PLAYABLE_TYPES.get(getattr(target, "content_type", "") or "")
+        if not mime or len(target.blob) > 50_000_000:
+            self.deck.stats["unsupported"] += 1
+            return None
+        if mime.startswith("audio/"):
+            kind = "audio"
+        o: dict[str, Any] = {"id": self.new_id("v" if kind == "video" else "a", spid), "kind": kind, **b,
+                             "src": f"data:{mime};base64," + base64.b64encode(target.blob).decode(),
+                             "fileName": posixpath.basename(str(target.partname))[:200], "autoplay": False, "loop": False}
+        if kind == "video":
+            o["muted"] = False
+            o["fit"] = "contain"
+            blip = el.find(f"{P}blipFill/{A}blip")
+            poster_part = self.rel_target(part or self.slide.part, blip.get(R + "embed")) if blip is not None and blip.get(R + "embed") else None
+            poster = image_url(poster_part, self.deck) if poster_part is not None else None
+            if poster and poster.startswith(("data:image/png", "data:image/jpeg", "data:image/webp")) and len(poster) <= 3_000_000:
+                o["poster"] = poster
+        name = nv.get("name") if nv is not None else None
+        if name:
+            o["name"] = name[:60]
+        if nv is not None and nv.get("descr"):
+            o["alt"] = nv.get("descr")[:500]
+        if p14 is not None:
+            ms = lambda node, key: int(node.get(key)) / 1000 if node is not None and (node.get(key) or "").isdigit() else 0
+            trim = p14.find(f"{{{NS['p14']}}}trim")
+            if ms(trim, "st"):
+                o["trimStart"] = round(ms(trim, "st"), 2)
+            if ms(trim, "end"):
+                # PowerPoint keeps how much is cut from the end: an end time when the file says how long it is.
+                length = media_duration(target.blob, ext)
+                end = length - ms(trim, "end") if length else 0
+                if end > (o.get("trimStart") or 0) + 0.1:
+                    o["trimEnd"] = round(end, 2)
+            fade = p14.find(f"{{{NS['p14']}}}fade")
+            for key, attr in (("fadeIn", "in"), ("fadeOut", "out")):
+                if ms(fade, attr):
+                    o[key] = round(min(60, ms(fade, attr)), 2)
+            marks = [{"name": (bm.get("name") or "")[:40], "t": round(ms(bm, "time"), 2)} for bm in p14.iter(f"{{{NS['p14']}}}bmk") if (bm.get("time") or "").isdigit()]
+            if marks:
+                o["bookmarks"] = marks[:32]
+        self.deck.stats["media"] += 1
+        return o
 
     def model3d(self, data, b, spid, part, nv):
         """A 3D model: its GLB file, how PowerPoint turned it, and the picture PowerPoint drew of it (the poster)."""
@@ -1573,6 +1681,22 @@ class SlideReader:
         notes = notes_text(self.slide)
         if notes:
             slide["notes"] = notes
+        # 再生 options from the timing, on the videos and sounds they name.
+        by_id = {o["id"]: o for o in self.objects}
+        for spid, opts in media_settings(self.slide._element).items():
+            o = by_id.get(self.by_spid.get(spid, ""))
+            if not o or o.get("kind") not in ("video", "audio"):
+                continue
+            if "volume" in opts:
+                o["volume"] = opts["volume"]
+            if opts.get("loop"):
+                o["loop"] = True
+            if opts.get("hideStopped"):
+                o["hideIdle" if o["kind"] == "video" else "hideIcon"] = True
+            if o["kind"] == "audio" and opts.get("across"):
+                o["across"] = opts["across"]
+            if o["kind"] == "video" and opts.get("fullscreen"):
+                o["fullscreen"] = True
         if self.objects:
             slide["elements"] = self.objects
         timeline = timeline_of(self.slide._element, self.by_spid, self.deck)
@@ -1911,6 +2035,13 @@ def timeline_of(slide_el, by_spid, deck: Deck) -> list[dict[str, Any]]:
                 entry["dir"] = WIPE_DIRS[sub]
         elif cls == "emph":
             entry.update({"cls": "em", "fx": EMPHASES.get(preset, "pulse")})
+        elif cls == "mediacall":
+            # 再生・一時停止・停止 of a video or a sound (the engine keeps them only on media).
+            fx = {1: "play", 2: "pause", 3: "stop"}.get(preset)
+            if not fx:
+                continue
+            entry.update({"cls": "media", "fx": fx})
+            durs = []
         elif cls == "path":
             motion = next((m for m in ctn.iter(P + "animMotion")), None)
             pts = path_points(motion.get("path", "") if motion is not None else "", deck)
@@ -1928,6 +2059,41 @@ def timeline_of(slide_el, by_spid, deck: Deck) -> list[dict[str, Any]]:
         out.append(entry)
     if len(out) > 5000:
         raise ValueError("アニメーションが5000件を超えています。")
+    return out
+
+
+def media_settings(slide_el) -> dict[str, dict[str, Any]]:
+    """
+    The 再生 options PowerPoint keeps in a slide's timing for each video and sound (by shape id): volume, play across
+    slides, hide while not playing, loop until stopped, play full screen.
+    """
+    timing = slide_el.find(P + "timing")
+    out: dict[str, dict[str, Any]] = {}
+    if timing is None:
+        return out
+    for holder in [*timing.iter(P + "video"), *timing.iter(P + "audio")]:
+        node = holder.find(P + "cMediaNode")
+        tgt = node.find(f"{P}tgtEl/{P}spTgt") if node is not None else None
+        spid = tgt.get("spid") if tgt is not None else None
+        if not spid:
+            continue
+        opts: dict[str, Any] = {}
+        vol = node.get("vol") or ""
+        if node.get("mute") in ("1", "true"):
+            opts["volume"] = 0
+        elif vol.isdigit() and int(vol) < 100000:
+            opts["volume"] = round(int(vol) / 100000, 2)
+        n = node.get("numSld") or ""
+        if n.isdigit() and int(n) > 1:
+            opts["across"] = min(999, int(n))
+        if node.get("showWhenStopped") in ("0", "false"):
+            opts["hideStopped"] = True
+        ctn = node.find(P + "cTn")
+        if ctn is not None and ctn.get("repeatCount") == "indefinite":
+            opts["loop"] = True
+        if local(holder) == "video" and holder.get("fullScrn") in ("1", "true"):
+            opts["fullscreen"] = True
+        out[spid] = opts
     return out
 
 

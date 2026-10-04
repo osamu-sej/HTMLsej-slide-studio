@@ -41,3 +41,9 @@ test("normalizeQat: known commands and safe ribbon references only, no repeats, 
   assert.equal(normalizeQat({ items: Array.from({ length: 50 }, (_, i) => ({ ref: `home|g|c${i}` })) }).items.length, 30);
   assert.deepEqual(normalizeQat({ show: true, items: [] }).items, [], "an emptied toolbar stays empty");
 });
+
+test("a toolbar saved with a ribbon button's old tooltip still finds it", () => {
+  const qat = normalizeQat({ show: true, items: [{ ref: "view|表示/非表示|1cmごとの線を表示", label: "グリッド線" }, { ref: "view|表示/非表示|0.25cmごとに吸着", label: "吸着" }] });
+  assert.deepEqual(qat.items.map((it) => it.ref), ["view|表示/非表示|グリッド線を表示（間隔はグリッドとガイドの設定で）", "view|表示/非表示|グリッド線に吸着（間隔はグリッドとガイドの設定で）"]);
+  assert.deepEqual(qat.items.map((it) => it.label), ["グリッド線", "吸着"], "its label stays");
+});

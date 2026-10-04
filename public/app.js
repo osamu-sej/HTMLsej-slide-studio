@@ -903,7 +903,7 @@ async function mediaBlob(src) {
 }
 
 /** Every photo, video and animation a slide uses: its own media and the objects placed on it. */
-const mediaSources = (slide) => [slide.media?.src, slide.background?.image, ...(slide.elements || []).map((o) => o?.src)].filter((src) => typeof src === "string" && src);
+const mediaSources = (slide) => [slide.media?.src, slide.background?.image, ...(slide.elements || []).flatMap((o) => [o?.src, o?.fillImg])].filter((src) => typeof src === "string" && src);
 // Bumped when a browser-kept file becomes available, so thumbnails drawn without it are drawn again.
 let mediaEpoch = 0;
 
@@ -933,6 +933,9 @@ async function storeInlineMedia(deck) {
     for (const o of slide.elements || []) {
       if (o?.src?.startsWith("data:")) {
         try { o.src = await putMedia(await dataUrlToBlob(o.src), o.fileName || ""); } catch { /* keep the data URL */ }
+      }
+      if (o?.fillImg?.startsWith("data:")) {
+        try { o.fillImg = await putMedia(await dataUrlToBlob(o.fillImg), "図形の塗りつぶし"); } catch { /* keep the data URL */ }
       }
     }
     if (slide.background?.image?.startsWith("data:")) {
@@ -5891,6 +5894,12 @@ async function portableDeck() {
           o.src = await blobToDataUrl(blob);
           bytes += blob.size;
         }
+        // 図で塗りつぶし: the shape's picture too (without it the shape keeps its colour).
+        if (o.fillImg?.startsWith("asset:")) await addAsset(o.fillImg.slice(6));
+        if (o.fillImg?.startsWith("idb:")) {
+          const blob = await mediaBlob(o.fillImg).catch(() => null);
+          if (blob) { o.fillImg = await blobToDataUrl(blob); bytes += blob.size; } else { delete o.fillImg; delete o.fillTile; if (!missing.includes(index + 1)) missing.push(index + 1); }
+        }
         kept.push(o);
       }
       slide.elements = kept;
@@ -6243,7 +6252,7 @@ function importCallout() {
   const close = h("button", { class: "btn btn-ghost btn-icon", type: "button", title: "閉じる", onclick: () => { state.imported = null; renderStage(); } }, "✕");
   if (fidelity === "exact") {
     const s = state.imported.stats || {};
-    const notes = [s.hidden && `非表示のスライド${s.hidden}枚も編集用に保持しています`, s.unsupported && `再現できない要素が${s.unsupported}個あります。原本との照合が必要です`].filter(Boolean);
+    const notes = [s.hidden && `非表示のスライド${s.hidden}枚も編集用に保持しています`, s.media && `ビデオ・オーディオ${s.media}個は再生できる形で取り込みました（トリミング・フェード・ブックマークも）`, s.unsupported && `再現できない要素が${s.unsupported}個あります。原本との照合が必要です`].filter(Boolean);
     const auto = state.imported.auto;
     const editAnimations = h("button", { class: "btn btn-ghost", type: "button", title: "動き（自動の動き・アニメーション・インタラクション）をアニメーション ウィンドウで見る・直す", onclick: () => { if (state.view !== "single") setView("single"); editorUi.showTab("animation", { open: true }); setPanel("anim"); } }, "アニメーションを編集");
     if (auto) {
@@ -6653,6 +6662,8 @@ function bind() {
     if (state.mode === "edit" && state.deck && !document.querySelector("dialog[open]")) {
       if (meta && event.key === "F1") { event.preventDefault(); editorUi.toggleRibbon(); return; }
       if (meta && !event.shiftKey && ["f", "h"].includes(event.key.toLowerCase()) && !document.activeElement?.isContentEditable) { event.preventDefault(); openReplace(); return; }
+      // フォント (⇧⌘F, as PowerPoint's Ctrl+Shift+F), also while typing.
+      if (meta && event.shiftKey && event.key.toLowerCase() === "f" && state.view === "single" && !isFinal(state.deck) && editor.textState()) { event.preventDefault(); editorUi.fontDialog(); return; }
       if (!typing && shell.zoomKey(event)) { event.preventDefault(); return; }
       if (meta && event.key.toLowerCase() === "m" && !typing) { event.preventDefault(); openTypeDialog("insert"); return; }
       if (document.activeElement === $("filmstrip") && filmKey(event)) { event.preventDefault(); return; }

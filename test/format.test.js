@@ -213,3 +213,47 @@ test("セルのサイズ: rows (or columns) set in pixels, the table growing by 
   assert.deepEqual(narrow.cols, [0.5, 0.5]);
   assert.equal(ops.tableSetSize(t, "rows", 0, 0, 2).rows.length, 3, "never below the smallest size");
 });
+
+test("図で塗りつぶし: a picture fills the shape (cut to its outline), stretched or tiled; only real pictures", async () => {
+  const { E } = await loadEngine();
+  const o = E.normalizeObject({ id: "s1", kind: "shape", shape: "ellipse", x: 100, y: 100, w: 400, h: 200, fill: "#dce4f2", fillImg: "data:image/png;base64,AAAA", fillTile: true });
+  assert.equal(o.fillImg, "data:image/png;base64,AAAA");
+  assert.equal(o.fillTile, true);
+  assert.equal(E.normalizeObject({ id: "s2", kind: "shape", shape: "rect", fillImg: "javascript:alert(1)", fillTile: true }).fillImg, undefined, "only pictures");
+  assert.equal(E.normalizeObject({ id: "s3", kind: "shape", shape: "rect", fillImg: "data:text/html,x" }).fillImg, undefined);
+  const draw = (obj, ctx = {}) => { const slide = { type: "blank", elements: [obj] }; return E.render(slide, { mode: "present", index: 0, deck: { slides: [slide], theme: "sej" }, ...ctx }); };
+  const tiled = draw(o);
+  const pattern = tiled.querySelector(".hs-obj pattern");
+  assert.ok(pattern, "a pattern of the picture");
+  assert.equal(pattern.getAttribute("width"), "160", "tiles");
+  assert.equal(pattern.querySelector("image").getAttribute("href"), "data:image/png;base64,AAAA");
+  assert.equal(pattern.querySelector("image").getAttribute("preserveAspectRatio"), "xMidYMid slice");
+  assert.equal(tiled.querySelector(".hs-obj path").getAttribute("fill"), `url(#${pattern.getAttribute("id")})`, "the outline is filled with it");
+  const stretched = draw({ ...o, fillTile: undefined });
+  assert.equal(stretched.querySelector(".hs-obj pattern").getAttribute("width"), "400", "one picture over the whole shape");
+  // A picture kept in this browser is drawn once its address is known (and left out until then).
+  const stored = E.normalizeObject({ ...o, fillImg: "idb:abc" });
+  assert.equal(draw(stored).querySelector(".hs-obj pattern"), null);
+  assert.equal(draw(stored, { mediaUrls: { "idb:abc": "blob:x" } }).querySelector(".hs-obj pattern image").getAttribute("href"), "blob:x");
+});
+
+test("段落 → インデント: before the text, a first line indented or hanging; kept by the sanitizer, read back", async () => {
+  const { E, window } = await loadEngine();
+  globalThis.document = window.document;
+  try {
+    const hanging = ops.setIndent(E, '<p>一つ目</p><p style="text-align: center">二つ目</p>', { left: 56.69, first: -28.35 });
+    assert.match(hanging, /<p style="[^"]*margin-left: ?56\.69px[^"]*text-indent: ?-28\.35px[^"]*">一つ目<\/p>/);
+    assert.match(hanging, /text-align: ?center[^"]*margin-left: ?56\.69px/, "the paragraph keeps its alignment");
+    assert.deepEqual({ ...ops.indentOf(hanging) }, { left: 56.69, first: -28.35 });
+    assert.equal(ops.setIndent(E, hanging, { left: 0, first: 0 }), '<p>一つ目</p><p style="text-align: center">二つ目</p>', "0 takes them away");
+    assert.match(ops.setIndent(E, "<ul><li>a</li></ul>", { left: 20, first: 10 }), /<li style="margin-left: ?20px; text-indent: ?10px">a<\/li>/);
+    assert.equal(E.sanitizeRich('<p style="margin-left: 99999px; text-indent: abc">x</p>'), "<p>x</p>", "only lengths in range");
+    // フォント → すべて大文字・小型英大文字 on the box.
+    const o = E.normalizeObject({ id: "t", kind: "text", x: 0, y: 0, w: 400, h: 100, text: "<p>Seven</p>", caps: "small" });
+    assert.equal(o.caps, "small");
+    assert.equal(E.normalizeObject({ id: "t2", kind: "text", text: "<p>x</p>", caps: "huge" }).caps, undefined);
+    const slide = { type: "blank", elements: [o] };
+    const el = E.render(slide, { mode: "edit", index: 0, deck: { slides: [slide], theme: "sej" } });
+    assert.match(el.querySelector(".hs-obj-tx").getAttribute("style"), /font-variant: ?small-caps/);
+  } finally { delete globalThis.document; }
+});

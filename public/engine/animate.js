@@ -171,6 +171,8 @@
     const objectIds = new Set(objects.map((o) => o.id));
     const groupIds = new Set(objects.map((o) => o.group).filter(Boolean));
     const kinds = new Map(objects.map((o) => [o.id, o.kind]));
+    // ブックマーク時: a trigger "id@mark" names a bookmark of a video or a sound on the slide.
+    const marks = new Map(objects.filter((o) => (o.kind === "video" || o.kind === "audio") && Array.isArray(o.bookmarks)).map((o) => [o.id, new Set(o.bookmarks.map((b) => b?.id).filter(Boolean))]));
     const seen = new Set();
     const out = [];
     for (const raw of Array.isArray(list) ? list : []) {
@@ -200,7 +202,10 @@
       if (EASES[raw.ease] && raw.ease !== "auto") entry.ease = raw.ease;
       if (BY[raw.by] && raw.by !== "all" && ["in", "out", "em"].includes(cls) && !def.custom && !def.html && (objectIds.has(el) ? ["shape", "text"].includes(kinds.get(el)) : LAYOUT_TARGET.test(el))) entry.by = raw.by;
       if (raw.by === "item" && ["in", "out", "em"].includes(cls) && !def.custom && !def.html && kinds.get(el) === "smartart") entry.by = "item";
-      if (typeof raw.trigger === "string" && objectIds.has(raw.trigger)) entry.trigger = raw.trigger;
+      if (typeof raw.trigger === "string" && /^[^@]+(@[A-Za-z0-9_-]{1,16})?$/.test(raw.trigger)) {
+        const [tid, mark] = raw.trigger.split("@");
+        if (objectIds.has(tid) && (!mark || marks.get(tid)?.has(mark))) entry.trigger = raw.trigger;
+      }
       if (cls === "path") {
         const pts = (Array.isArray(raw.path?.pts) ? raw.path.pts : []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))).slice(0, 2000).map(([x, y]) => [Math.round(num(x, -6000, 6000, 0) * 10) / 10, Math.round(num(y, -6000, 6000, 0) * 10) / 10]);
         if (pts.length < 2) continue;
@@ -1192,7 +1197,20 @@
     state.running = [];
   }
 
-  // A trigger object plays its own sequence, one group per click on it, and does not move the slide on.
+  /** Play a trigger's next group (after its last group it starts over, as a button pressed again). */
+  function fireTrigger(state, key) {
+    const seq = state.plan.triggers.get(key);
+    if (!seq) return false;
+    const at = state.triggerAt.get(key) || 0;
+    const index = at >= seq.length ? 0 : at;
+    if (at >= seq.length) for (const g of seq) for (const item of g.items) for (const part of targetsOf(state.slideEl, state.plan, item.e.el).parts) for (const a of part.fx.getAnimations?.() || []) a.cancel();
+    state.triggerAt.set(key, index + 1);
+    runGroup(state, seq[index]);
+    return true;
+  }
+
+  // A trigger object plays its own sequence, one group per click on it, and does not move the slide on; a
+  // bookmark trigger ("id@mark") plays its sequence as the video or sound passes that bookmark.
   function bindTriggers(state) {
     const slideEl = state.slideEl;
     if (!state.plan.triggers.size || slideEl.dataset.hsTriggers) return;
@@ -1200,17 +1218,27 @@
     slideEl.addEventListener("click", (event) => {
       const node = event.target.closest?.(".hs-obj[data-trigger]");
       if (!node || !slideEl.contains(node)) return;
-      const seq = state.plan.triggers.get(node.dataset.el);
-      if (!seq) return;
+      if (!state.plan.triggers.has(node.dataset.el)) return;
       event.stopPropagation();
       event.preventDefault();
-      const at = state.triggerAt.get(node.dataset.el) || 0;
-      // After its last group a trigger starts over (as a button pressed again).
-      const index = at >= seq.length ? 0 : at;
-      if (at >= seq.length) for (const g of seq) for (const item of g.items) for (const part of targetsOf(slideEl, state.plan, item.e.el).parts) for (const a of part.fx.getAnimations?.() || []) a.cancel();
-      state.triggerAt.set(node.dataset.el, index + 1);
-      runGroup(state, seq[index]);
+      fireTrigger(state, node.dataset.el);
     });
+    for (const key of state.plan.triggers.keys()) {
+      const [id, mark] = key.split("@");
+      if (!mark) continue;
+      const media = slideEl.querySelector(`.hs-obj[data-el="${cssId(id)}"] :is(video, audio)`);
+      const t = media && E.mediaMarks ? E.mediaMarks(media).find((b) => b.id === mark)?.t : null;
+      if (t == null) continue;
+      let last = media.currentTime;
+      media.addEventListener("play", () => { last = media.currentTime - 0.001; });
+      media.addEventListener("seeked", () => { last = media.currentTime; });
+      media.addEventListener("timeupdate", () => {
+        const now = media.currentTime;
+        // Passing the moment while playing (not a jump past it) plays the sequence.
+        if (!media.seeking && last < t && now >= t && now - last < 1.5) fireTrigger(state, key);
+        last = now;
+      });
+    }
   }
 
   // ---------------------------------------------------------------- mounting on a rendered slide
@@ -1230,7 +1258,7 @@
     slideEl.dataset.steps = String(lsteps + plan.clicks);
     slideEl.dataset.timeline = String(plan.list.length);
     if (!ctx.live) return;
-    for (const id of plan.triggers.keys()) slideEl.querySelector(`.hs-obj[data-el="${cssId(id)}"]`)?.setAttribute("data-trigger", "");
+    for (const id of plan.triggers.keys()) if (!id.includes("@")) slideEl.querySelector(`.hs-obj[data-el="${cssId(id)}"]`)?.setAttribute("data-trigger", "");
     for (const target of firstEntrances(plan)) {
       for (const part of targetsOf(slideEl, plan, target).parts) part.fx.classList.add("hs-anim-hide");
     }

@@ -225,6 +225,32 @@ await step("deleting the custom show the settings use: the settings go back to a
   assert(d.show?.kiosk, "the rest of the settings stay");
 });
 
+await step("メディア コントロールを表示: off in the settings, the show has no video controls or sound bars; on again", async () => {
+  await tab("スライド ショー");
+  await ribbonBtn("の設定");
+  await page.waitForSelector(".sh-settings[open]");
+  assert(await page.isChecked('.sh-settings input[name="mediaControls"]'), "on by default");
+  await page.check('.sh-settings input[name="kind"][value="speaker"]');
+  await page.uncheck('.sh-settings input[name="loop"]');
+  await page.uncheck('.sh-settings input[name="mediaControls"]');
+  await page.click(".sh-settings .sh-ok");
+  await page.waitForTimeout(300);
+  assert((await deck()).show?.noControls === true, `saved: ${JSON.stringify((await deck()).show)}`);
+  await ribbonBtn("このスライド");
+  await page.waitForSelector("#presenter .hs-player-slide");
+  await page.waitForTimeout(400);
+  assert(await page.locator("#presenter .hs-player-slide .hs-no-controls, #presenter .hs-player-slide.hs-no-controls").count(), "the slide is told");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+  await ribbonBtn("の設定");
+  await page.waitForSelector(".sh-settings[open]");
+  assert(!(await page.isChecked('.sh-settings input[name="mediaControls"]')), "kept off");
+  await page.check('.sh-settings input[name="mediaControls"]');
+  await page.click(".sh-settings .sh-ok");
+  await page.waitForTimeout(300);
+  assert(!(await deck()).show?.noControls, "on again");
+});
+
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");
 await browser.close();
 process.exit(errors.length ? 1 : 0);

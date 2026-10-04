@@ -431,3 +431,61 @@ class DistributedAlignTest(unittest.TestCase):
         imported = by_text(deck["slideData"][0], "均等割り付け")
         self.assertEqual(imported["align"], "distributed")
         self.assertIn('style="text-align: justify; text-align-last: justify"', imported["text"])
+
+
+class MediaTest(unittest.TestCase):
+    """PowerPoint's videos come over playable, with their poster, trim, fades, bookmarks and volume."""
+
+    @staticmethod
+    def mp4(seconds):
+        import struct
+        ftyp = struct.pack(">I4s4sI4s", 20, b"ftyp", b"isom", 0, b"isom")
+        body = bytes(4) + struct.pack(">IIII", 0, 0, 1000, int(seconds * 1000)) + bytes(80)
+        mvhd = struct.pack(">I4s", 8 + len(body), b"mvhd") + body
+        return ftyp + struct.pack(">I4s", 8 + len(mvhd), b"moov") + mvhd
+
+    def deck_with(self, blob, mime, suffix=".mp4"):
+        import tempfile
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        with tempfile.NamedTemporaryFile(suffix=suffix) as f:
+            f.write(blob)
+            f.flush()
+            pic = slide.shapes.add_movie(f.name, Inches(1), Inches(1), Inches(4), Inches(2.25), mime_type=mime)
+        p14 = "http://schemas.microsoft.com/office/powerpoint/2010/main"
+        media = next(pic._element.iter(f"{{{p14}}}media"), None)
+        if media is not None:
+            for xml in (f'<p14:trim xmlns:p14="{p14}" st="1000" end="1500"/>', f'<p14:fade xmlns:p14="{p14}" in="500" out="250"/>',
+                        f'<p14:bmkLst xmlns:p14="{p14}"><p14:bmk name="サビ" time="2500"/><p14:bmk name="終わり" time="4000"/></p14:bmkLst>'):
+                media.append(etree.fromstring(xml))
+        out = io.BytesIO()
+        prs.save(out)
+        return read_pptx_exact(out.getvalue())
+
+    def test_an_mp4_video_plays_with_its_settings(self):
+        deck = self.deck_with(self.mp4(6), "video/mp4")
+        video = next(o for o in deck["slideData"][0]["elements"] if o["kind"] == "video")
+        self.assertTrue(video["src"].startswith("data:video/mp4;base64,"))
+        self.assertTrue(video["fileName"].endswith(".mp4"))
+        self.assertEqual((video["autoplay"], video["loop"], video["muted"]), (False, False, False), "plays on a click, with sound")
+        self.assertEqual(video["trimStart"], 1.0)
+        self.assertEqual(video["trimEnd"], 4.5, "6 s long, 1.5 s cut from the end")
+        self.assertEqual((video["fadeIn"], video["fadeOut"]), (0.5, 0.25))
+        self.assertEqual(video["bookmarks"], [{"name": "サビ", "t": 2.5}, {"name": "終わり", "t": 4.0}])
+        self.assertEqual(video.get("volume"), 0.8, "python-pptx's timing keeps PowerPoint's 80% volume")
+        self.assertTrue(video.get("poster", "").startswith("data:image/"), "the poster frame")
+        self.assertEqual(deck["stats"]["media"], 1)
+
+    def test_a_video_browsers_cannot_play_stays_its_picture(self):
+        deck = self.deck_with(b"0&\xb2u\x8ef\xcf\x11" + bytes(64), "video/x-ms-wmv", ".wmv")
+        kinds = [o["kind"] for o in deck["slideData"][0]["elements"]]
+        self.assertNotIn("video", kinds)
+        self.assertIn("image", kinds, "the poster stays on the slide")
+
+    def test_media_lengths_from_their_headers(self):
+        import struct
+        self.assertAlmostEqual(pptx_exact.media_duration(self.mp4(12.5), ".mp4"), 12.5)
+        rate = 8000 * 2
+        wav = b"RIFF" + struct.pack("<I", 36 + rate * 3) + b"WAVE" + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 8000, rate, 2, 16) + b"data" + struct.pack("<I", rate * 3) + bytes(rate * 3)
+        self.assertAlmostEqual(pptx_exact.media_duration(wav, ".wav"), 3.0)
+        self.assertIsNone(pptx_exact.media_duration(b"nothing", ".mp3"))

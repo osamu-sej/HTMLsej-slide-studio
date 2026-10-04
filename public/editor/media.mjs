@@ -348,6 +348,84 @@ export function createMedia(editor, app, kit) {
     sync();
   }
 
+  // ---------------------------------------------------------------- ブックマーク
+
+  const markId = () => `b${Date.now().toString(36).slice(-5)}${Math.random().toString(36).slice(2, 5)}`;
+  /** Keep the media's bookmarks; an animation started by a bookmark that is gone goes back to the click order. */
+  function saveMarks(id, marks) {
+    const clean = E.normalizeBookmarks(marks);
+    const keep = new Set(clean.map((b) => `${id}@${b.id}`));
+    const list = editor.objects().map((x) => (x.id === id ? { ...x, bookmarks: clean.length ? clean : undefined } : x));
+    const timeline = (app.slide()?.timeline || []).map((e) => {
+      if (!String(e.trigger || "").startsWith(`${id}@`) || keep.has(e.trigger)) return e;
+      const { trigger: _, ...rest } = e;
+      return rest;
+    });
+    editor.commit(list, { timeline });
+  }
+  /** ブックマークの追加: while the preview plays, a bookmark at that moment; otherwise the bookmark editor. */
+  function addBookmark() {
+    const o = current();
+    if (!o) return;
+    if (player?.id === o.id && Number.isFinite(player.el.currentTime)) {
+      const t = Math.round(player.el.currentTime * 100) / 100;
+      const marks = [...(o.bookmarks || []), { id: markId(), t, name: "" }];
+      saveMarks(o.id, marks);
+      app.toast(`${fmt(t)} にブックマークを付けました（アニメーションの「トリガー → ブックマーク時」で使えます）`);
+      return;
+    }
+    bookmarkDialog();
+  }
+  function removeMenu() {
+    const o = current();
+    const marks = o?.bookmarks || [];
+    if (!marks.length) return menu([{ label: "（ブックマークがありません）", disabled: true }]);
+    return menu([
+      { head: "ブックマークの削除" },
+      ...marks.map((b) => ({ label: `${b.name}（${fmt(b.t)}）`, icon: "trash", run: () => saveMarks(o.id, marks.filter((x) => x.id !== b.id)) })),
+      "-",
+      { label: "すべて削除", icon: "trash", run: () => saveMarks(o.id, []) },
+    ]);
+  }
+  /** The bookmarks of the selected media: play or seek to a moment, add one there, name, jump to and remove each. */
+  function bookmarkDialog() {
+    const o = current();
+    if (!o) return;
+    const url = urlOf(o);
+    if (!url) { app.toast("このブラウザにメディアのデータがありません"); return; }
+    const el = h(o.kind === "video" ? "video" : "audio", { src: url, preload: "auto", class: "trim-media", controls: true, playsinline: true });
+    let marks = (o.bookmarks || []).map((b) => ({ ...b }));
+    const listEl = h("ol", { class: "bm-list" });
+    const draw = () => {
+      marks.sort((a, b) => a.t - b.t);
+      listEl.replaceChildren(...(marks.length ? marks.map((b) => h("li", { class: "bm-row", "data-mark": b.id },
+        h("button", { type: "button", class: "btn btn-sm bm-go", title: "この位置へ移動して再生", onclick: () => { el.currentTime = b.t; el.play().catch(() => {}); } }, `▶ ${fmt(b.t)}`),
+        h("input", { type: "text", class: "bm-name", value: b.name || "", placeholder: "名前", "aria-label": "ブックマークの名前", maxlength: 40, oninput: (event) => { b.name = event.target.value; } }),
+        h("button", { type: "button", class: "btn btn-sm btn-ghost bm-del", title: "このブックマークを削除", onclick: () => { marks = marks.filter((x) => x !== b); draw(); } }, "削除")))
+        : [h("li", { class: "hint bm-empty" }, "まだブックマークがありません。再生かシークで場面を選んで「現在の位置に追加」を押します。")]));
+    };
+    const add = () => {
+      const t = Math.round((el.currentTime || 0) * 100) / 100;
+      if (marks.some((b) => Math.abs(b.t - t) < 0.05)) { app.toast("その位置にはもうブックマークがあります"); return; }
+      marks.push({ id: markId(), t, name: `ブックマーク ${marks.length + 1}` });
+      draw();
+    };
+    const dialog = h("dialog", { class: "bm-dialog", "aria-label": "ブックマーク" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "ブックマーク"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body" }, el,
+        h("p", { class: "hint" }, "発表では、オーディオのバーとビデオの上に印が出て、クリックでその位置へ移ります（Alt+End／Alt+Home で次・前）。アニメーションを「トリガー → ブックマーク時」にすると、その場面で動きます。"),
+        listEl),
+      h("div", { class: "dialog-foot" },
+        h("button", { type: "button", class: "btn bm-add", onclick: add }, "＋ 現在の位置に追加"),
+        h("span", { style: { flex: "1" } }),
+        h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"),
+        h("button", { type: "button", class: "btn btn-primary bm-ok", onclick: () => { saveMarks(o.id, marks); dialog.close(); } }, "OK")));
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => { el.pause(); dialog.remove(); });
+    draw();
+    dialog.showModal();
+  }
+
   // ---------------------------------------------------------------- how it starts (開始)
 
   const mediaPlays = (o) => (app.slide()?.timeline || []).filter((e) => e.cls === "media" && e.fx === "play" && e.el === o.id && !e.trigger);
@@ -393,6 +471,10 @@ export function createMedia(editor, app, kit) {
     const preBtn = btn("play", "再生", "この画面で再生して確かめる（トリミング・フェード・音量のとおり）。もう一度で停止", () => preview(), { big: true, enabled: () => Boolean(current()), pressed: () => Boolean(player && player.id === current()?.id) });
     return [
       group("プレビュー", preBtn),
+      group("ブックマーク",
+        btn("pin", "ブックマーク|の追加", "再生中ならその位置に、止まっていればブックマークの画面で場面を選んで付ける（発表で移動でき、アニメーションのトリガーにも使える）", () => addBookmark(), { big: true, enabled: () => Boolean(current()) }),
+        col(btn("bullet", "ブックマーク…", "ブックマークの一覧：名前・移動・削除", () => bookmarkDialog(), { enabled: () => Boolean(current()) }),
+          drop("trash", "ブックマークの削除", "ブックマークを外す（そのブックマークで始まるアニメーションはクリックの順に戻る）", () => removeMenu(), { enabled: () => Boolean(current()?.bookmarks?.length) }))),
       group("編集",
         btn("crop", "トリミング", "再生する範囲（開始と終了）を決める", () => trimDialog(), { big: true, enabled: () => Boolean(current()) }),
         col(seconds("フェードイン", "fadeIn", "フェードインの時間（秒）"), seconds("フェードアウト", "fadeOut", "フェードアウトの時間（秒）"))),

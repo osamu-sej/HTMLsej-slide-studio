@@ -6,7 +6,7 @@
 import { userName } from "./people.mjs";
 
 const newClientId = () => `v${(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/[^a-z0-9]/gi, "").slice(0, 20)}`;
-const mediaIds = (slides) => [...new Set((slides || []).flatMap((s) => [s?.media?.src, s?.background?.image, ...(s?.elements || []).map((o) => o?.src)]).filter((src) => typeof src === "string" && src.startsWith("idb:")))];
+const mediaIds = (slides) => [...new Set((slides || []).flatMap((s) => [s?.media?.src, s?.background?.image, ...(s?.elements || []).flatMap((o) => [o?.src, o?.fillImg])]).filter((src) => typeof src === "string" && src.startsWith("idb:")))];
 const api = (id, rest = "") => `/api/rooms/${encodeURIComponent(id)}${rest}`;
 
 /** The link as a QR code (an SVG), for phones to join. */

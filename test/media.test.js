@@ -74,3 +74,23 @@ test("再生・一時停止・停止 animations work on a sound; the server and 
   assert.equal(reset.slides[1].elements[0].autoplay, false);
   assert.equal(reset.slides[1].elements[0].across, undefined);
 });
+
+test("ブックマーク: kept in time order with ids and names; a jump list for the show", async () => {
+  const { E } = await loadEngine();
+  const o = E.normalizeObject({ id: "v1", kind: "video", x: 0, y: 0, w: 640, h: 360, src: "https://example.com/v.mp4",
+    bookmarks: [{ t: 12.346, name: "  まとめ  " }, { id: "m1", t: 3, name: "" }, { id: "m1", t: 7 }, { t: "x" }, null, { id: "bad id!", t: 99999999 }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(o.bookmarks.map((b) => b.t))), [3, 7, 12.35, 86400], "sorted, rounded, in range, nonsense dropped");
+  assert.equal(o.bookmarks[0].id, "m1");
+  assert.notEqual(o.bookmarks[1].id, "m1", "ids stay unique");
+  assert.equal(o.bookmarks[0].name, "ブックマーク 1", "an empty name gets one");
+  assert.equal(o.bookmarks[2].name, "まとめ");
+  assert.match(o.bookmarks[3].id, /^[A-Za-z0-9_-]{1,16}$/);
+  assert.equal(JSON.stringify(E.normalizeObject({ ...o }).bookmarks), JSON.stringify(o.bookmarks), "normalizing again changes nothing");
+  assert.equal(E.normalizeObject({ id: "v2", kind: "video", src: "https://example.com/v.mp4", bookmarks: [] }).bookmarks, undefined);
+  const slide = { type: "blank", elements: [o] };
+  const live = E.render(slide, { mode: "present", index: 0, deck: { slides: [slide], theme: "sej" } });
+  assert.equal(live.querySelectorAll(".hs-media-marks .hs-mark").length, 4, "dots over the video while presenting");
+  assert.equal(E.mediaMarks(live.querySelector("video")).length, 4);
+  const edit = E.render(slide, { mode: "edit", index: 0, deck: { slides: [slide], theme: "sej" } });
+  assert.equal(edit.querySelector(".hs-media-marks"), null, "not while editing");
+});

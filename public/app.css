@@ -863,6 +863,11 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .ed-eyedrop-swatch::before { content: ""; position: absolute; left: 5px; top: 4px; width: 16px; height: 16px; border-radius: 3px; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .18); }
 .rb-eyedrop { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 6px; padding: 5px 6px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; cursor: pointer; }
 .rb-eyedrop:hover { background: var(--canvas); }
+/* 図形の塗りつぶし → 図・並べて表示・図を外す. */
+.rb-extra { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 6px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; cursor: pointer; }
+.rb-extra:hover:not(:disabled) { background: var(--canvas); }
+.rb-extra.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.rb-extra:disabled { opacity: .45; cursor: default; }
 .tb-kind-hint { margin: -2px 0 6px; font-size: 11.5px; line-height: 1.55; }
 /* 箇条書き ▾ / 段落番号 ▾: the split button's menu half and the gallery of markers. */
 .rb-btn.rb-caret-only { width: 14px; min-width: 14px; padding: 0; margin-left: -3px; justify-content: center; }
@@ -1375,8 +1380,28 @@ body.is-final .film-item { -webkit-user-drag: none; }
 
 /* Sound and video (media.mjs): the recorder, trimming, the format pane's file name. */
 .fp-file { font-size: 12px; color: var(--muted); word-break: break-all; }
-.rec-dialog, .trim-dialog { width: min(560px, calc(100vw - 32px)); }
-.rec-dialog .dialog-body, .trim-dialog .dialog-body { display: flex; flex-direction: column; gap: 10px; }
+.rec-dialog, .trim-dialog, .bm-dialog { width: min(560px, calc(100vw - 32px)); }
+.rec-dialog .dialog-body, .trim-dialog .dialog-body, .bm-dialog .dialog-body { display: flex; flex-direction: column; gap: 10px; }
+/* ブックマーク (再生 tab): one row per bookmark — jump there, its name, remove. */
+.bm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; }
+.bm-row { display: flex; align-items: center; gap: 8px; }
+.bm-go { min-width: 84px; font-variant-numeric: tabular-nums; }
+.bm-name { flex: 1; min-width: 0; }
+/* フォント・段落・グリッドとガイド (dialogs). */
+.fmt-dialog { width: min(560px, calc(100vw - 32px)); }
+.fmt-body { display: flex; flex-direction: column; gap: 10px; }
+.fmt-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fmt-cols > fieldset:first-child, .fmt-cols > .hint { grid-column: 1 / -1; }
+.fmt-field { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.fmt-field > span:first-child { min-width: 9em; color: var(--muted); font-size: 12px; }
+.fmt-num { width: 90px; }
+.fmt-field select { min-width: 8em; }
+.fmt-cols > fieldset:not(:first-child) .fmt-field > span:first-child { min-width: 3em; }
+.fmt-colors { display: inline-flex; gap: 6px; }
+/* クイック レイアウト (グラフのデザイン): a small picture of each layout's elements. */
+.tb-layout-row { display: inline-flex; align-items: center; gap: 10px; }
+.tb-layout-row small { display: block; color: var(--muted); font-size: 11px; }
+.tb-layout-pic svg { display: block; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
 .rec-status { margin: 0; font-size: 13px; }
 .rec-row { display: flex; align-items: center; gap: 12px; }
 .rec-clock { font: 700 26px/1 ui-monospace, SFMono-Regular, Menlo, monospace; min-width: 5.5em; }

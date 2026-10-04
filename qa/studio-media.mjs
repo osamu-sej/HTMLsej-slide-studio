@@ -70,6 +70,12 @@ const ribbonField = async (label) => {
   throw new Error(`no ribbon field "${label}"`);
 };
 const slideIndex = 2;
+// Select an object from the 書式 pane's list (as the selection pane does).
+const pickObject = async (id) => {
+  if ((await page.getAttribute("#formatTab", "aria-selected")) !== "true") await page.click("#formatTab");
+  await page.locator(`#formatPane .fp-sel-list li[data-id="${id}"]`).click();
+  await page.waitForTimeout(200);
+};
 const sound = async () => (await deck()).slides[slideIndex].elements?.find((o) => o.kind === "audio");
 
 await page.goto(base);
@@ -208,6 +214,76 @@ await step("slide show: the sound starts by itself, its icon hidden, and keeps p
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500);
   assert(!(await page.evaluate(() => [...document.querySelectorAll("audio")].some((a) => !a.paused))), "ending the show stops it");
+});
+
+await step("再生 → ブックマーク: add, name, remove; トリガー → ブックマーク時 plays the title as the sound passes it in the show", async () => {
+  await page.locator(".film-item").nth(slideIndex).click();
+  await page.waitForTimeout(300);
+  const id = (await sound()).id;
+  await pickObject(id);
+  await page.waitForTimeout(200);
+  await tab("再生");
+  await ribbonBtn("ブックマーク…");
+  await page.waitForSelector(".bm-dialog[open]");
+  await page.waitForFunction(() => document.querySelector(".bm-dialog audio")?.readyState >= 1, null, { timeout: 8000 });
+  await page.evaluate(() => { document.querySelector(".bm-dialog audio").currentTime = 1.4; });
+  await page.waitForTimeout(200);
+  await page.click(".bm-dialog .bm-add");
+  await page.fill(".bm-dialog .bm-name", "サビ");
+  await shot("bookmarks");
+  await page.click(".bm-dialog .bm-ok");
+  await page.waitForTimeout(300);
+  let o = await sound();
+  assert(o.bookmarks?.length === 1 && Math.abs(o.bookmarks[0].t - 1.4) < 0.05 && o.bookmarks[0].name === "サビ", `the bookmark: ${JSON.stringify(o.bookmarks)}`);
+  // While the preview plays, ブックマークの追加 marks that moment; ブックマークの削除 takes one away.
+  await ribbonBtn("再生");
+  await page.waitForTimeout(500);
+  await ribbonBtn("ブックマークの追加");
+  await page.waitForTimeout(300);
+  await ribbonBtn("再生");
+  o = await sound();
+  assert(o.bookmarks.length === 2, `a bookmark at the playing moment: ${JSON.stringify(o.bookmarks)}`);
+  const extra = o.bookmarks.find((b) => b.name !== "サビ");
+  await ribbonBtn("ブックマークの削除");
+  await page.locator(`.rb-pop .rb-menu button:has-text("${extra.name}")`).first().click();
+  await page.waitForTimeout(300);
+  o = await sound();
+  assert(o.bookmarks.length === 1 && o.bookmarks[0].name === "サビ", `removed: ${JSON.stringify(o.bookmarks)}`);
+  // The title comes in when the sound reaches サビ (アニメーション → トリガー → ブックマーク時).
+  await tab("アニメーション");
+  if (!(await page.isVisible("#animPane:not([hidden])"))) await ribbonBtn("ウィンドウ");
+  await page.waitForSelector("#animPane:not([hidden])");
+  await page.click('#animPane button:has-text("＋ レイアウトの部品")');
+  await page.locator('.rb-pop .rb-menu button:has-text("タイトル")').first().click();
+  await page.waitForTimeout(400);
+  const key = `${id}@${o.bookmarks[0].id}`;
+  if (!(await page.locator('#animPane .an-details select[aria-label="トリガー"]').count())) await page.locator('#animPane .an-row:has-text("タイトル")').first().click();
+  await page.waitForSelector('#animPane .an-details select[aria-label="トリガー"]', { timeout: 5000 });
+  await page.locator('#animPane .an-details select[aria-label="トリガー"]').selectOption(key);
+  await page.waitForTimeout(400);
+  const entry = ((await deck()).slides[slideIndex].timeline || []).find((e) => e.el === "@title");
+  assert(entry?.trigger === key, `the title waits for the bookmark: ${JSON.stringify(entry)}`);
+  assert(/ブックマーク時：.*「サビ」/.test(await page.textContent("#animPane")), "the pane names the bookmark");
+  await tab("スライド ショー");
+  await ribbonBtn("このスライド");
+  await page.waitForSelector("#presenter .hs-player-slide audio", { state: "attached", timeout: 10000 });
+  assert(await page.locator("#presenter .hs-player-slide .hs-audio-track .hs-mark").count() === 1, "the bookmark's mark on the bar");
+  const titleSeen = () => page.evaluate(() => getComputedStyle(document.querySelector('#presenter .hs-player-slide [data-field="title"]')).visibility);
+  assert(await titleSeen() === "hidden", "the title waits for the bookmark");
+  await page.evaluate(() => { const a = document.querySelector("#presenter .hs-player-slide audio"); if (a.paused) window.SlideEngine.mediaPlay(a, { fromStart: true }); });
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#presenter .hs-player-slide [data-field="title"]')).visibility === "visible", null, { timeout: 6000 });
+  for (let i = 0; i < 4 && await page.isVisible("#presenter"); i += 1) { await page.keyboard.press("Escape"); await page.waitForTimeout(400); }
+  // Taking the bookmark away puts the title back in the click order.
+  await page.locator(".film-item").nth(slideIndex).click();
+  await page.waitForTimeout(300);
+  await pickObject(id);
+  await page.waitForSelector('.rb-tabs [role=tab]:text-is("再生")', { timeout: 5000 });
+  await tab("再生");
+  await ribbonBtn("ブックマークの削除");
+  await page.locator('.rb-pop .rb-menu button:has-text("すべて削除")').first().click();
+  await page.waitForTimeout(300);
+  const after = ((await deck()).slides[slideIndex].timeline || []).find((e) => e.el === "@title");
+  assert(after && !after.trigger && !(await sound()).bookmarks, `back to the click order: ${JSON.stringify(after)}`);
 });
 
 await step("挿入 → オーディオ → オーディオの録音: record, play back, insert", async () => {
