@@ -129,7 +129,9 @@ export function createFileInfo(app) {
     const final = isFinal(deck);
     const protect = h("div", { class: "fi-protect" }, h("b", {}, "プレゼンテーションの保護"),
       h("p", { class: "hint" }, final ? "この資料は最終版です。編集しないように設定されています。" : "最終版にすると、読む人が誤って変更しないように編集を止めます（メッセージ バーの「編集する」で戻せます）。"),
-      h("button", { type: "button", class: "btn btn-sm fi-final", onclick: () => { dialog.close(); app.setFinal(!final); } }, final ? "最終版を解除" : "最終版にする"));
+      h("button", { type: "button", class: "btn btn-sm fi-final", onclick: () => { dialog.close(); app.setFinal(!final); } }, final ? "最終版を解除" : "最終版にする"),
+      h("p", { class: "hint" }, "書き出すHTMLファイルをパスワードで保護し、パスワードを知っている人だけが開けるようにします。"),
+      h("button", { type: "button", class: "btn btn-sm fi-lock", onclick: () => { dialog.close(); app.exportLockedHtml(); } }, "パスワードを使用して暗号化…"));
     const dialog = h("dialog", { class: "fileinfo-dialog", "aria-label": "情報" },
       h("div", { class: "dialog-head" }, h("h3", {}, "情報（プロパティ）"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
       h("div", { class: "dialog-body fi-body" }, h("div", {}, fields), h("div", { class: "fi-side" }, protect, h("b", {}, "統計"), stats, inspectBox)),

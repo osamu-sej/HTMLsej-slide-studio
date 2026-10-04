@@ -40,6 +40,9 @@
 .hs-slide img, .hs-slide video, .hs-slide iframe { display: block; max-width: none; }
 
 .hs-decor { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.hs-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.hs-bg-img { position: absolute; inset: 0; background-position: center; background-size: cover; background-repeat: no-repeat; }
+.hs-bg-img.is-tiled { background-size: auto; background-repeat: repeat; background-position: 0 0; }
 .hs-frame { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; padding: var(--pad-top) var(--pad-x) var(--pad-bottom); }
 .hs-foot { position: absolute; left: var(--pad-x); right: var(--pad-x); bottom: 40px; z-index: 3; display: flex; justify-content: space-between; align-items: baseline; font-size: 18px; color: var(--muted); letter-spacing: .04em; pointer-events: none; }
 .hs-foot .hs-page { font-family: var(--font-num); font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -133,6 +136,7 @@
 .hs-obj-tablebox { position: absolute; inset: 0; }
 .hs-otable { width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--font-body); }
 .hs-otable td { padding: .3em .55em; vertical-align: middle; overflow: hidden; overflow-wrap: anywhere; word-break: normal; line-break: strict; }
+.hs-otable .hs-cell-tx.is-vertical { writing-mode: vertical-rl; text-orientation: mixed; margin: 0 auto; max-height: 100%; }
 .hs-slide .hs-cell-tx p { margin: 0; }
 .hs-slide .hs-cell-tx :is(ul, ol) { margin: 0; padding: 0 0 0 1.2em; }
 .hs-slide .hs-cell-tx ul { list-style: disc; }

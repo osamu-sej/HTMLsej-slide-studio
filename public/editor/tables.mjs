@@ -215,6 +215,30 @@ export function createTableUi(editor, app, kit) {
           btn("clear", "書式のクリア", "選んだセルの太字・色を戻す", () => editor.textFormat("clear"), { enabled: isTable, keep: true }))),
     ];
   }
+  // セルの余白 (PowerPoint's cell margins): 標準 is the style's own; the others set each cell's padding (cm).
+  const CELL_MARGINS = [["標準", null], ["なし", [0, 0, 0, 0]], ["狭い", [0.13, 0.13, 0.13, 0.13]], ["広い", [0.38, 0.38, 0.38, 0.38]]];
+  function setMargins(cm) {
+    change((o, x) => ops.tableCells(o, x.r0, x.c0, x.r1, x.c1, { pad: cm ? cm.map((v) => ops.fromCm(Math.max(0, Number(v) || 0))) : undefined }));
+  }
+  function marginsMenu() {
+    const x = target();
+    const now = x ? x.o.cells[x.r0]?.[x.c0]?.pad || null : null;
+    const same = (cm) => (cm ? Boolean(now) && now.every((v, i) => Math.abs(v - ops.fromCm(cm[i])) < 0.5) : !now);
+    return menu([
+      { head: "セルの余白" },
+      ...CELL_MARGINS.map(([label, cm]) => ({ label: cm ? `${label}（上下左右 ${cm[0]} cm）` : "標準（表のスタイルどおり）", on: same(cm), run: () => setMargins(cm) })),
+      "-",
+      { label: "ユーザー設定の余白…", run: async () => {
+        const cur = (now || [7, 14, 7, 14]).map((v) => ops.toCm(v));
+        const answer = await app.ask("セルの余白", "上・右・下・左（cm）を空白で区切って（例：0.1 0.25 0.1 0.25）", cur.join(" "));
+        if (answer == null) return;
+        const values = String(answer).trim().split(/[\s,，、]+/).map(Number).filter((v) => Number.isFinite(v) && v >= 0);
+        if (!values.length) return;
+        const [t, r = t, b = t, l = r] = values;
+        setMargins([t, r, b, l].map((v) => Math.min(v, 5)));
+      } },
+    ]);
+  }
   function layoutTab() {
     const t = () => target();
     const merged = () => { const x = t(); return Boolean(x && x.cells && (x.r1 > x.r0 || x.c1 > x.c0) && !editor.cellRange); };
@@ -238,7 +262,8 @@ export function createTableUi(editor, app, kit) {
         col(btn("distV", "高さを揃える", "選んだ行（なければ全部）の高さを同じに", () => change((o, x) => ops.tableDistribute(o, "rows", x.cells ? x.r0 : 0, x.cells ? x.r1 : Infinity)), { enabled: isTable , keep: true }),
           btn("distH", "幅を揃える", "選んだ列（なければ全部）の幅を同じに", () => change((o, x) => ops.tableDistribute(o, "cols", x.cells ? x.c0 : 0, x.cells ? x.c1 : Infinity)), { enabled: isTable , keep: true }))),
       group("配置",
-        row(btn("textLeft", "", "左揃え", () => editor.textFormat("align", "left"), { enabled: isTable, keep: true }), btn("textCenter", "", "中央揃え", () => editor.textFormat("align", "center"), { enabled: isTable, keep: true }), btn("textRight", "", "右揃え", () => editor.textFormat("align", "right"), { enabled: isTable, keep: true })),
+        row(btn("textLeft", "", "左揃え", () => editor.textFormat("align", "left"), { enabled: isTable, keep: true }), btn("textCenter", "", "中央揃え", () => editor.textFormat("align", "center"), { enabled: isTable, keep: true }), btn("textRight", "", "右揃え", () => editor.textFormat("align", "right"), { enabled: isTable, keep: true }), btn("textDistributed", "", "均等割り付け", () => editor.textFormat("align", "distributed"), { enabled: isTable, keep: true }), drop("cellMargin", "", "セルの余白（標準・なし・狭い・広い・ユーザー設定）", () => marginsMenu(), { enabled: isTable, keep: true }),
+          btn("vtext", "", "文字列の方向（セルを縦書きに・もう一度で横書き）", () => change((o, x) => { const on = !o.cells[x.r0]?.[x.c0]?.vertical; return ops.tableCells(o, x.r0, x.c0, x.r1, x.c1, { vertical: on || undefined }); }), { enabled: isTable, keep: true, pressed: () => { const x = target(); return Boolean(x?.o.cells[x.r0]?.[x.c0]?.vertical); } })),
         row(btn("valignTop", "", "上揃え", () => editor.textFormat("valign", "top"), { enabled: isTable, keep: true }), btn("valignMiddle", "", "上下中央揃え", () => editor.textFormat("valign", "middle"), { enabled: isTable, keep: true }), btn("valignBottom", "", "下揃え", () => editor.textFormat("valign", "bottom"), { enabled: isTable, keep: true }))),
     ];
   }

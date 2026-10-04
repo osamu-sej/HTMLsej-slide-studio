@@ -24,6 +24,10 @@ import { createCompare } from "./editor/compare.mjs?v=__APP_VERSION__";
 import { createOnline } from "./editor/online.mjs?v=__APP_VERSION__";
 import { createCoach } from "./editor/coach.mjs?v=__APP_VERSION__";
 import { createImageExport } from "./editor/imagexport.mjs?v=__APP_VERSION__";
+import { createGifExport } from "./editor/gif.mjs?v=__APP_VERSION__";
+import { lockHtml } from "./editor/protect.mjs?v=__APP_VERSION__";
+import { createBackground } from "./editor/background.mjs?v=__APP_VERSION__";
+import { createAutoCorrect } from "./editor/autocorrect.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -555,6 +559,9 @@ function normalizeSlide(raw, index, total) {
   if (!Object.values(E.TRANSITION_OPTIONS).some((list) => list.some(([key]) => key === slide.transitionDir))) delete slide.transitionDir;
   if (slide.advance != null && Number.isFinite(Number(slide.advance)) && Number(slide.advance) >= 0) slide.advance = Math.min(600, Math.round(Number(slide.advance) * 10) / 10); else delete slide.advance;
   if (!(typeof slide.sid === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(slide.sid))) delete slide.sid;
+  // 背景の書式設定: the slide's own background (an SEJ light colour, a picture).
+  const background = E.normalizeBackground?.(slide.background);
+  if (background) slide.background = background; else delete slide.background;
   // A page brought over from PowerPoint as it looked keeps its title as an object and may use the cover's master.
   if (type === "blank") {
     if (slide.hideTitle === true) slide.hideTitle = true; else delete slide.hideTitle;
@@ -796,7 +803,7 @@ function extractUnits(slide) {
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "hidden", "section", "comments"]) {
+  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "hidden", "section", "comments", "background"]) {
     if (slide[key] != null && slide[key] !== "" && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
@@ -896,7 +903,7 @@ async function mediaBlob(src) {
 }
 
 /** Every photo, video and animation a slide uses: its own media and the objects placed on it. */
-const mediaSources = (slide) => [slide.media?.src, ...(slide.elements || []).map((o) => o?.src)].filter((src) => typeof src === "string" && src);
+const mediaSources = (slide) => [slide.media?.src, slide.background?.image, ...(slide.elements || []).map((o) => o?.src)].filter((src) => typeof src === "string" && src);
 // Bumped when a browser-kept file becomes available, so thumbnails drawn without it are drawn again.
 let mediaEpoch = 0;
 
@@ -927,6 +934,9 @@ async function storeInlineMedia(deck) {
       if (o?.src?.startsWith("data:")) {
         try { o.src = await putMedia(await dataUrlToBlob(o.src), o.fileName || ""); } catch { /* keep the data URL */ }
       }
+    }
+    if (slide.background?.image?.startsWith("data:")) {
+      try { slide.background.image = await putMedia(await dataUrlToBlob(slide.background.image), "背景"); } catch { /* keep the data URL */ }
     }
   }
   return deck;
@@ -1602,7 +1612,7 @@ const PLACEHOLDERS = new Set([
   "工程", "項目", "補足", "説明", "伝えたいひと言", "写真に重ねて見せる補足の一文", "ポイント", "いちばん伝えたい**ひと言**を大きく",
 ]);
 const FULLWIDTH_NUMBER = /[０-９％．，]/;
-const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance"]);
+const NON_TEXT_KEYS = new Set(["type", "visualAsset", "imagePosition", "state", "trend", "status", "chartType", "customImage", "icon", "animation", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "media", "imagePlacement", "target", "notes", "formula", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "background"]);
 
 function textEntries(value, path = [], out = []) {
   if (typeof value === "string") out.push([path, value]);
@@ -2457,8 +2467,13 @@ const editorApp = {
   openVideoExport: () => videoExport.openDialog(),
   // 画像として保存 (public/editor/imagexport.mjs).
   openImageExport: () => imageExport.openDialog(),
+  openGifExport: () => gifExport.openDialog(),
+  exportLockedHtml: () => exportLockedHtml(),
+  formatBackground: () => background.open(),
+  openAutoCorrect: () => autoCorrectUi.openOptions(),
+  setBackground: (target, bg, { undo = true } = {}) => setBackground(target, bg, { undo }),
   showOrder: () => showSlides(state.deck, showOf(state.deck?.show) || {}) || E.storyMap(state.deck.slides).order.filter((i) => !state.deck.slides[i].hidden),
-  presentForVideo: (extra) => openPresenter(0, { extra }),
+  presentForVideo: (extra, { fullscreen = true } = {}) => openPresenter(0, { extra, fullscreen }),
   // オンライン プレゼンテーション (public/editor/online.mjs).
   openPresenter: (start, options) => openPresenter(start, options),
   openOnline: () => online.open(),
@@ -2506,6 +2521,12 @@ const slideTools = createSlideTools(editorApp);
 const videoExport = createVideoExport(editorApp);
 // ファイル → エクスポート → 画像として保存 (public/editor/imagexport.mjs).
 const imageExport = createImageExport(editorApp);
+// ファイル → エクスポート → アニメーション GIF の作成 (public/editor/gif.mjs).
+const gifExport = createGifExport(editorApp);
+// デザイン → 背景の書式設定 (public/editor/background.mjs).
+const background = createBackground(editorApp);
+// 校閲 → オートコレクトのオプション (public/editor/autocorrect.mjs).
+const autoCorrectUi = createAutoCorrect(editorApp);
 // 校閲 → 比較 (public/editor/compare.mjs).
 const compareTool = createCompare(editorApp);
 // スライド ショー → オンライン プレゼンテーション (public/editor/online.mjs).
@@ -4577,7 +4598,7 @@ function restoreImages(slides, previous) {
     if (source?.imagePlacement && slide.customImage === source.customImage && !slide.imagePlacement) slide.imagePlacement = source.imagePlacement;
     // What people placed by hand stays: a 白紙 page comes back as it was, objects stay with their slide.
     if (source?.type === "blank") { slides[index] = clone(source); return; }
-    for (const key of ["elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance"]) if (source?.[key] != null && slide[key] == null) slide[key] = clone(source[key]);
+    for (const key of ["elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "background"]) if (source?.[key] != null && slide[key] == null) slide[key] = clone(source[key]);
   });
   // A slide with objects that found no place in the new deck is kept (before the close), so no work is lost.
   const placed = new Set(slides.flatMap((slide) => (slide.elements || []).map((o) => o.id)));
@@ -5224,7 +5245,7 @@ function chooseVariant(id, variant) {
   saveVersion("別案を採用する前");
   const original = state.deck.slides[set.index];
   const chosen = clone(variant.slide);
-  for (const key of ["elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance"]) if (original?.[key] != null && chosen[key] == null) chosen[key] = clone(original[key]);
+  for (const key of ["elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "background"]) if (original?.[key] != null && chosen[key] == null) chosen[key] = clone(original[key]);
   replaceSlide(set.index, chosen);
   message.variants.status = "chosen";
   message.variants.chosen = variant.label;
@@ -5851,6 +5872,14 @@ async function portableDeck() {
       if (!blob) { missing.push(index + 1); delete slide.media; }
       else { slide.media.src = await blobToDataUrl(blob); bytes += blob.size; }
     }
+    // 背景の書式設定: the background picture travels inside the file too.
+    const bgSrc = slide.background?.image;
+    if (bgSrc?.startsWith("asset:")) await addAsset(bgSrc.slice(6));
+    if (bgSrc?.startsWith("idb:")) {
+      const blob = await mediaBlob(bgSrc).catch(() => null);
+      if (!blob) { if (!missing.includes(index + 1)) missing.push(index + 1); delete slide.background.image; if (!slide.background.color) delete slide.background; }
+      else { slide.background.image = await blobToDataUrl(blob); bytes += blob.size; }
+    }
     // Pictures, videos and animations placed as objects travel inside the file too.
     if (slide.elements?.length) {
       const kept = [];
@@ -5935,9 +5964,40 @@ const EXPORT_BOOT = `(async function () {
   E.createPlayer(document.body, opts);
 })();`;
 
-async function exportHtml({ checked = false } = {}) {
+/**
+ * ファイル → 情報 → プレゼンテーションの保護 → パスワードを使用して暗号化: the password asked twice, then the HTML file
+ * written locked with it. The password is not kept (forgotten, the file cannot be opened).
+ */
+function exportLockedHtml() {
+  if (!state.deck) return;
+  const pw = h("input", { type: "password", class: "lock-pw", autocomplete: "new-password", "aria-label": "パスワード" });
+  const again = h("input", { type: "password", class: "lock-again", autocomplete: "new-password", "aria-label": "パスワードの再入力" });
+  const msg = h("p", { class: "hint lock-msg", role: "alert" });
+  const dialog = h("dialog", { class: "lock-dialog", "aria-label": "パスワードを使用して暗号化" },
+    h("div", { class: "dialog-head" }, h("h3", {}, "パスワードを使用して暗号化"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+    h("div", { class: "dialog-body sh-form-col" },
+      h("p", {}, "書き出すHTMLファイルをパスワードで保護します。開くときにパスワードを聞き、合っていれば発表できます（中身は暗号化され、ファイルを見ても読めません）。"),
+      h("label", { class: "field" }, h("span", {}, "パスワード"), pw),
+      h("label", { class: "field" }, h("span", {}, "パスワードの再入力"), again),
+      h("p", { class: "hint" }, "注意：パスワードを忘れると、ファイルを開けなくなります。パスワードはどこにも保存されません。大文字と小文字は区別されます。"),
+      msg),
+    h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"),
+      h("button", { type: "button", class: "btn btn-primary lock-go", onclick: () => {
+        if (pw.value.length < 4) { msg.textContent = "パスワードは4文字以上にしてください"; pw.focus(); return; }
+        if (pw.value !== again.value) { msg.textContent = "2つのパスワードが違います"; again.select(); return; }
+        const password = pw.value;
+        dialog.close();
+        exportHtml({ password });
+      } }, "書き出す")));
+  document.body.append(dialog);
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.showModal();
+  pw.focus();
+}
+
+async function exportHtml({ checked = false, password = null } = {}) {
   if (!state.deck || state.exporting) return;
-  if (!checked) {
+  if (!checked && !password) {
     await measureAll();
     const problems = validateForExport();
     const warnings = checkItems().filter((item) => item.severity !== "info");
@@ -5952,12 +6012,15 @@ async function exportHtml({ checked = false } = {}) {
     const { deck, assets, bytes, missing } = await portableDeck();
     if (deck.slides[0].type === "title" && !deck.slides[0].date) deck.slides[0].date = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
     const fits = state.deck.slides.map((_, i) => { const fit = fitFor(i); return fit ? { fs: fit.fs, ts: fit.ts } : null; });
-    const html = await standaloneHtml({ title: deck.title, body: '<div class="hs-boot">読み込み中…</div>', boot: EXPORT_BOOT, data: { deck, fits, assets, show: { ...playerOptions(showOf(deck.show)), only: showSlides(deck, showOf(deck.show)) } }, player: true });
-    const fileName = `${fileSafe(deck.title, "presentation")}_${today()}.html`;
+    const plain = await standaloneHtml({ title: deck.title, body: '<div class="hs-boot">読み込み中…</div>', boot: EXPORT_BOOT, data: { deck, fits, assets, show: { ...playerOptions(showOf(deck.show)), only: showSlides(deck, showOf(deck.show)) } }, player: true });
+    // パスワードを使用して暗号化: the file opens only with its password (protect.mjs).
+    // The locked page names nothing of the deck (its title may be confidential too).
+    const html = password ? await lockHtml(plain, password) : plain;
+    const fileName = `${fileSafe(deck.title, "presentation")}_${today()}${password ? "_保護" : ""}.html`;
     await downloadBlob(new Blob([html], { type: "text/html" }), fileName);
     state.historyId = saveHistory({ exported: fileName });
     const size = bytes > 20_000_000 ? `（約${Math.round(bytes / 1_000_000)}MB。動画が入っているため大きめです）` : "";
-    toast(`HTMLに書き出しました${size}。ブラウザで開くとそのまま発表できます${missing.length ? `／${missing.join("・")}枚目の動画・写真はこのブラウザにないため外しました` : ""}`);
+    toast(`HTMLに書き出しました${password ? "（パスワード付き。開くときにパスワードを聞きます）" : ""}${size}。ブラウザで開くとそのまま発表できます${missing.length ? `／${missing.join("・")}枚目の動画・写真はこのブラウザにないため外しました` : ""}`);
   } catch (error) {
     toast(`書き出せませんでした：${error.message}`);
   } finally {
@@ -6142,6 +6205,17 @@ async function importExistingDeck(file, mode = null) {
   } catch (error) {
     showStatus("generationStatus", `取り込めませんでした：${error.message}`, "error");
   }
+}
+
+/** 背景の書式設定: one slide's background (or every slide's, "all"); null or {} takes it away. */
+function setBackground(target, bg, { undo = true } = {}) {
+  if (!state.deck) return;
+  const value = E.normalizeBackground(bg);
+  const slides = target === "all" ? state.deck.slides : [state.deck.slides[target]].filter(Boolean);
+  if (!slides.length) return;
+  if (undo) pushUndo();
+  for (const slide of slides) { if (value) slide.background = clone(value); else delete slide.background; }
+  markChanged({ structural: true });
 }
 
 /** 最終版にする / 編集する: the document's 状態 set to 最終版 (or no longer). */

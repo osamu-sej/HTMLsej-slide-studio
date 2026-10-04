@@ -84,3 +84,50 @@ test("最終版にする is the document's 状態 (最終版)", () => {
   assert.equal(isFinal({}), false);
   assert.equal(isFinal(null), false);
 });
+
+const plain = (v) => JSON.parse(JSON.stringify(v));
+const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+test("背景の書式設定: the SEJ's light colours only, a picture with its transparency, drawn under everything", async () => {
+  const { E } = await loadEngine();
+  assert.deepEqual(plain(E.normalizeBackground({ color: "#DCE4F2" })), { color: "#dce4f2" });
+  assert.equal(E.normalizeBackground({ color: "#1f3864" }), null, "navy carries no text");
+  assert.equal(E.normalizeBackground({ color: "#ff0000" }), null, "not an SEJ colour");
+  assert.deepEqual(plain(E.normalizeBackground({ image: PNG, transparency: 0.333, tile: true, extra: 1 })), { image: PNG, transparency: 0.33, tile: true });
+  assert.equal(E.normalizeBackground({ image: "javascript:alert(1)" }), null);
+  assert.equal(E.normalizeBackground({ color: "#f5f0ea", transparency: 0.5 }).transparency, undefined, "transparency is the picture's");
+  const slide = { type: "content", title: "背景", body: "本文", background: { color: "#f5f0ea" } };
+  const el = E.render(slide, { mode: "present", index: 0, deck: { slides: [slide], theme: "sej" } });
+  const bg = el.querySelector(".hs-bg");
+  assert.ok(bg && el.firstElementChild === bg, "first in the slide: under the layout, its objects and the master");
+  assert.match(bg.getAttribute("style") || "", /f5f0ea|245, 240, 234/);
+  assert.ok(el.querySelector(".hs-sej"), "the SEJ master still drawn");
+  const pic = { type: "blank", background: { image: PNG, transparency: 0.5, tile: true } };
+  const img = E.render(pic, { mode: "present", index: 0, deck: { slides: [pic], theme: "sej" } }).querySelector(".hs-bg-img");
+  assert.ok(img?.classList.contains("is-tiled"), "tiled");
+  assert.match(img.getAttribute("style"), /url\("data:image\/png/);
+  assert.match(img.getAttribute("style"), /opacity: ?0\.5/);
+  assert.equal(E.render({ type: "blank" }, { mode: "present", index: 0, deck: { slides: [{ type: "blank" }], theme: "sej" } }).querySelector(".hs-bg"), null, "none set, none drawn");
+});
+
+test("均等割り付け on a box, a cell and a paragraph; a cell's text can be vertical", async () => {
+  const { E } = await loadEngine();
+  const t = E.normalizeObject({ id: "t", kind: "text", x: 0, y: 0, w: 400, h: 100, text: "<p>あいう</p>", align: "distributed" });
+  assert.equal(t.align, "distributed");
+  const slide = { type: "blank", elements: [t] };
+  const tx = E.render(slide, { mode: "present", index: 0, deck: { slides: [slide], theme: "sej" } }).querySelector(".hs-obj-tx");
+  assert.match(tx.getAttribute("style"), /text-align: ?justify/);
+  assert.match(tx.getAttribute("style"), /text-align-last: ?justify/);
+  assert.equal(E.sanitizeRich('<p style="text-align: justify; text-align-last: justify">あ</p>'), '<p style="text-align: justify; text-align-last: justify">あ</p>');
+  assert.equal(E.sanitizeRich('<p style="text-align: justify">あ</p>'), '<p style="text-align: justify">あ</p>');
+  assert.equal(E.sanitizeRich('<p style="text-align-last: justify">あ</p>'), "<p>あ</p>", "only with justified lines");
+  const table = E.normalizeObject({ id: "g", kind: "table", x: 0, y: 0, w: 600, h: 200, cells: [[{ text: "<p>見出し</p>", align: "distributed", vertical: true, pad: [0, 0, 0, 0] }, { text: "<p>b</p>", vertical: "yes" }]] });
+  assert.equal(table.cells[0][0].align, "distributed");
+  assert.equal(table.cells[0][0].vertical, true);
+  assert.equal(table.cells[0][1].vertical, undefined, "only true");
+  assert.deepEqual(plain(table.cells[0][0].pad), [0, 0, 0, 0], "セルの余白 なし");
+  const tslide = { type: "blank", elements: [table] };
+  const cell = E.render(tslide, { mode: "present", index: 0, deck: { slides: [tslide], theme: "sej" } }).querySelector(".hs-cell-tx");
+  assert.ok(cell.classList.contains("is-vertical"));
+  assert.match(cell.getAttribute("style"), /text-align-last: ?justify/);
+});

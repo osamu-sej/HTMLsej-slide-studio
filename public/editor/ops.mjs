@@ -516,7 +516,7 @@ export function clearInline(E, html, kind) {
     for (const prop of props) el.style.removeProperty(prop);
     if (!el.getAttribute("style")?.trim()) unwrap(el);
   }
-  if (kind === "align") for (const el of box.querySelectorAll("p, li")) el.removeAttribute("style");
+  if (kind === "align") for (const el of box.querySelectorAll("p, li, div")) el.removeAttribute("style");
   return E.sanitizeRich(box.innerHTML);
 }
 

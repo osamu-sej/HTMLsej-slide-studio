@@ -1643,3 +1643,21 @@ audio.trim-media { background: transparent; }
 .poll-dialog { width: min(560px, calc(100vw - 32px)); }
 .pl-field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
 .pl-field input, .pl-field textarea { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font: 14px/1.6 inherit; font-weight: 400; color: var(--ink); }
+
+/* 背景の書式設定: a pane beside the slide (not over it), the SEJ light colours as swatches. */
+.bg-dialog { position: fixed; inset: 118px 16px auto auto; margin: 0; width: min(340px, calc(100vw - 32px)); z-index: 60; }
+.bg-dialog .dialog-body { gap: 8px; }
+.bg-colors { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 24px; }
+.bg-sw { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; }
+.bg-sw.on { outline: 2px solid var(--accent, #1f3864); outline-offset: 2px; }
+.bg-colors.is-off, .bg-picture.is-off { opacity: .45; }
+.bg-picture { display: flex; flex-direction: column; gap: 8px; padding-left: 24px; }
+.bg-transparency { width: 140px; vertical-align: middle; }
+/* オートコレクト・アニメーション GIF・パスワード */
+.ac-dialog, .gif-dialog, .lock-dialog { width: min(560px, calc(100vw - 32px)); }
+.ac-dialog .dialog-body, .gif-dialog .dialog-body, .lock-dialog .dialog-body { display: flex; flex-direction: column; gap: 10px; }
+.ac-list { border-collapse: collapse; font-size: 13px; width: 100%; max-width: 360px; }
+.ac-list th, .ac-list td { border-bottom: 1px solid var(--line); padding: 3px 8px; text-align: left; }
+.lock-dialog .field input { width: 100%; box-sizing: border-box; }
+.lock-msg { color: var(--danger, #9b2c2c); min-height: 1.2em; }
+.sh-form-col { display: flex; flex-direction: column; gap: 10px; }

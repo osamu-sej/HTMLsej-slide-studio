@@ -453,6 +453,8 @@ export function createEditorUi(editor, app) {
       { label: "レビュー用ファイル", icon: "review", run: () => app.exportReview() },
       { label: "ビデオの作成（WebM）…", icon: "video2", run: () => app.openVideoExport() },
       { label: "画像として保存（PNG・JPEG）…", icon: "image", run: () => app.openImageExport() },
+      { label: "アニメーション GIF の作成…", icon: "play", run: () => app.openGifExport() },
+      { label: "HTMLファイル（パスワードで保護）…", icon: "lock", run: () => app.exportLockedHtml() },
       "-",
       { label: "JSONを読み込む…", icon: "up", run: () => app.openJson() },
       { label: "版の履歴・過去の資料…", icon: "clock", run: () => app.openHistory() },
@@ -536,6 +538,7 @@ export function createEditorUi(editor, app) {
     if (pop && !pop.anchor.isConnected) closePop(true);
     refresh();
     fitRibbon();
+    relight();
   }
   // Off the 1枚 view: whole tabs and groups that work on slides rather than on the objects of the one on the stage.
   const OFF_SLIDE_TABS = new Set(["design", "transition", "slideshow", "review", "view", "developer"]);
@@ -654,6 +657,7 @@ export function createEditorUi(editor, app) {
           btn("textCenter", "", "中央揃え（⌘E）", () => editor.textFormat("align", "center"), { enabled: hasText, pressed: () => editor.textState()?.align === "center", keep: true }),
           btn("textRight", "", "右揃え（⌘R）", () => editor.textFormat("align", "right"), { enabled: hasText, pressed: () => editor.textState()?.align === "right", keep: true }),
           btn("textJustify", "", "両端揃え（⌘J）", () => editor.textFormat("align", "justify"), { enabled: hasText, pressed: () => editor.textState()?.align === "justify", keep: true }),
+          btn("textDistributed", "", "均等割り付け（⇧⌘J）", () => editor.textFormat("align", "distributed"), { enabled: hasText, pressed: () => editor.textState()?.align === "distributed", keep: true }),
           btn("vtext", "", "縦書き", () => editor.textFormat("vertical"), { enabled: hasText, pressed: tState("vertical") }),
           caret("文字列の方向（横書き・縦書き・90度／270度回転）", () => menu([
             { head: "文字列の方向" },
@@ -700,6 +704,7 @@ export function createEditorUi(editor, app) {
         btn("magic", "デザイン|アイデア", "このスライドの見せ方の違う3つの案をAIが作り、並べて選べます（Codexに接続しているとき。右の「AIと話す」に届きます）", () => app.designIdeas(), { big: true, enabled: () => app.canAi() })),
       group("ユーザー設定",
         btn("slide", "スライドの|サイズ", "ワイド画面（16:9・13.33×7.5インチ）：SEJテンプレートの大きさです", () => app.toast("スライドのサイズはワイド画面（16:9・13.33×7.5インチ）です（SEJテンプレート）"), { big: true }),
+        btn("fill", "背景の|書式設定", "このスライドの背景（SEJの淡い色・図と透明度・並べて表示）。すべてに適用・背景のリセットも", () => app.formatBackground(), { big: true, enabled: () => Boolean(app.slide()) }),
         col(btn("chartBar", "数字を数え上げる", "数字のカウントアップとグラフが伸びる動き（資料全体）", () => app.setDeckDesign({ motion: { numbers: !motion().numbers } }), { pressed: () => motion().numbers }),
           btn("spot", "波紋を広げる", "SEJの波紋を発表中にゆっくり広げる", () => app.setDeckDesign({ motion: { ambient: !motion().ambient } }), { pressed: () => motion().ambient }),
           btn("pen", "線を描くように", "アイコン・線・マーカーを描くように見せる", () => app.setDeckDesign({ motion: { draw: !motion().draw } }), { pressed: () => motion().draw }))),
@@ -775,7 +780,8 @@ export function createEditorUi(editor, app) {
         btn("magic", "あふれを|AIで直す", "文字が収まらないスライドをAIで順番に直す", () => app.fixOverflow(), { big: true, enabled: () => app.canFixOverflow() })),
       group("文章校正",
         btn("spell", "スペル|チェック", "入力中の文字のスペルを確かめる（ブラウザの辞書。間違いに赤い波線）", () => app.setSpellcheck(!app.spellcheck()), { big: true, pressed: () => app.spellcheck() }),
-        btn("textCase", "表記ゆれ|チェック", "全角・半角（ＡＩ／AI）、長音（ユーザ／ユーザー）、送り仮名（行う／行なう）のゆれを見つけて統一する", () => app.openProofing(), { big: true })),
+        btn("textCase", "表記ゆれ|チェック", "全角・半角（ＡＩ／AI）、長音（ユーザ／ユーザー）、送り仮名（行う／行なう）のゆれを見つけて統一する", () => app.openProofing(), { big: true }),
+        btn("check", "オートコレクトの|オプション", "入力中に (c) を © に、「・ 」「1. 」で始めると箇条書き・段落番号に。種類ごとにオン・オフ", () => app.openAutoCorrect(), { big: true })),
       group("音声",
         btn("readAloud", "音声|読み上げ", "選んだ文字・部品、またはスライドの文字を順に読み上げる（読んでいる所に色。もう一度押すと止まる）", () => readAloud.toggle(), { big: true, pressed: () => readAloud.active })),
       group("言語",
@@ -1206,10 +1212,22 @@ export function createEditorUi(editor, app) {
     if (b.disabled || g.inert) { app.toast(g.inert ? "1枚表示（標準）で使えるコマンドです" : "このコマンドは今は使えません"); return false; }
     if (g.foldedItems?.contains(b)) g.querySelector(".rb-folded")?.click();
     b.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    // The button stays lit for a moment even if the ribbon is drawn again meanwhile (its command may change the
+    // window: the rulers, the panes, a tab coming or going).
+    lit = { tab: id, group, title, until: Date.now() + 1600 };
     b.classList.add("rb-found");
-    setTimeout(() => b.classList.remove("rb-found"), 1600);
+    setTimeout(() => { if (lit && Date.now() >= lit.until) lit = null; ribbon.querySelectorAll(".rb-found").forEach((el) => el.classList.remove("rb-found")); }, 1600);
     b.click();
+    relight();
     return true;
+  }
+  let lit = null;
+  /** The button the search ran, lit again in a ribbon drawn since. */
+  function relight() {
+    if (!lit || Date.now() >= lit.until || tab !== lit.tab) return;
+    const g = [...ribbon.querySelectorAll(".rb-body > .rb-group")].find((x) => (x.querySelector(":scope > .rb-label")?.textContent || "") === lit.group);
+    const find = (root) => (root ? [...root.querySelectorAll("button.rb-btn")].find((x) => x.getAttribute("title") === lit.title && !x.classList.contains("rb-folded")) : null);
+    (g ? find(g) || find(g.foldedItems) : null)?.classList.add("rb-found");
   }
 
   function buildTab(id) {
@@ -1329,7 +1347,7 @@ export function createEditorUi(editor, app) {
           tool("grow", "大きく", () => editor.textFormat("grow")), tool("shrink", "小さく", () => editor.textFormat("shrink"))),
         line("書式", tool("bold", "太字", () => editor.textFormat("bold"), st.bold), tool("italic", "斜体", () => editor.textFormat("italic"), st.italic), tool("underline", "下線", () => editor.textFormat("underline"), st.underline), tool("strike", "取り消し線", () => editor.textFormat("strike"), st.strike), tool("clear", "書式のクリア", () => editor.textFormat("clear"))),
         line("文字の色", swatchRow(E.PALETTE.text, st.color, (c) => editor.textFormat("color", c))),
-        line("揃え", tool("textLeft", "左揃え", () => editor.textFormat("align", "left"), st.align === "left"), tool("textCenter", "中央揃え", () => editor.textFormat("align", "center"), st.align === "center"), tool("textRight", "右揃え", () => editor.textFormat("align", "right"), st.align === "right"), tool("textJustify", "両端揃え", () => editor.textFormat("align", "justify"), st.align === "justify")),
+        line("揃え", tool("textLeft", "左揃え", () => editor.textFormat("align", "left"), st.align === "left"), tool("textCenter", "中央揃え", () => editor.textFormat("align", "center"), st.align === "center"), tool("textRight", "右揃え", () => editor.textFormat("align", "right"), st.align === "right"), tool("textJustify", "両端揃え", () => editor.textFormat("align", "justify"), st.align === "justify"), tool("textDistributed", "均等割り付け", () => editor.textFormat("align", "distributed"), st.align === "distributed")),
         line("上下の位置", tool("valignTop", "上揃え", () => editor.textFormat("valign", "top"), st.valign === "top"), tool("valignMiddle", "上下中央", () => editor.textFormat("valign", "middle"), st.valign === "middle"), tool("valignBottom", "下揃え", () => editor.textFormat("valign", "bottom"), st.valign === "bottom")),
         line("箇条書き", tool("bullet", "箇条書き", () => editor.textFormat("bullet"), st.list === "bullet"), tool("number", "段落番号", () => editor.textFormat("number"), st.list === "number"), tool("vtext", "縦書き", () => editor.textFormat("vertical"), st.vertical)),
         line("行間", choice(LINE_HEIGHTS.map(([v, label]) => [v, `${label} 行`]), LINE_HEIGHTS.find(([v]) => Math.abs(v - (st.lh || 0)) < 0.01)?.[0] ?? st.lh, (v) => editor.textFormat("lh", Number(v)))),

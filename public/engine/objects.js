@@ -974,6 +974,10 @@
   const INLINE = { B: "b", STRONG: "b", I: "i", EM: "i", U: "u", S: "s", STRIKE: "s", DEL: "s", SUB: "sub", SUP: "sup", SPAN: "span", FONT: "span", A: "a" };
   const BLOCKS = new Set(["P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "LI"]);
   const ALIGN = new Set(["left", "center", "right", "justify"]);
+  // 均等割り付け (distributed): justified, the last line too — kept on a box, a cell or a paragraph.
+  const ALIGN_ALL = new Set([...ALIGN, "distributed"]);
+  const alignCss = (a) => (a === "distributed" ? "justify" : a || null);
+  const alignLastCss = (a) => (a === "distributed" ? "justify" : null);
 
   function hexColor(value) {
     const text = String(value || "").trim().toLowerCase();
@@ -1079,7 +1083,9 @@
 
   function blockAttrs(src, el) {
     const align = String(src.style?.textAlign || src.getAttribute?.("align") || "").toLowerCase();
-    if (ALIGN.has(align)) el.setAttribute("style", `text-align: ${align}`);
+    const last = String(src.style?.textAlignLast || src.style?.getPropertyValue?.("text-align-last") || "").toLowerCase();
+    if (align === "justify" && last === "justify") el.setAttribute("style", "text-align: justify; text-align-last: justify");
+    else if (ALIGN.has(align)) el.setAttribute("style", `text-align: ${align}`);
     const indent = Number(src.getAttribute?.("data-indent"));
     if (Number.isInteger(indent) && indent > 0) el.setAttribute("data-indent", String(Math.min(indent, 4)));
     // A paragraph's own bullet or number ("■", "①", "1."), as PowerPoint draws it (a hanging mark).
@@ -1565,7 +1571,7 @@
       if (raw.textRot === 90 || raw.textRot === 270) o.textRot = raw.textRot;
       if (raw.lockRatio === true) o.lockRatio = true;
       if (typeof raw.wrap === "boolean") o.wrap = raw.wrap;
-      if (ALIGN.has(raw.align)) o.align = raw.align;
+      if (ALIGN_ALL.has(raw.align)) o.align = raw.align;
       if (["top", "middle", "bottom"].includes(raw.valign)) o.valign = raw.valign;
       if (FONTS[raw.font] && raw.font !== "body") o.font = raw.font;
       if (typeof raw.fontFace === "string" && /^[\p{L}\p{N}\s._+\-]{1,100}$/u.test(raw.fontFace)) o.fontFace = raw.fontFace;
@@ -1763,8 +1769,9 @@
       if (typeof src.fontFace === "string" && /^[\p{L}\p{N}\s._+\-]{1,100}$/u.test(src.fontFace)) cell.fontFace = src.fontFace;
       if (Array.isArray(src.pad) && src.pad.length === 4) cell.pad = src.pad.map((v) => num(v, 0, 400, 0));
       for (const key of ["bold", "italic", "underline", "strike"]) if (src[key] === true) cell[key] = true;
-      if (ALIGN.has(src.align)) cell.align = src.align;
+      if (ALIGN_ALL.has(src.align)) cell.align = src.align;
       if (["top", "middle", "bottom"].includes(src.valign)) cell.valign = src.valign;
+      if (src.vertical === true) cell.vertical = true;
       const rs = Math.round(Number(src.rs) || 1);
       const cs = Math.round(Number(src.cs) || 1);
       if (rs > 1) cell.rs = rs;
@@ -2567,7 +2574,7 @@
       if (size) el.style.fontSize = `calc(${size}px * var(--os, 1))`;
     }
     const style = {
-      "font-size": `calc(${o.fs}px * var(--os, 1))`, color: o.color, "line-height": String(o.lh), "text-align": o.align,
+      "font-size": `calc(${o.fs}px * var(--os, 1))`, color: o.color, "line-height": String(o.lh), "text-align": alignCss(o.align), "text-align-last": alignLastCss(o.align),
       "font-weight": o.bold ? "700" : null, "font-style": o.italic ? "italic" : null,
       "text-decoration": [o.underline ? "underline" : "", o.strike ? "line-through" : ""].filter(Boolean).join(" ") || null,
       "letter-spacing": o.ls ? `${o.ls}em` : null, "--psp": o.psp ? `${o.psp}em` : null,
@@ -2636,7 +2643,7 @@
         const td = h("td", { "data-r": String(r), "data-c": String(c), rowspan: cell.rs > 1 ? String(cell.rs) : null, colspan: cell.cs > 1 ? String(cell.cs) : null, "data-fill": cell.fill || null,
           style: { background: cell.fill || null, "vertical-align": cell.valign || null, "border-top": edge("bt"), "border-right": edge("br"), "border-bottom": edge("bb"), "border-left": edge("bl"),
             padding: cell.pad ? cell.pad.map((v) => `${v}px`).join(" ") : null } });
-        const tx = h("div", { class: "hs-cell-tx", style: { "text-align": cell.align || null, color: cell.color || null, "font-weight": cell.bold ? "700" : null, "font-style": cell.italic ? "italic" : null,
+        const tx = h("div", { class: ["hs-cell-tx", cell.vertical ? "is-vertical" : ""], style: { "text-align": alignCss(cell.align), "text-align-last": alignLastCss(cell.align), color: cell.color || null, "font-weight": cell.bold ? "700" : null, "font-style": cell.italic ? "italic" : null,
           "font-size": cell.fs ? `calc(${cell.fs}px * var(--os, 1))` : null, "line-height": cell.lh ?? null,
           "font-family": cell.fontFace ? `"${cell.fontFace}", sans-serif` : null,
           "text-decoration": [cell.underline ? "underline" : "", cell.strike ? "line-through" : ""].filter(Boolean).join(" ") || null } });
@@ -3370,6 +3377,34 @@
     return el;
   }
 
+  // 背景の書式設定: a slide's own background — one of the SEJ's light colours (text sits on it, so never navy), a
+  // picture (with its transparency, filling the slide or tiled), or both. It lies under the layout and its objects.
+  const BG_COLORS = PALETTE.fill.filter(([c]) => !["#1f3864", "#808080"].includes(c));
+  function normalizeBackground(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const out = {};
+    const color = hexColor(raw.color);
+    if (color && BG_COLORS.some(([c]) => c === color.toLowerCase())) out.color = color.toLowerCase();
+    const src = typeof raw.image === "string" ? raw.image : "";
+    if (src && /^(data:image\/(png|jpeg|webp|gif|svg\+xml)[;,]|idb:|asset:|https?:\/\/|blob:)/i.test(src) && src.length <= 80_000_000) {
+      out.image = src;
+      const t = Number(raw.transparency);
+      if (Number.isFinite(t) && t > 0) out.transparency = Math.min(1, Math.round(t * 100) / 100);
+      if (raw.tile === true) out.tile = true;
+    }
+    return Object.keys(out).length ? out : null;
+  }
+  function backgroundLayer(slide, ctx) {
+    const bg = normalizeBackground(slide?.background);
+    if (!bg) return null;
+    const layer = h("div", { class: "hs-bg", "aria-hidden": "true", style: { background: bg.color || null } });
+    const url = bg.image ? E.resolveSrc(bg.image, ctx) : "";
+    if (url) {
+      layer.append(h("div", { class: ["hs-bg-img", bg.tile ? "is-tiled" : ""], style: { "background-image": `url("${url.replace(/["\\\n\r]/g, (c) => encodeURIComponent(c))}")`, opacity: bg.transparency ? String(r2(1 - bg.transparency)) : null } }));
+    }
+    return layer;
+  }
+
   /** The slide's objects as one layer above the layout (the SEJ master stays on top of it). */
   function objectLayer(slide, ctx, opts = {}) {
     const list = Array.isArray(slide?.elements) ? slide.elements : [];
@@ -3462,7 +3497,7 @@
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
     TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
-    corners, bounds, sites, lineEnds, linePath, objectLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
+    corners, bounds, sites, lineEnds, linePath, objectLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,
     normalizeStrokes, inkPath, INK_COLORS, texToMathML,

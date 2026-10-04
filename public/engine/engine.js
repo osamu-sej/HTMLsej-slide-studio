@@ -2367,6 +2367,9 @@
     if (backdropKind) decor.append(backdrop(backdropKind, (index + 1) * 7919 + Object.keys(BACKDROPS).indexOf(backdropKind) * 104729));
     const frame = h("div", { class: "hs-frame" });
     const overlay = h("div", { class: "hs-overlay" });
+    // 背景の書式設定: the slide's own background lies under everything (the template's ripples too).
+    const ownBackground = Engine.backgroundLayer?.(slide, ctx);
+    if (ownBackground) root.append(ownBackground);
     root.append(decor);
     const parts = { root, decor, frame, overlay };
     if (!slide) {
