@@ -74,10 +74,12 @@ await step("⌥Q focuses the search; 「るーらー」 finds ルーラー (表�
   await shot("results");
   const before = await rulers();
   await page.keyboard.press("Enter");
+  // The button stays lit for 1.6 s: look for it first, then at what the command did.
+  await page.waitForSelector(".rb-body .rb-btn.rb-found", { timeout: 1200 }).catch(() => {});
+  assert(await page.locator(".rb-body .rb-btn.rb-found").count() === 1, "the button lit where it lives");
   await page.waitForTimeout(300);
   assert((await rulers()) === !before, "the rulers toggled");
   assert((await currentTab()) === "表示", `tab: ${await currentTab()}`);
-  assert(await page.locator(".rb-body .rb-btn.rb-found").count() === 1, "the button lit where it lives");
 });
 
 await step("found by its description and chosen with ↓ ↑: アニメーション ウィンドウ opens", async () => {

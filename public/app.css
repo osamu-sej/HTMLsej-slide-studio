@@ -1395,6 +1395,8 @@ body.is-final .film-item { -webkit-user-drag: none; }
 .fmt-field { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 .fmt-field > span:first-child { min-width: 9em; color: var(--muted); font-size: 12px; }
 .fmt-num { width: 90px; }
+.fmt-field select { min-width: 8em; }
+.fmt-cols > fieldset:not(:first-child) .fmt-field > span:first-child { min-width: 3em; }
 .fmt-colors { display: inline-flex; gap: 6px; }
 /* クイック レイアウト (グラフのデザイン): a small picture of each layout's elements. */
 .tb-layout-row { display: inline-flex; align-items: center; gap: 10px; }
