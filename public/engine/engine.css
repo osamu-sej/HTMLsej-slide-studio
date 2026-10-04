@@ -183,6 +183,12 @@
 .hs-obj-chart > .hs-chart-wrap { flex: 1; min-height: 0; }
 .hs-obj-chart .hs-chart { flex: 1; min-height: 0; }
 .hs-obj-chart .hs-chart svg { width: 100%; height: 100%; }
+/* データ テーブル: the chart's values under it (black words, grey rules). */
+.hs-chart-table { flex: none; width: 100%; border-collapse: collapse; table-layout: fixed; font: 400 18px/1.2 var(--font-body); color: #1a1a1a; }
+.hs-chart-table th, .hs-chart-table td { border: 1px solid #d9d9d9; padding: 2px 6px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hs-chart-table thead th { color: #808080; font-weight: 600; }
+.hs-chart-table tbody th { text-align: left; font-weight: 600; }
+.hs-chart-table thead th:first-child { border-top-color: transparent; border-left-color: transparent; }
 .hs-obj-chart.is-office > svg { width: 100%; height: 100%; display: block; overflow: visible; font-family: var(--font-body); }
 .hs-ochart text { white-space: pre; }
 

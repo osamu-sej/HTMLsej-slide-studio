@@ -1281,7 +1281,13 @@ export function createEditorUi(editor, app) {
       group("アクセシビリティ", btn("textbox", "代替|テキスト", "画面読み上げが読む図の説明（装飾用にもできます）", () => { const o = one(); if (o) app.editAlt(o.id); }, { big: true, enabled: () => Boolean(one()) })),
       group("図のスタイル",
         drop("outline", "図の枠線", "枠線の色・太さ", () => outlineMenu(), { enabled: hasImage, swatch: strokeOf }),
-        drop("mask", "図形に合わせて|切り抜き", "画像を図形の形に切り抜く", () => (close) => h("div", { class: "rb-gallery" }, h("div", { class: "rb-gallery-grid" }, MASKS.map((key) => h("button", { type: "button", title: E.SHAPES[key].label, onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? { mask: key === "rect" ? undefined : key, adj: undefined } : null)); } }, shapeThumb(key))))), { big: true, enabled: hasImage })),
+        drop("mask", "図形に合わせて|切り抜き", "画像を図形の形に切り抜く", () => (close) => h("div", { class: "rb-gallery" }, h("div", { class: "rb-gallery-grid" }, MASKS.map((key) => h("button", { type: "button", title: E.SHAPES[key].label, onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? { mask: key === "rect" ? undefined : key, adj: undefined } : null)); } }, shapeThumb(key))))), { big: true, enabled: hasImage }),
+        drop("smartart", "図の|レイアウト", "図のレイアウト：選んだ図をキャプション付きで並べる（横に並べる・2列のグリッド・図と説明）。図とキャプションはグループになります", () => menu(Object.entries(ops.PICTURE_LAYOUTS).map(([kind, label]) => ({ label, run: () => {
+          const { list, ids } = ops.pictureLayout(editor.objects(), editor.selection, kind);
+          if (!ids.length) { app.toast("並べる図を選んでください"); return; }
+          editor.commit(list, { select: ids });
+          app.toast("図をキャプション付きで並べました（キャプションはダブルクリックで書き換えられます。⌘Zで戻せます）");
+        } }))), { big: true, enabled: hasImage })),
       arrangeGroup(),
       group("サイズ",
         btn("crop", "トリミング", "画像の端を切り取る：黒い印をドラッグ（Enterで確定）。数値は書式パネルで", () => { const o = one(); if (o?.kind === "image") crop.start(o.id); else app.openPanel("format", "picture"); }, { big: true, enabled: hasImage, pressed: () => crop.active }),

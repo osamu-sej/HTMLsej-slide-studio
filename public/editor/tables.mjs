@@ -311,10 +311,34 @@ export function createTableUi(editor, app, kit) {
       "-", { head: "目盛線" },
       { label: "表示する", on: opts.grid !== false, run: () => setOpts({ grid: true }) },
       { label: "なし", on: opts.grid === false, run: () => setOpts({ grid: false }) },
+      "-", { head: "データ テーブル（グラフの下に値の表）" },
+      { label: "表示する", on: opts.table === true, disabled: !E.TABLE_CHARTS.has(chart()?.chart.type), title: "縦棒・横軸に項目のあるグラフで使えます", run: () => setOpts({ table: true }) },
+      { label: "なし", on: !opts.table, run: () => setOpts({ table: undefined }) },
       "-", { head: "軸ラベル・近似曲線" },
       { label: opts.axisX || opts.axisY ? `軸ラベル（${[opts.axisX, opts.axisY].filter(Boolean).join("・")}）…` : "軸ラベル…", run: () => axisTitles() },
       { label: "近似曲線（線形）", on: opts.trend === "linear", disabled: !TREND_CHARTS.has(chart()?.chart.type), title: "縦棒・折れ線・散布図で使えます", run: () => setOpts({ trend: opts.trend === "linear" ? false : "linear" }) },
       { label: opts.axisMin != null || opts.axisMax != null ? `軸の書式（${opts.axisMin ?? "自動"} 〜 ${opts.axisMax ?? "自動"}）…` : "軸の書式（最小値・最大値）…", disabled: !BOUND_CHARTS.has(chart()?.chart.type), title: "縦棒・集合縦棒・折れ線・面・散布図で使えます（空にすると自動）", run: () => axisFormat() },
+    ]);
+  }
+  /** グラフ フィルター: a series or a category shown or hidden (its data stays; one of each always shows). */
+  function filterMenu() {
+    const c = chart()?.chart;
+    if (!c) return menu([]);
+    const hidden = (key) => new Set(c.opts?.[key] || []);
+    const toggle = (key, i, count) => {
+      const set = hidden(key);
+      if (set.has(i)) set.delete(i);
+      else if (set.size + 1 >= count) { app.toast("少なくとも1つは表示します"); return; } else set.add(i);
+      setOpts({ [key]: set.size ? [...set].sort((a, b) => a - b) : undefined });
+    };
+    const hs = hidden("hideSeries");
+    const hl = hidden("hideLabels");
+    return menu([
+      { head: "系列（チェックのあるものを表示）" },
+      ...c.series.map((ser, i) => ({ label: ser.name || `系列 ${i + 1}`, on: !hs.has(i), run: () => toggle("hideSeries", i, c.series.length) })),
+      "-", { head: "項目（チェックのあるものを表示）" },
+      ...c.labels.map((label, i) => ({ label: label || `項目 ${i + 1}`, on: !hl.has(i), run: () => toggle("hideLabels", i, c.labels.length) })),
+      "-", { label: "すべて表示", disabled: !hs.size && !hl.size, run: () => setOpts({ hideSeries: undefined, hideLabels: undefined }) },
     ]);
   }
   const TREND_CHARTS = new Set(["bar", "line", "multi-line", "scatter"]);
@@ -373,7 +397,8 @@ export function createTableUi(editor, app, kit) {
       group("種類", drop("chartBar", "グラフの種類|の変更", "縦棒・積み上げ・折れ線・面・円・ドーナツ・散布図・レーダー・ウォーターフォール・じょうご・複合", () => chartPicker(setKind), { big: true, enabled: isChart })),
       group("データ", btn("table", "データの|編集", "項目と値を表で直す（Excelから貼り付けもできます）", () => { const o = chart(); if (o) editChart(o.id); }, { big: true, enabled: isChart }),
         // A chart brought over from PowerPoint keeps its formatting until it is reset to the studio's look.
-        btn("reset", "書式を|リセット", "PowerPointから取り込んだグラフの書式（色・ラベル・軸・凡例）を外し、スタジオのグラフの描き方にします", resetStyle, { big: true, enabled: () => Boolean(chart()?.chart.style) })),
+        btn("reset", "書式を|リセット", "PowerPointから取り込んだグラフの書式（色・ラベル・軸・凡例）を外し、スタジオのグラフの描き方にします", resetStyle, { big: true, enabled: () => Boolean(chart()?.chart.style) }),
+        drop("eye", "グラフ|フィルター", "グラフ フィルター：系列と項目を表示する／しない（データは残ります）", () => filterMenu(), { big: true, enabled: () => Boolean(chart()) && !chart().chart.style })),
       group("グラフのレイアウト",
         drop("layout", "クイック|レイアウト", "グラフ要素の組み合わせ（データ ラベル・凡例の位置・目盛線・軸ラベル）をまとめて変える", () => quickLayouts(), { big: true, enabled: isChart })),
       group("グラフ要素",

@@ -757,6 +757,60 @@ await step("フォント（⇧⌘F）・段落（インデント・ぶら下げ�
   assert(await page.evaluate(() => JSON.parse(localStorage.getItem("hsej-editor-alignTo") || "null")) === "auto", "back to aligning with each other");
 });
 
+await step("グラフ フィルター（系列・項目を隠す）とデータ テーブル; 図のレイアウト（キャプション付きで並べる）", async () => {
+  await page.keyboard.press("Escape");
+  await page.locator(".film-item").nth(4).click();
+  await page.waitForTimeout(300);
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="clustered-bar"]');
+  await page.waitForTimeout(400);
+  if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
+  const chartId = (await slide()).elements.at(-1).id;
+  const chartOf = async () => (await slide()).elements.find((x) => x.id === chartId).chart;
+  const c0 = await chartOf();
+  await tab("グラフのデザイン");
+  await byTitle("グラフ フィルター");
+  await page.locator(`.rb-pop .rb-menu button:has-text("${c0.labels[0]}")`).first().click();
+  await page.waitForTimeout(300);
+  let c = await chartOf();
+  assert(JSON.stringify(c.opts?.hideLabels) === "[0]" && c.labels.length === c0.labels.length, `the first category hidden, its data kept: ${JSON.stringify(c.opts)}`);
+  const axis = await page.evaluate((id) => document.querySelector(`#stageBody .hs-obj[data-el="${id}"]`).textContent, chartId);
+  assert(!axis.includes(c0.labels[0]), `not drawn: ${axis.slice(0, 120)}`);
+  await byTitle("データ ラベル・凡例・目盛線");
+  await page.locator('.rb-pop .rb-menu button:has-text("表示する")').nth(2).click();
+  await page.waitForTimeout(300);
+  c = await chartOf();
+  assert(c.opts?.table === true, `データ テーブル on: ${JSON.stringify(c.opts)}`);
+  const cols = await page.evaluate((id) => document.querySelectorAll(`#stageBody .hs-obj[data-el="${id}"] .hs-chart-table thead th`).length, chartId);
+  assert(cols === c0.labels.length, `a column a shown category (and the names): ${cols}`);
+  await shot("chart-filter-table");
+  await byTitle("グラフ フィルター");
+  await page.locator('.rb-pop .rb-menu button:has-text("すべて表示")').click();
+  await page.waitForTimeout(300);
+  assert(!(await chartOf()).opts?.hideLabels, "all shown again");
+  // 図のレイアウト: two pictures in a row with captions.
+  await page.keyboard.press("Escape");
+  const p1 = await insertPicture(logo);
+  const p2 = await insertPicture(logo);
+  await page.click("#formatTab").catch(() => {});
+  await page.locator(`#formatPane .fp-sel-list li[data-id="${p1.id}"]`).click();
+  await page.locator(`#formatPane .fp-sel-list li[data-id="${p2.id}"]`).click({ modifiers: ["Shift"] });
+  await page.waitForTimeout(200);
+  await tab("図の形式");
+  await byTitle("図のレイアウト");
+  await menuItem("キャプション付きの図（横に並べる）");
+  await page.waitForTimeout(400);
+  const list = (await slide()).elements;
+  const [a, b] = [p1.id, p2.id].map((id) => list.find((o) => o.id === id));
+  const caps = list.filter((o) => o.kind === "text" && o.group && o.group === a.group);
+  assert(a.group && a.group === b.group && caps.length === 2, `pictures and two captions grouped: ${JSON.stringify(caps.map((o) => o.text))}`);
+  assert(Math.abs(a.y - b.y) < 0.5 && Math.abs(a.w - b.w) < 0.5 && a.fit === "cover", `side by side, the same size: ${JSON.stringify([a, b].map((o) => [o.x, o.y, o.w, o.h, o.fit]))}`);
+  await shot("picture-layout");
+  await undo();
+  assert(!(await slide()).elements.find((o) => o.id === p1.id).group, "⌘Z puts them back");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

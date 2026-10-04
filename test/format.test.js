@@ -257,3 +257,32 @@ test("段落 → インデント: before the text, a first line indented or hang
     assert.match(el.querySelector(".hs-obj-tx").getAttribute("style"), /font-variant: ?small-caps/);
   } finally { delete globalThis.document; }
 });
+
+test("図のレイアウト: pictures set out with a caption each, filling their frames, grouped", () => {
+  const pics = [
+    { id: "p1", kind: "image", x: 100, y: 300, w: 300, h: 200, src: "asset:office", alt: "売場", crop: { l: 0.1, t: 0, r: 0, b: 0 } },
+    { id: "p2", kind: "image", x: 500, y: 320, w: 300, h: 200, src: "asset:office", fileName: "倉庫.jpg" },
+    { id: "p3", kind: "image", x: 900, y: 340, w: 300, h: 200, src: "asset:office" },
+  ];
+  const other = { id: "t1", kind: "text", x: 0, y: 0, w: 100, h: 50, text: "<p>見出し</p>" };
+  const { list, ids } = ops.pictureLayout([other, ...pics], ["p1", "p2", "p3", "t1"], "row");
+  assert.equal(ids.length, 6, "three pictures and three captions");
+  const placed = list.filter((o) => ids.includes(o.id));
+  const group = placed[0].group;
+  assert.ok(group && placed.every((o) => o.group === group), "one group");
+  const [a, b, c] = ["p1", "p2", "p3"].map((id) => list.find((o) => o.id === id));
+  assert.ok(Math.abs(a.y - b.y) < 0.01 && Math.abs(b.y - c.y) < 0.01 && a.x < b.x && b.x < c.x, "in a row");
+  assert.ok(Math.abs(a.w - b.w) < 0.01 && Math.abs(a.h - c.h) < 0.01, "the same size");
+  assert.equal(a.fit, "cover");
+  assert.equal(a.crop, undefined, "the frame is filled instead of cropped");
+  const caps = list.filter((o) => o.kind === "text" && ids.includes(o.id));
+  assert.deepEqual(caps.map((o) => o.text), ["<p>売場</p>", "<p>倉庫</p>", "<p>説明を入力</p>"], "alternative text, then the file's name");
+  assert.ok(caps.every((cap, i) => cap.y > [a, b, c][i].y + [a, b, c][i].h - 1), "each caption under its picture");
+  assert.equal(list.find((o) => o.id === "t1").group, undefined, "other objects are left alone");
+  const grid = ops.pictureLayout(pics, ["p1", "p2", "p3"], "grid").list;
+  assert.equal(grid.find((o) => o.id === "p3").x, grid.find((o) => o.id === "p1").x, "2 columns: the third starts a new row");
+  const side = ops.pictureLayout(pics, ["p1", "p2"], "side");
+  const cap = side.list.find((o) => o.id === side.ids[2]);
+  assert.ok(cap.x > side.list.find((o) => o.id === "p1").x && cap.align === "left", "the words to the right of the picture");
+  assert.equal(ops.pictureLayout([other], ["t1"], "row").ids.length, 0, "only pictures");
+});
