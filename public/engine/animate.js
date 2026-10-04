@@ -27,6 +27,8 @@
   const BY = { all: "すべて同時", para: "段落ごと", word: "単語ごと", char: "文字ごと" };
   // A SmartArt's items one after another (PowerPoint's 効果のオプション → 個別).
   const BY_SMARTART = { all: "1つのオブジェクトとして", item: "1つずつ" };
+  // アニメーションの後 (PowerPoint's After animation): fade back (暗くする), gone at once, or gone at the next click.
+  const AFTERS = { none: "暗くしない", dim: "薄くする（暗くする）", hide: "アニメーションの後で非表示にする", hideNext: "次のアニメーションのクリック時に非表示にする" };
   const REPEATS = { 1: "なし", 2: "2回", 3: "3回", 4: "4回", 5: "5回", 10: "10回", click: "次のクリックまで", slide: "スライドの最後まで" };
   const SPEEDS = [[5000, "さらに遅く（5秒）"], [3000, "遅く（3秒）"], [2000, "普通（2秒）"], [1000, "速く（1秒）"], [500, "さらに速く（0.5秒）"]];
 
@@ -192,6 +194,8 @@
       if (raw.repeat === "click" || raw.repeat === "slide") entry.repeat = raw.repeat;
       else if (Number(raw.repeat) > 1) entry.repeat = Math.round(num(raw.repeat, 1, 20, 1));
       if (raw.rewind === true) entry.rewind = true;
+      if (AFTERS[raw.after] && raw.after !== "none" && cls !== "out" && cls !== "media") entry.after = raw.after;
+      if (raw.sound && typeof raw.sound === "string" && /^[a-z]{2,16}$/.test(raw.sound)) entry.sound = raw.sound;
       if (raw.autoReverse === true && cls !== "media") entry.autoReverse = true;
       if (EASES[raw.ease] && raw.ease !== "auto") entry.ease = raw.ease;
       if (BY[raw.by] && raw.by !== "all" && ["in", "out", "em"].includes(cls) && !def.custom && !def.html && (objectIds.has(el) ? ["shape", "text"].includes(kinds.get(el)) : LAYOUT_TARGET.test(el))) entry.by = raw.by;
@@ -953,7 +957,26 @@
     }
     // (What waits hidden for its entrance stays marked: the entrance's frames show it while they apply, and an
     // entrance that rewinds leaves it hidden again.)
+    // サウンド: the effect's sound as it starts (the player's own, as for slide transitions).
+    if (e.sound && !instant) state.slideEl.hsAnimSound?.(e.sound);
+    // アニメーションの後: once the effect has played (not when it is called off, nor after the slide was reset).
+    const gen = state.gen;
+    if (e.after && started.length) Promise.all(started.map((a) => a.finished)).then(() => { if (state.gen === gen) afterEffect(state, e, parts); }).catch(() => {});
+    else if (e.after) afterEffect(state, e, parts);
     return started;
+  }
+
+  /** アニメーションの後: faded (暗くする), hidden now, or kept to be hidden at the next click. */
+  function afterEffect(state, e, parts) {
+    if (!parts.every((part) => part.fx.isConnected)) return;
+    if (e.after === "hideNext") { state.hideNext = [...(state.hideNext || []), ...parts]; return; }
+    const frames = e.after === "dim" ? [{ opacity: 0.35 }, { opacity: 0.35 }] : [{ visibility: "hidden" }, { visibility: "hidden" }];
+    for (const part of parts) { try { part.fx.animate(frames, { duration: 1, fill: "forwards" }); } catch { /* detached */ } }
+  }
+  /** The next click: what waited for it is hidden. */
+  function hideWaiting(state) {
+    for (const part of state.hideNext || []) { try { part.fx.animate([{ visibility: "hidden" }, { visibility: "hidden" }], { duration: 1, fill: "forwards" }); } catch { /* detached */ } }
+    state.hideNext = [];
   }
 
   /** An entrance (or, played backwards, an exit) on each part — or on its words or letters. */
@@ -1054,6 +1077,9 @@
     state.running = [];
     state.pending = [];
     state.triggerAt = new Map();
+    state.hideNext = [];
+    state.lastInstant = [];
+    state.gen = (state.gen || 0) + 1;
     const slideEl = state.slideEl;
     for (const el of slideEl.querySelectorAll(".hs-obj-fx, .hs-obj-move, .hs-obj-tx, .hs-obj-text, .hs-obj-geom *, .hs-obj-icon *, .hs-obj-line path, .hs-ochart *, .hs-chart *, .hs-mk, .hs-frame, [data-field], [data-g], .hs-u")) for (const a of el.getAnimations?.() || []) a.cancel();
     for (const el of slideEl.querySelectorAll(".hs-pen, .hs-caret, .hs-fx-shine, .hs-fx-ripple")) el.remove();
@@ -1067,6 +1093,7 @@
     if (!group) return 0;
     if (instant) {
       for (const item of [...group.items].sort((a, b) => a.begin - b.begin)) for (const a of runEntry(state, item.e, { instant: true })) { try { a.finish(); } catch { a.cancel(); } }
+      state.lastInstant = group.items;
       return 0;
     }
     for (const item of group.items) {
@@ -1117,7 +1144,7 @@
     bindTriggers(state);
     const upto = Math.min(step, state.plan.clicks);
     if (!animate || upto > 0) {
-      for (let g = 0; g <= upto; g += 1) runGroup(state, state.plan.main[g], { instant: true });
+      for (let g = 0; g <= upto; g += 1) { if (g > 0) settleThenHide(state); runGroup(state, state.plan.main[g], { instant: true }); }
       return 0;
     }
     return runGroup(state, state.plan.main[0], { offset: Math.max(0, delay) });
@@ -1131,6 +1158,7 @@
     releaseSpots(state);
     const group = state.plan.main[n];
     if (!group) return 0;
+    settleThenHide(state);
     const reduced = root.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     if (!animate || reduced) { runGroup(state, group, { instant: true }); return 0; }
     return runGroup(state, group);
@@ -1141,7 +1169,16 @@
     const state = stateOf(slideEl);
     if (!state) return;
     reset(state);
-    for (let g = 0; g <= Math.min(n, state.plan.clicks); g += 1) runGroup(state, state.plan.main[g], { instant: true });
+    for (let g = 0; g <= Math.min(n, state.plan.clicks); g += 1) { if (g > 0) settleThenHide(state); runGroup(state, state.plan.main[g], { instant: true }); }
+  }
+  /**
+   * Before a click's group: what the last group left to hide at the next click goes. Effects finished at once
+   * report their end a moment later, so their "hide at the next click" is collected here first.
+   */
+  function settleThenHide(state) {
+    for (const { e } of state.lastInstant || []) if (e.after === "hideNext") for (const part of targetsOf(state.slideEl, state.plan, e.el).parts) if (!(state.hideNext || []).includes(part)) state.hideNext = [...(state.hideNext || []), part];
+    state.lastInstant = [];
+    hideWaiting(state);
   }
 
   /** Stop everything (leaving a slide). */
@@ -1210,7 +1247,7 @@
   }
 
   Object.assign(E, {
-    ANIM_CLASSES: CLASSES, ANIM_STARTS: STARTS, ANIM_EASES: EASES, ANIM_BY: BY, ANIM_BY_SMARTART: BY_SMARTART, ANIM_REPEATS: REPEATS, ANIM_SPEEDS: SPEEDS,
+    ANIM_CLASSES: CLASSES, ANIM_STARTS: STARTS, ANIM_AFTERS: AFTERS, ANIM_EASES: EASES, ANIM_BY: BY, ANIM_BY_SMARTART: BY_SMARTART, ANIM_REPEATS: REPEATS, ANIM_SPEEDS: SPEEDS,
     ANIM_IN: IN, ANIM_EM: EM, ANIM_PATHS: PATHS, ANIM_MEDIA: MEDIA, animLabel: fxLabel, animDirs: dirsOf, animDefaultDur: defaultDur, animIsHtml: (cls, fx) => Boolean((cls === "out" ? IN[fx] : FX[cls]?.[fx])?.html),
     normalizeTimeline, timelinePlan, timelineTakesLayout, timelineMount, layoutTargets,
     animStart, animStep, animSeek, animStop, animBusy, animFinish,

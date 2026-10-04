@@ -336,6 +336,62 @@ await step("every page's animations and click actions can be reset in one undo s
   assert((await page.inputValue("#chatInput")).includes("HTMLならでは"), "AI prompt starts from HTML rather than old PowerPoint effects");
 });
 
+await step("最近使用した図形; 書式のコピー (ダブルクリックで続けて); アニメーションの後 薄くする・サウンド", async () => {
+  await page.locator(".film-item").nth(1).click();
+  await tab("ホーム");
+  await ribbon("新しいスライド");
+  await menuItem("白紙");
+  await page.waitForSelector(".slide-wrap .hs-slide");
+  await drawShape("楕円", [300, 300], [700, 600]);
+  await drawShape("正方形/長方形", [900, 300], [1200, 500]);
+  await drawShape("正方形/長方形", [900, 650], [1200, 850]);
+  // The gallery shows the shapes used, the last first.
+  await tab("挿入");
+  await page.locator('.rb-btn.big:has-text("図形")').first().click();
+  const recent = await page.$$eval(".rb-gallery .rb-recent-shapes button", (els) => els.map((el) => el.dataset.shape));
+  assert(recent[0] === "rect" && recent.includes("ellipse"), `最近使用した図形: ${recent}`);
+  await page.keyboard.press("Escape");
+  // The ellipse in light brown, then its format onto both boxes with one double-click.
+  const [ellipse, a, b] = await objects();
+  await selectObject(0);
+  await tab("図形の書式");
+  await page.locator('.rb-body .rb-drop:has-text("塗り")').first().click().catch(async () => { await page.locator('.rb-body .rb-drop[title*="塗りつぶし"]').first().click(); });
+  await page.locator('.rb-pop .rb-sw[aria-label="淡茶"]').first().click();
+  await page.waitForTimeout(250);
+  assert((await objects())[0].fill === "#d6c9b8", `the ellipse light brown: ${(await objects())[0].fill}`);
+  await tab("ホーム");
+  await page.locator('.rb-body .rb-btn[title^="書式のコピー/貼り付け"]').first().dblclick();
+  await page.waitForTimeout(200);
+  const click = async (o) => { await page.mouse.click(...at(o.x + o.w / 2, o.y + o.h / 2)); await page.waitForTimeout(250); };
+  await click(a);
+  await click(b);
+  let list = await objects();
+  assert(list[1].fill === "#d6c9b8" && list[2].fill === "#d6c9b8", `both boxes: ${list[1].fill} ${list[2].fill}`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  // アニメーションの後: the ellipse fades in, then fades back; a sound as it starts.
+  await selectObject(0);
+  await tab("アニメーション");
+  await page.locator('.an-quick .an-fx[data-fx="in:fade"]').click();
+  await page.waitForTimeout(300);
+  await page.click("#animTab");
+  await page.locator(".an-row").first().click();
+  await page.selectOption('.an-details select[aria-label="アニメーションの後"]', "dim");
+  await page.selectOption('.an-details select[aria-label="サウンド"]', "chime");
+  await page.waitForTimeout(300);
+  const [e] = await timeline();
+  assert(e.after === "dim" && e.sound === "chime", `the entry: ${JSON.stringify(e)}`);
+  await page.keyboard.press("Shift+F5");
+  await page.waitForSelector(".hs-player .hs-slide .hs-objects .hs-obj");
+  await page.waitForTimeout(800);
+  await page.click(".hs-player-stage", { position: { x: 40, y: 40 } });
+  await page.waitForTimeout(1800);
+  const opacity = await page.evaluate((id) => getComputedStyle(document.querySelector(`.hs-player .hs-obj[data-el="${id}"] .hs-obj-fx`)).opacity, ellipse.id);
+  assert(Math.abs(Number(opacity) - 0.35) < 0.02, `faded after its entrance: ${opacity}`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+});
+
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");
 await browser.close();
 process.exit(errors.length ? 1 : 0);

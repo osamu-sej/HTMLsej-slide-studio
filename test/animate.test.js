@@ -186,3 +186,37 @@ test("the AI never writes animations: they stay out of its view and every change
   const parsed = deckShape.parse({ title: "t", purpose: "", audience: "", theme: "sej", slides: [{ type: "title", title: "表紙" }, { type: "blank", title: "x", elements: objects, timeline }] });
   assert.equal(parsed.slides[1].timeline.length, 2, "the deck keeps them");
 });
+
+test("アニメーションの後 and an effect's sound: kept where they fit; a faded / hidden end after the effect, a hide at the next click", async () => {
+  const { E, window } = await loadEngine();
+  const slide = { type: "blank", elements: objects, timeline: [
+    { id: "a1", el: "box1", cls: "in", fx: "fade", start: "click", after: "dim", sound: "chime" },
+    { id: "a2", el: "txt1", cls: "in", fx: "fade", start: "click", after: "hideNext" },
+    { id: "a3", el: "pic1", cls: "out", fx: "fade", start: "click", after: "dim", sound: "BAD!" },
+    { id: "a4", el: "btn1", cls: "em", fx: "pulse", start: "click", after: "hide" },
+    { id: "a5", el: "vid1", cls: "media", fx: "play", start: "click", after: "dim" },
+  ] };
+  const list = plain(E.normalizeTimeline(slide.timeline, slide));
+  assert.equal(list[0].after, "dim");
+  assert.equal(list[0].sound, "chime");
+  assert.equal(list[1].after, "hideNext");
+  assert.equal(list[2].after, undefined, "an exit has no after");
+  assert.equal(list[2].sound, undefined, "only sound names");
+  assert.equal(list[3].after, "hide");
+  assert.equal(list[4].after, undefined, "media has no after");
+  assert.ok(E.ANIM_AFTERS.dim && E.ANIM_AFTERS.hide && E.ANIM_AFTERS.hideNext);
+  // Playing: seeking to the end of click 2 hides what was to go at the next click (the 2nd click came).
+  const el = E.render(slide, { mode: "present", index: 0, deck: { slides: [slide], theme: "sej" } });
+  window.document.body.append(el);
+  const fxOf = (id) => el.querySelector(`.hs-obj[data-el="${id}"] .hs-obj-fx`) || el.querySelector(`.hs-obj[data-el="${id}"]`);
+  const seen = [];
+  const animate = window.Element.prototype.animate;
+  window.Element.prototype.animate = function (frames, opts) { seen.push([this.closest(".hs-obj")?.dataset.el, JSON.stringify(frames.at(-1))]); return animate ? animate.call(this, frames, opts) : { finished: Promise.resolve(), finish() {}, cancel() {}, effect: { updateTiming() {} } }; };
+  try {
+    assert.ok(fxOf("txt1"), "the text drawn");
+    E.animSeek(el, 3);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.ok(seen.some(([id, f]) => id === "txt1" && /hidden/.test(f)), `the text hidden when the next click came: ${JSON.stringify(seen.filter(([id]) => id === "txt1"))}`);
+    assert.ok(seen.some(([id, f]) => id === "box1" && /0\.35/.test(f)), `the box faded after its entrance: ${JSON.stringify(seen.filter(([id]) => id === "box1"))}`);
+  } finally { window.Element.prototype.animate = animate; }
+});

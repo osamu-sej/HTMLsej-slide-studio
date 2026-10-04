@@ -1157,6 +1157,8 @@
 
     const renderAt = (i) => {
       const el = E.render(slides[i], { ...(opts.renderOptions || {}), deck, index: i, mode: "present", fit: opts.fitFor?.(i) });
+      // アニメーションのサウンド: an effect's sound rings as it starts (unless the show plays without sounds).
+      if (opts.sounds !== false && !opts.static) el.hsAnimSound = (kind) => playSound(kind);
       return E.mount(el, { contain: true, className: "hs-player-slide" });
     };
 
