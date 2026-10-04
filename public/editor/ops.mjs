@@ -535,13 +535,38 @@ export function setList(E, html, type, style = null) {
   if (!type) return E.sanitizeRich(lines.map((line) => `<p>${line || "<br>"}</p>`).join(""));
   const tag = type === "number" ? "ol" : "ul";
   const kept = style && E.LIST_STYLES?.[tag]?.[style] ? ` data-style="${style}"` : "";
-  return E.sanitizeRich(`<${tag}${kept}>${lines.map((line) => `<li>${line || "<br>"}</li>`).join("")}</${tag}>`);
+  const made = E.sanitizeRich(`<${tag}${kept}>${lines.map((line) => `<li>${line || "<br>"}</li>`).join("")}</${tag}>`);
+  // The marks' colour and size (and a numbered list's first number) stay through a change of style.
+  const was = listPropsOf(html);
+  return was ? setListProps(E, made, { start: type === "number" && was.type === "number" ? was.start : undefined, mark: was.mark, msize: was.msize }) : made;
 }
 
 /** The list's marker (箇条書き・段落番号の種類): its data-style, or the plain one. */
 export function listStyleOf(html) {
-  const m = String(html || "").match(/^<(ul|ol)(?: data-style="([\w-]+)")?>/);
-  return m ? m[2] || (m[1] === "ul" ? "disc" : "decimal") : null;
+  const m = String(html || "").match(/^<(ul|ol)\b([^>]*)>/);
+  if (!m) return null;
+  return m[2].match(/data-style="([\w-]+)"/)?.[1] || (m[1] === "ul" ? "disc" : "decimal");
+}
+
+/** 箇条書きと段落番号 of the first list in the text: its first number, marks' colour and size. */
+export function listPropsOf(html) {
+  const m = String(html || "").match(/^<(ul|ol)\b([^>]*)>/);
+  if (!m) return null;
+  const attr = (name) => m[2].match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? null;
+  return { type: m[1] === "ol" ? "number" : "bullet", start: Number(attr("start")) || 1, mark: attr("data-mark") || "", msize: attr("data-msize") || "100" };
+}
+
+/** Every list in the text given a first number (numbered lists), marks' colour and size; the rest kept. */
+export function setListProps(E, html, { start, mark, msize } = {}) {
+  const box = document.createElement("div");
+  box.append(E.richFragment(html || ""));
+  for (const list of box.querySelectorAll("ul, ol")) {
+    if (list.parentElement?.closest("ul, ol")) continue;
+    if (start !== undefined && list.nodeName === "OL") { if (start > 1) list.setAttribute("start", String(start)); else list.removeAttribute("start"); }
+    if (mark !== undefined) { if (mark) list.setAttribute("data-mark", mark); else list.removeAttribute("data-mark"); }
+    if (msize !== undefined) { if (msize && msize !== "100") list.setAttribute("data-msize", msize); else list.removeAttribute("data-msize"); }
+  }
+  return E.sanitizeRich(box.innerHTML);
 }
 
 /** Which list the text is (all bullets / all numbers / none). */
@@ -629,6 +654,50 @@ function collapse(grid) {
     return out;
   }));
 }
+/** 罫線 (テーブル デザイン → 罫線): which sides each kind draws, for a cell at the range's edges or inside it. */
+export const TABLE_BORDERS = [
+  ["bottom", "下罫線"], ["top", "上罫線"], ["left", "左罫線"], ["right", "右罫線"], ["none", "枠なし"], ["all", "格子"],
+  ["outside", "外枠"], ["inside", "内側"], ["insideH", "横罫線（内側）"], ["insideV", "縦罫線（内側）"],
+];
+/**
+ * The cells r0..r1 × c0..c1 given borders of a kind drawn with the pen ({ c: colour, w: width px }), or none. The
+ * cell across each edge gets the same line (borders collapse into one); a merged cell takes a line only on its own edges.
+ */
+export function tableBorders(o, r0, c0, r1, c1, kind, pen) {
+  const grid = expand(o.cells);
+  const rows = grid.length;
+  const cols = grid[0]?.length || 0;
+  const [ra, rb] = [Math.max(0, Math.min(r0, r1)), Math.min(rows - 1, Math.max(r0, r1))];
+  const [ca, cb] = [Math.max(0, Math.min(c0, c1)), Math.min(cols - 1, Math.max(c0, c1))];
+  const line = kind === "none" ? "none" : { c: pen.c, w: pen.w };
+  const at = (i, j) => grid[i]?.[j];
+  for (let i = ra; i <= rb; i += 1) for (let j = ca; j <= cb; j += 1) {
+    const cell = at(i, j);
+    const top = i === ra;
+    const bottom = i === rb;
+    const left = j === ca;
+    const right = j === cb;
+    const want = {
+      bottom: { bb: bottom }, top: { bt: top }, left: { bl: left }, right: { br: right },
+      outside: { bt: top, bb: bottom, bl: left, br: right },
+      inside: { bt: !top, bb: !bottom, bl: !left, br: !right },
+      insideH: { bt: !top, bb: !bottom }, insideV: { bl: !left, br: !right },
+      all: { bt: true, bb: true, bl: true, br: true }, none: { bt: true, bb: true, bl: true, br: true },
+    }[kind] || {};
+    // A side is the cell's own only where the next position is another cell (a merge covers the rest).
+    const across = { bt: [i - 1, j, "bb"], bb: [i + 1, j, "bt"], bl: [i, j - 1, "br"], br: [i, j + 1, "bl"] };
+    for (const [side, on] of Object.entries(want)) {
+      if (!on) continue;
+      const [ni, nj, facing] = across[side];
+      const next = at(ni, nj);
+      if (next === cell) continue;
+      cell[side] = line === "none" ? "none" : { ...line };
+      if (next) next[facing] = line === "none" ? "none" : { ...line };
+    }
+  }
+  return { ...o, cells: collapse(grid) };
+}
+
 /** The cell (top-left of a merge) that covers row r, column c. */
 export function tableOrigin(o, r, c) {
   const grid = expand(o.cells);

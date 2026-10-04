@@ -77,6 +77,16 @@
 .hs-slide .hs-obj-tx ol { list-style: decimal; }
 .hs-slide .hs-obj-tx ol ol { list-style: lower-alpha; }
 .hs-slide .hs-obj-tx li::marker { color: currentColor; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) u[data-line="double"], .hs-slide :is(.hs-obj-tx, .hs-cell-tx) s[data-line="double"] { text-decoration-style: double; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) u[data-line="dotted"] { text-decoration-style: dotted; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) u[data-line="dashed"] { text-decoration-style: dashed; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) u[data-line="wavy"] { text-decoration-style: wavy; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) u[data-line="thick"] { text-decoration-thickness: .12em; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) :is(ul, ol)[data-mark="navy"] > li::marker { color: #1f3864; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) :is(ul, ol)[data-mark="gray"] > li::marker { color: #808080; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) :is(ul, ol)[data-msize="75"] > li::marker { font-size: .75em; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) :is(ul, ol)[data-msize="125"] > li::marker { font-size: 1.25em; }
+.hs-slide :is(.hs-obj-tx, .hs-cell-tx) :is(ul, ol)[data-msize="150"] > li::marker { font-size: 1.5em; }
 .hs-slide .hs-obj-tx p[data-bullet] { padding-left: 1.15em; text-indent: -1.15em; }
 /* 箇条書き・段落番号の種類 (data-style on the list). */
 @counter-style hs-circled { system: fixed; symbols: "①" "②" "③" "④" "⑤" "⑥" "⑦" "⑧" "⑨" "⑩" "⑪" "⑫" "⑬" "⑭" "⑮" "⑯" "⑰" "⑱" "⑲" "⑳"; suffix: " "; fallback: decimal; }

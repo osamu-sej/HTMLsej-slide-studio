@@ -184,8 +184,34 @@ export function createEditorUi(editor, app) {
       return h("div", { class: "rb-gallery rb-lists" }, h("div", { class: "rb-gallery-head" }, type === "number" ? "段落番号" : "箇条書き"),
         h("div", { class: "rb-list-grid" },
           cell(null, h("span", { class: "rb-list-none" }, "なし"), "なし"),
-          Object.keys(E.LIST_STYLES[tag]).map((style) => cell(style, h("span", { class: "rb-list-prev" }, marks(style).map((m) => h("span", {}, h("b", {}, m), h("i")))), LIST_NAMES[style] || style))));
+          Object.keys(E.LIST_STYLES[tag]).map((style) => cell(style, h("span", { class: "rb-list-prev" }, marks(style).map((m) => h("span", {}, h("b", {}, m), h("i")))), LIST_NAMES[style] || style))),
+        h("button", { type: "button", class: "rb-menu-foot rb-list-more", disabled: !st?.list, title: st?.list ? "" : "先に箇条書き・段落番号にしてください", onmousedown: (event) => event.preventDefault(), onclick: () => { close(); listDialog(type); } }, "箇条書きと段落番号…"));
     };
+  }
+  /** 箇条書きと段落番号: the marks' size and colour (the SEJ's text colours) and a numbered list's first number. */
+  function listDialog(type) {
+    const now = editor.textState()?.listProps || { start: 1, mark: "", msize: "100" };
+    const size = h("select", { class: "ld-size", "aria-label": "サイズ" }, ...[["75", "75%"], ["100", "100%（文字と同じ）"], ["125", "125%"], ["150", "150%"]].map(([v, l]) => h("option", { value: v, selected: now.msize === v }, l)));
+    const color = h("select", { class: "ld-color", "aria-label": "色" }, ...[["", "黒（文字と同じ）"], ["navy", "濃紺"], ["gray", "グレー"]].map(([v, l]) => h("option", { value: v, selected: now.mark === v }, l)));
+    const start = h("input", { type: "number", min: "1", max: "9999", value: String(now.start || 1), class: "ld-start sh-num", "aria-label": "開始" });
+    const numbered = now.type === "number" || type === "number";
+    const dialog = h("dialog", { class: "list-dialog", "aria-label": "箇条書きと段落番号" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "箇条書きと段落番号"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body sh-form-col" },
+        h("label", { class: "sh-inline" }, "サイズ（文字に対して） ", size),
+        h("label", { class: "sh-inline" }, "色 ", color),
+        numbered ? h("label", { class: "sh-inline" }, "開始 ", start) : null,
+        h("p", { class: "hint" }, "色はSEJの文字の色（黒・濃紺・グレー）だけです。")),
+      h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"),
+        h("button", { type: "button", class: "btn btn-primary ld-ok", onclick: () => {
+          const props = { mark: color.value, msize: size.value };
+          if (numbered) props.start = Math.max(1, Math.min(9999, Math.round(Number(start.value) || 1)));
+          dialog.close();
+          editor.textFormat("listProps", props);
+        } }, "OK")));
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => dialog.remove());
+    dialog.showModal();
   }
 
   /** Colour swatches of the SEJ palette (plus none and, for fills and lines, any colour with a warning). */
@@ -635,6 +661,13 @@ export function createEditorUi(editor, app) {
         row(btn("bold", "", "太字（⌘B）", () => editor.textFormat("bold"), { enabled: hasText, pressed: tState("bold"), keep: true }),
           btn("italic", "", "斜体（⌘I）", () => editor.textFormat("italic"), { enabled: hasText, pressed: tState("italic"), keep: true }),
           btn("underline", "", "下線（⌘U）", () => editor.textFormat("underline"), { enabled: hasText, pressed: tState("underline"), keep: true }),
+          caret("下線の種類・二重取り消し線", () => menu([
+            { head: "下線の種類" },
+            ...[["single", "一重線"], ["double", "二重線"], ["thick", "太線"], ["dotted", "点線"], ["dashed", "破線"], ["wavy", "波線"]].map(([v, label]) => ({ label, on: editor.textState()?.uline === v, run: () => editor.textFormat("uline", v) })),
+            "-", { head: "取り消し線" },
+            { label: "一重取り消し線", on: editor.textState()?.sline === "single", run: () => editor.textFormat("sline", "single") },
+            { label: "二重取り消し線", on: editor.textState()?.sline === "double", run: () => editor.textFormat("sline", "double") },
+          ]), { enabled: hasText }),
           btn("strike", "", "取り消し線", () => editor.textFormat("strike"), { enabled: hasText, pressed: tState("strike"), keep: true }),
           btn("sup", "", "上付き", () => editor.textFormat("sup"), { enabled: () => editor.typing, keep: true }),
           btn("sub", "", "下付き", () => editor.textFormat("sub"), { enabled: () => editor.typing, keep: true }),
@@ -704,7 +737,7 @@ export function createEditorUi(editor, app) {
         btn("magic", "デザイン|アイデア", "このスライドの見せ方の違う3つの案をAIが作り、並べて選べます（Codexに接続しているとき。右の「AIと話す」に届きます）", () => app.designIdeas(), { big: true, enabled: () => app.canAi() })),
       group("ユーザー設定",
         btn("slide", "スライドの|サイズ", "ワイド画面（16:9・13.33×7.5インチ）：SEJテンプレートの大きさです", () => app.toast("スライドのサイズはワイド画面（16:9・13.33×7.5インチ）です（SEJテンプレート）"), { big: true }),
-        btn("fill", "背景の|書式設定", "このスライドの背景（SEJの淡い色・図と透明度・並べて表示）。すべてに適用・背景のリセットも", () => app.formatBackground(), { big: true, enabled: () => Boolean(app.slide()) }),
+        btn("background", "背景の|書式設定", "このスライドの背景（SEJの淡い色・図と透明度・並べて表示）。すべてに適用・背景のリセットも", () => app.formatBackground(), { big: true, enabled: () => Boolean(app.slide()) }),
         col(btn("chartBar", "数字を数え上げる", "数字のカウントアップとグラフが伸びる動き（資料全体）", () => app.setDeckDesign({ motion: { numbers: !motion().numbers } }), { pressed: () => motion().numbers }),
           btn("spot", "波紋を広げる", "SEJの波紋を発表中にゆっくり広げる", () => app.setDeckDesign({ motion: { ambient: !motion().ambient } }), { pressed: () => motion().ambient }),
           btn("pen", "線を描くように", "アイコン・線・マーカーを描くように見せる", () => app.setDeckDesign({ motion: { draw: !motion().draw } }), { pressed: () => motion().draw }))),

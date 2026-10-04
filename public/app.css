@@ -1661,3 +1661,8 @@ audio.trim-media { background: transparent; }
 .lock-dialog .field input { width: 100%; box-sizing: border-box; }
 .lock-msg { color: var(--danger, #9b2c2c); min-height: 1.2em; }
 .sh-form-col { display: flex; flex-direction: column; gap: 10px; }
+/* 箇条書きと段落番号… at the foot of the list galleries, and its dialog. */
+.rb-list-more { display: block; width: 100%; margin-top: 6px; padding: 6px 10px; border: 0; border-top: 1px solid var(--line); background: none; text-align: left; font: inherit; font-size: 13px; cursor: pointer; }
+.rb-list-more:hover:not(:disabled) { background: var(--hover, rgba(31, 56, 100, .06)); }
+.rb-list-more:disabled { opacity: .5; cursor: default; }
+.list-dialog { width: min(420px, calc(100vw - 32px)); }

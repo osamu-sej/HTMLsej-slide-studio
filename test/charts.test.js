@@ -191,3 +191,24 @@ test("動作設定ボタン: twelve of them, the ones that move through the show
   for (const key of group[1]) assert.ok(E.geometry(key, 100, 100).paths.length, key);
   assert.ok(E.geometry("actionButtonForwardNext", 100, 100).extras.some((x) => x.tone === "dark"), "its sign drawn darker");
 });
+
+test("軸の書式: the value axis's own minimum and maximum; values beyond it stay on the edge", async () => {
+  const E = await loadEngine();
+  const data = { labels: ["4月", "5月", "6月"], series: [{ name: "売上", values: [60, 80, 140] }] };
+  const { o, el } = draw(E, { type: "line", ...data, opts: { axisMin: 50, axisMax: 100 } });
+  assert.equal(o.chart.opts.axisMin, 50);
+  assert.equal(o.chart.opts.axisMax, 100);
+  const ticks = [...el.querySelectorAll(".hs-tick")].map((t) => t.textContent);
+  assert.equal(ticks[0], "50", `from the minimum: ${ticks}`);
+  assert.equal(ticks.at(-1), "100", `to the maximum: ${ticks}`);
+  const top = Math.min(...[...el.querySelectorAll("line.hs-grid, line.hs-axisline")].map((l) => Number(l.getAttribute("y1"))));
+  const dots = [...el.querySelectorAll("circle")].map((c) => Number(c.getAttribute("cy")));
+  assert.ok(dots.length && Math.min(...dots) >= top - 0.01, `140 stays on the top edge (${Math.min(...dots)} vs ${top})`);
+  // A maximum not above the minimum is dropped; bars keep their zero line and stop at the maximum.
+  assert.equal(draw(E, { type: "line", ...data, opts: { axisMin: 100, axisMax: 50 } }).o.chart.opts.axisMax, undefined);
+  const bars = draw(E, { type: "bar", ...data, opts: { axisMax: 100 } }).el;
+  // A bar's top is its value label's place (16 above it); the zero line is the axis line.
+  const y0 = Number(bars.querySelector("line.hs-axisline").getAttribute("y1"));
+  const heights = [...bars.querySelectorAll("text.hs-val")].map((t) => y0 - Number(t.getAttribute("y")) - 16);
+  assert.ok(heights.length === 3 && heights[1] / heights[2] > 0.79 && heights[1] / heights[2] < 0.81 && heights[0] / heights[2] > 0.59 && heights[0] / heights[2] < 0.61, `bars on a 0–100 axis (140 stops at the top): ${heights}`);
+});

@@ -458,6 +458,98 @@ await step("パスワードを使用して暗号化: the file asks the password,
   await viewer.close();
 });
 
+await step("テーブル デザイン → 罫線の作成: ペンの太さ 3 pt・濃紺で外枠、内側の横罫線、枠なし", async () => {
+  await tab("挿入");
+  await ribbonBtn("表");
+  await page.waitForSelector(".tb-pick");
+  await page.locator(".tb-pick button").nth(2 * 10 + 2).click();
+  await page.waitForTimeout(400);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  const cells = async () => (await slide()).elements.find((x) => x.id === id).cells;
+  await tab("テーブル デザイン");
+  await byTitle("罫線を引くペンの太さ");
+  await menuItem("3 pt");
+  await byTitle("選んだセル（なければ表全体）に罫線");
+  await menuItem("外枠");
+  await page.waitForTimeout(300);
+  let c = await cells();
+  assert(JSON.stringify(c[0][0].bt) === JSON.stringify({ c: "#1f3864", w: 6 }) && JSON.stringify(c[2][2].bb) === JSON.stringify({ c: "#1f3864", w: 6 }) && !c[1][1].bt, `外枠 at 3 pt: ${JSON.stringify(c[0][0])} ${JSON.stringify(c[1][1])}`);
+  const drawn = await page.evaluate((id) => getComputedStyle(document.querySelector(`#stageBody .hs-obj[data-el="${id}"] td[data-r="0"][data-c="0"]`)).borderTopWidth, id);
+  assert(parseFloat(drawn) >= 5, `drawn 6px: ${drawn}`);
+  await byTitle("選んだセル（なければ表全体）に罫線");
+  await menuItem("横罫線（内側）");
+  await page.waitForTimeout(300);
+  c = await cells();
+  assert(c[0][1].bb && c[1][1].bt && c[1][1].bb && !c[1][1].bl, `inside horizontal lines: ${JSON.stringify(c[1][1])}`);
+  await shot("table-borders");
+  await byTitle("選んだセル（なければ表全体）に罫線");
+  await menuItem("枠なし");
+  await page.waitForTimeout(300);
+  c = await cells();
+  assert(c.flat().every((cell) => cell.merged || (cell.bt === "none" && cell.bb === "none" && cell.bl === "none" && cell.br === "none")), "枠なし");
+});
+
+await step("箇条書きと段落番号…: 開始 3, 濃紺, 125%; 下線の種類 二重線; グラフの軸の書式 0〜200", async () => {
+  await tab("挿入");
+  await ribbonBtn("テキスト ボックス");
+  await menuItem("横書きテキスト ボックス");
+  const r = await page.locator(".slide-wrap .hs-slide").first().boundingBox();
+  await page.mouse.click(r.x + r.width * 0.3, r.y + r.height * 0.45);
+  await page.waitForTimeout(200);
+  await page.keyboard.type("三つ目");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("四つ目");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  const o = async () => (await slide()).elements.find((x) => x.id === id);
+  await tab("ホーム");
+  await byTitle("段落番号の種類");
+  await page.click('.rb-pop .rb-list-sw[data-list-style="decimal"]');
+  await page.waitForTimeout(200);
+  await byTitle("段落番号の種類");
+  await page.click(".rb-pop .rb-list-more");
+  await page.waitForSelector(".list-dialog[open]");
+  await page.fill(".list-dialog .ld-start", "3");
+  await page.selectOption(".list-dialog .ld-color", "navy");
+  await page.selectOption(".list-dialog .ld-size", "125");
+  await page.click(".list-dialog .ld-ok");
+  await page.waitForTimeout(300);
+  const text = (await o()).text;
+  assert(/^<ol[^>]*\bstart="3"/.test(text) && /data-mark="navy"/.test(text) && /data-msize="125"/.test(text), `the list: ${text}`);
+  const marker = await page.evaluate((id) => { const li = document.querySelector(`#stageBody .hs-obj[data-el="${id}"] li`); const m = getComputedStyle(li, "::marker"); return `${m.color}|${m.fontSize}|${li.parentElement.start}`; }, id);
+  assert(/31, 56, 100/.test(marker) && marker.endsWith("|3"), `drawn: navy marks, from 3 (${marker})`);
+  await byTitle("下線の種類");
+  await menuItem("二重線");
+  await page.waitForTimeout(200);
+  const u = await o();
+  assert(u.underline && u.uline === "double", `underlined double: ${JSON.stringify({ underline: u.underline, uline: u.uline })}`);
+  assert((await page.evaluate((id) => getComputedStyle(document.querySelector(`#stageBody .hs-obj[data-el="${id}"] .hs-obj-tx`)).textDecorationStyle, id)) === "double", "drawn double");
+  // グラフ: 軸の書式 (最小値・最大値).
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="line"]');
+  await page.waitForTimeout(400);
+  if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
+  const chartId = (await slide()).elements.at(-1).id;
+  await tab("グラフのデザイン");
+  await ribbonBtn("グラフ要素");
+  await menuItem("軸の書式");
+  await page.waitForSelector("#askDialog[open]");
+  await page.fill("#askInput", "0");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("#askDialog[open]");
+  await page.fill("#askInput", "200");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  const opts = (await slide()).elements.find((x) => x.id === chartId).chart.opts || {};
+  assert(opts.axisMin === 0 && opts.axisMax === 200, `the axis: ${JSON.stringify(opts)}`);
+  const ticks = await page.$$eval(`#stageBody .hs-obj[data-el="${chartId}"] .hs-tick`, (els) => els.map((el) => el.textContent));
+  assert(ticks[0] === "0" && ticks.at(-1) === "200", `ticks 0–200: ${ticks}`);
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {
