@@ -1666,3 +1666,13 @@ audio.trim-media { background: transparent; }
 .rb-list-more:hover:not(:disabled) { background: var(--hover, rgba(31, 56, 100, .06)); }
 .rb-list-more:disabled { opacity: .5; cursor: default; }
 .list-dialog { width: min(420px, calc(100vw - 32px)); }
+/* グラフのデザイン → 色の変更: each set's first colours. */
+.tb-color-row { display: inline-flex; align-items: center; gap: 8px; }
+.tb-color-set { display: inline-flex; gap: 2px; }
+.tb-color-set i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); }
+/* ファイル → オプション */
+.options-dialog { width: min(600px, calc(100vw - 32px)); }
+.opt-body { display: flex; flex-direction: column; gap: 12px; }
+.opt-sec { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+.opt-sec legend { font-weight: 700; font-size: 13px; padding: 0 4px; }
+.opt-name { font-weight: 700; }

@@ -250,6 +250,18 @@ export function createTableUi(editor, app, kit) {
       } },
     ]);
   }
+  /** セルのサイズ: the rows' height (or the columns' width) in cm, the table growing or shrinking to fit. */
+  async function cellSize(axis) {
+    const x = target();
+    if (!x) return;
+    const [a, b] = axis === "rows" ? (x.cells ? [x.r0, x.r1] : [0, x.o.rows.length - 1]) : (x.cells ? [x.c0, x.c1] : [0, x.o.cols.length - 1]);
+    const now = ops.toCm((axis === "rows" ? x.o.rows[a] * x.o.h : x.o.cols[a] * x.o.w));
+    const answer = await app.ask(axis === "rows" ? "行の高さ" : "列の幅", `${axis === "rows" ? "高さ" : "幅"}（cm）`, String(now));
+    if (answer == null) return;
+    const cm = Number(String(answer).replace(/[,，cm\s]/g, ""));
+    if (!Number.isFinite(cm) || cm <= 0) { app.toast("0より大きい数字を入れてください"); return; }
+    change((o) => ops.tableSetSize(o, axis, a, b, ops.fromCm(cm)));
+  }
   function layoutTab() {
     const t = () => target();
     const merged = () => { const x = t(); return Boolean(x && x.cells && (x.r1 > x.r0 || x.c1 > x.c0) && !editor.cellRange); };
@@ -270,6 +282,8 @@ export function createTableUi(editor, app, kit) {
         col(btn("merge", "セルの結合", "選んだセル（Shift＋クリックかドラッグで選ぶ）を1つに", () => editor.changeTable((o, x) => ops.tableMerge(o, x.r0, x.c0, x.r1, x.c1), { keepRange: false }), { enabled: ranged , keep: true }),
           btn("split", "セルの分割", "結合したセルを元に戻す", () => change((o, x) => ops.tableSplit(o, x.r0, x.c0)), { enabled: merged , keep: true }))),
       group("セルのサイズ",
+        col(btn("size", "高さ…", "選んだ行（なければ全部）の高さ（cm）", () => cellSize("rows"), { enabled: isTable, keep: true }),
+          btn("size", "幅…", "選んだ列（なければ全部）の幅（cm）", () => cellSize("cols"), { enabled: isTable, keep: true })),
         col(btn("distV", "高さを揃える", "選んだ行（なければ全部）の高さを同じに", () => change((o, x) => ops.tableDistribute(o, "rows", x.cells ? x.r0 : 0, x.cells ? x.r1 : Infinity)), { enabled: isTable , keep: true }),
           btn("distH", "幅を揃える", "選んだ列（なければ全部）の幅を同じに", () => change((o, x) => ops.tableDistribute(o, "cols", x.cells ? x.c0 : 0, x.cells ? x.c1 : Infinity)), { enabled: isTable , keep: true }))),
       group("配置",
@@ -364,7 +378,19 @@ export function createTableUi(editor, app, kit) {
         drop("plus", "グラフ要素|を追加", "データ ラベル・凡例・目盛線", () => elementsMenu(), { big: true, enabled: isChart }),
         col(btn("textbox", "タイトル…", "グラフの上に出す見出し", () => ask("title", "グラフのタイトル", "空にすると消えます"), { enabled: isChart }), btn("font", "単位…", "値の単位（例：億円）", () => ask("unit", "値の単位", "例：億円・%"), { enabled: isChart }),
           btn("rotate", "行/列の切り替え", "項目と系列を入れ替える（横軸の項目が凡例に、凡例が横軸に）", () => transpose(), { enabled: () => Boolean(chart()) && !chart().chart.style }))),
+      group("グラフ スタイル",
+        drop("fill", "色の|変更", "グラフの色（SEJの配色・青・グレー・茶。どれもSEJの色だけ）", () => colorSets(), { big: true, enabled: () => Boolean(chart()) && !chart().chart.style })),
     ];
+  }
+  /** 色の変更: the chart's colour set, each shown with its first colours. */
+  function colorSets() {
+    const now = chart()?.chart.colors || "";
+    const swatches = (vars) => h("span", { class: "tb-color-set" }, ["--c1", "--c2", "--c3", "--c4"].map((k) => h("i", { style: { background: vars[k] } })));
+    const theme = { "--c1": "#1f3864", "--c2": "#b7c3da", "--c3": "#d6c9b8", "--c4": "#808080" };
+    const set = (colors) => { const o = chart(); if (o) editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: { ...x.chart, colors: colors || undefined } } : x)), { select: [o.id] }); };
+    return menu([{ head: "色の変更" },
+      { label: h("span", { class: "tb-color-row" }, swatches(theme), "SEJの配色（いろいろ）"), on: !now, run: () => set("") },
+      ...Object.entries(E.CHART_COLORS).map(([key, def]) => ({ label: h("span", { class: "tb-color-row", "data-colors": key }, swatches(def.vars), `${def.label}（同じ系統）`), on: now === key, run: () => set(key) }))]);
   }
 
   // ---------------------------------------------------------------- moving a table's lines on the stage

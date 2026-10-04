@@ -550,6 +550,54 @@ await step("箇条書きと段落番号…: 開始 3, 濃紺, 125%; 下線の種
   assert(ticks[0] === "0" && ticks.at(-1) === "200", `ticks 0–200: ${ticks}`);
 });
 
+await step("グラフの色の変更（茶）; 表の行の高さ・列の幅（cm）; ファイル → オプション", async () => {
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="clustered-bar"]');
+  await page.waitForTimeout(400);
+  if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
+  const chartId = (await slide()).elements.at(-1).id;
+  await tab("グラフのデザイン");
+  await byTitle("グラフの色（SEJの配色");
+  await page.click('.rb-pop .tb-color-row[data-colors="brown"]');
+  await page.waitForTimeout(300);
+  assert((await slide()).elements.find((x) => x.id === chartId).chart.colors === "brown", "the chart's colours");
+  const fill = await page.evaluate((id) => { const bar = document.querySelector(`#stageBody .hs-obj[data-el="${id}"] .hs-bar`); return bar ? getComputedStyle(bar).fill : ""; }, chartId);
+  assert(/214, 201, 184|245, 240, 234|128, 128, 128/.test(fill), `drawn in browns: ${fill}`);
+  // 表: the second row 2 cm high, the table taller by the difference.
+  await tab("挿入");
+  await ribbonBtn("表");
+  await page.waitForSelector(".tb-pick");
+  await page.locator(".tb-pick button").nth(2 * 10 + 1).click();
+  await page.waitForTimeout(400);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const t0 = (await slide()).elements.at(-1);
+  await tab("レイアウト");
+  await byTitle("選んだ行（なければ全部）の高さ（cm）");
+  await page.waitForSelector("#askDialog[open]");
+  await page.fill("#askInput", "2");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  const t1 = (await slide()).elements.find((x) => x.id === t0.id);
+  const rowsCm = t1.rows.map((f) => Math.round((f * t1.h) / (144 / 2.54) * 10) / 10);
+  assert(rowsCm.every((v) => Math.abs(v - 2) < 0.05), `every row 2 cm (none chosen: all): ${rowsCm}`);
+  // ファイル → オプション: spelling on, the toolbar below the ribbon, then both back.
+  await page.click(".rb-file");
+  await page.locator('.rb-pop .rb-menu button:has-text("オプション…")').click();
+  await page.waitForSelector(".options-dialog[open]");
+  const spellBefore = await page.isChecked('.options-dialog input[data-opt="spell"]');
+  await page.click('.options-dialog input[data-opt="spell"]');
+  await page.selectOption('.options-dialog select[data-opt="qat"]', "below");
+  await page.waitForTimeout(300);
+  assert(await page.locator(".rb-qat-row").count(), "the Quick Access Toolbar below the ribbon");
+  assert((await page.evaluate(() => localStorage.getItem("hsej-spellcheck"))) === (spellBefore ? "0" : "1"), "spelling switched and kept");
+  await page.selectOption('.options-dialog select[data-opt="qat"]', "off");
+  await page.click('.options-dialog input[data-opt="spell"]');
+  await page.click(".options-dialog .btn-primary");
+  assert(!(await page.locator(".rb-qat-row").count()), "the toolbar off again");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

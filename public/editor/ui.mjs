@@ -507,11 +507,44 @@ export function createEditorUi(editor, app) {
       "-", { label: "情報（プロパティ・ドキュメント検査）…", icon: "info", run: () => app.openFileInfo() },
       { label: "共有（共同編集）…", icon: "share", run: () => app.share() },
       "-", { head: "オプション" },
+      { label: "オプション…", icon: "effectOpts", run: () => optionsDialog() },
       { label: `ユーザー名：${app.userName() || "未設定"}…`, icon: "people", run: () => app.changeUserName() },
       { label: "使い方とショートカット", icon: "tip", keys: "?", run: () => app.openHelp() },
     ];
   }
   const fileMenu = () => menu(fileItems());
+  /**
+   * ファイル → オプション (PowerPoint's Options): the settings kept in this browser, in one place — the user name,
+   * proofing (spelling, AutoCorrect), the ribbon and the Quick Access Toolbar, the slide show, PowerPoint import.
+   */
+  function optionsDialog() {
+    const check = (key, label, on, set, hint = "") => h("label", { class: "sh-choice" }, h("input", { type: "checkbox", "data-opt": key, checked: on || null, onchange: (event) => set(event.target.checked) }), h("span", {}, label), hint ? h("small", {}, hint) : null);
+    const section = (title, ...rows) => h("fieldset", { class: "opt-sec" }, h("legend", {}, title), ...rows);
+    const modeSel = h("select", { "data-opt": "ribbon", "aria-label": "リボンの表示", onchange: (event) => setRibbonMode(event.target.value) }, Object.entries(RIBBON_MODES).map(([v, l]) => h("option", { value: v, selected: ribbonMode === v || null }, l)));
+    const qatSel = h("select", { "data-opt": "qat", "aria-label": "クイック アクセス ツール バー", onchange: (event) => { const v = event.target.value; quick?.setPlace(v === "off" ? { show: false } : { show: true, below: v === "below" }); } },
+      [["off", "表示しない"], ["above", "リボンの上（タブの左）"], ["below", "リボンの下"]].map(([v, l]) => h("option", { value: v, selected: (quick?.where() || "off") === v || null }, l)));
+    const name = h("span", { class: "opt-name" }, app.userName() || "未設定");
+    const dialog = h("dialog", { class: "options-dialog", "aria-label": "オプション" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "オプション"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body opt-body" },
+        section("全般", h("div", { class: "sh-inline" }, "ユーザー名：", name, " ", h("button", { type: "button", class: "btn btn-sm", onclick: () => { dialog.close(); app.changeUserName(); } }, "変更…"))),
+        section("文章校正",
+          check("spell", "入力中にスペル チェックを行う", app.spellcheck(), (on) => app.setSpellcheck(on)),
+          h("div", {}, h("button", { type: "button", class: "btn btn-sm opt-ac", onclick: () => { dialog.close(); app.openAutoCorrect(); } }, "オートコレクトのオプション…"))),
+        section("リボンとツール バー",
+          h("label", { class: "sh-inline" }, "リボンの表示 ", modeSel),
+          h("label", { class: "sh-inline" }, "クイック アクセス ツール バー ", qatSel),
+          h("div", {}, h("button", { type: "button", class: "btn btn-sm", onclick: () => { dialog.close(); quick?.customize(); } }, "クイック アクセス ツール バーのユーザー設定…"))),
+        section("スライド ショー",
+          check("presenter", "発表者ビューを使う（別のウィンドウに次のスライド・ノート・時間）", app.presenterView(), (on) => app.setPresenterView(on))),
+        section("取り込み",
+          check("autoHtml", "PowerPointを見た目どおりに取り込むと、HTMLの動き（おまかせ）を自動で付ける", app.autoHtml(), (on) => app.setAutoHtml(on))),
+        h("p", { class: "hint" }, "設定はこのブラウザに保存されます。")),
+      h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-primary", onclick: () => dialog.close() }, "閉じる")));
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => dialog.remove());
+    dialog.showModal();
+  }
   function ribbonOptions(anchor) {
     openPop(anchor, menu([
       { head: "リボンの表示オプション" },

@@ -815,6 +815,20 @@ export function tableDistribute(o, axis, a = 0, b = Infinity) {
   for (let i = lo; i <= hi; i += 1) list[i] = share;
   return { ...o, [key]: toShares(list) };
 }
+/**
+ * セルのサイズ (高さ・幅): rows a..b (or columns) each `size` slide pixels; the table grows or shrinks by the
+ * difference and the other rows keep their own size.
+ */
+export function tableSetSize(o, axis, a, b, size) {
+  const key = axis === "rows" ? "rows" : "cols";
+  const total = key === "rows" ? o.h : o.w;
+  const sizes = px(o[key], total);
+  const [lo, hi] = [Math.max(0, Math.min(a, b)), Math.min(sizes.length - 1, Math.max(a, b))];
+  const each = Math.max(12, Math.min(4000, Number(size) || 0));
+  for (let i = lo; i <= hi; i += 1) sizes[i] = each;
+  const next = sizes.reduce((sum, v) => sum + v, 0);
+  return { ...o, [key]: toShares(sizes), [key === "rows" ? "h" : "w"]: round2(next) };
+}
 /** Move the line between column i and i+1 (or row) by d slide pixels, keeping both at least `min` wide. */
 export function tableResizeLine(o, axis, i, d, min = 24) {
   const key = axis === "rows" ? "rows" : "cols";
