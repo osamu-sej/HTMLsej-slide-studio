@@ -300,7 +300,7 @@ export function createCoedit(app) {
 
   // ---------------------------------------------------------------- media through the room
 
-  const mediaIds = (slides) => (slides || []).flatMap((s) => [s?.media?.src, s?.background?.image, ...(s?.elements || []).map((o) => o?.src)]).filter((src) => typeof src === "string" && src.startsWith("idb:"));
+  const mediaIds = (slides) => (slides || []).flatMap((s) => [s?.media?.src, s?.background?.image, ...(s?.elements || []).flatMap((o) => [o?.src, o?.fillImg])]).filter((src) => typeof src === "string" && src.startsWith("idb:"));
   async function uploadMedia(deck) {
     if (!room) return;
     for (const src of new Set(mediaIds(deck?.slides))) {

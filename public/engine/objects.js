@@ -1316,7 +1316,27 @@
       if (raw.fullscreen === true) o.fullscreen = true;
       if (raw.hideIdle === true) o.hideIdle = true;
     }
+    const marks = normalizeBookmarks(raw.bookmarks);
+    if (marks.length) o.bookmarks = marks;
     return o;
+  }
+  /**
+   * ブックマーク (再生 → ブックマークの追加): named moments in a video or a sound, in time order. The show jumps to
+   * one from the bar, and an animation can start as the media passes one (トリガー → ブックマーク時, "id@mark").
+   */
+  function normalizeBookmarks(list) {
+    const seen = new Set();
+    const out = [];
+    for (const b of (Array.isArray(list) ? list : []).slice(0, 64)) {
+      if (!b || typeof b !== "object" || b.t == null || b.t === "") continue;
+      const t = num(b.t, 0, 86400);
+      if (t == null) continue;
+      let id = typeof b.id === "string" && /^[A-Za-z0-9_-]{1,16}$/.test(b.id) ? b.id : `b${Math.round(t * 100).toString(36)}`;
+      for (let n = 2; seen.has(id); n += 1) id = `${id.slice(0, 12)}-${n}`;
+      seen.add(id);
+      out.push({ id, t, name: typeof b.name === "string" ? b.name.replace(/\s+/g, " ").trim().slice(0, 40) : "" });
+    }
+    return out.sort((a, b) => a.t - b.t).slice(0, 32).map((b, i) => ({ ...b, name: b.name || `ブックマーク ${i + 1}` }));
   }
 
   // Ink (描画): strokes written with a pen or a highlighter, each a list of points as fractions of the object's box.
@@ -1567,6 +1587,11 @@
         const stops = raw.gradient.stops.slice(0, 100).map((stop) => ({ at: num(stop?.at, 0, 1), color: hexColor(stop?.color), opacity: num(stop?.opacity, 0, 1, 1) }))
           .filter((stop) => stop.at != null && stop.color);
         if (stops.length) o.gradient = { angle: num(raw.gradient.angle, -360, 360, 0), stops };
+      }
+      // 図形の塗りつぶし → 図: a picture fills the shape (cut to its outline), stretched to cover it or tiled.
+      if (typeof raw.fillImg === "string" && /^(data:image\/(png|jpeg|webp|gif)[;,]|idb:|asset:|https:\/\/|blob:)/i.test(raw.fillImg.trim()) && raw.fillImg.length <= 30_000_000) {
+        o.fillImg = raw.fillImg.trim();
+        if (raw.fillTile === true) o.fillTile = true;
       }
       const fillOpacity = num(raw.fillOpacity, 0, 1);
       if (fillOpacity != null && fillOpacity < 1) o.fillOpacity = fillOpacity;
@@ -1842,7 +1867,7 @@
     for (const key of ["title", "unit"]) if (typeof raw[key] === "string" && raw[key].trim()) out[key] = raw[key].trim().slice(0, key === "unit" ? 10 : 80);
     // 色の変更: one of the SEJ's colour sets (the mixed one is the theme's own).
     if (CHART_COLORS[raw.colors]) out.colors = raw.colors;
-    // グラフ要素を追加: data labels off, the legend's place (or none), gridlines off.
+    // グラフ要素を追加 (and クイック レイアウト): data labels off, the legend's place (or none), gridlines off.
     const opts = {};
     if (raw.opts?.labels === false) opts.labels = false;
     if (["bottom", "right", "none"].includes(raw.opts?.legend)) opts.legend = raw.opts.legend;
@@ -2611,7 +2636,7 @@
     return tx;
   }
 
-  function shapeBody(o, rotEl, scale) {
+  function shapeBody(o, rotEl, scale, ctx = {}) {
     const g = geometry(o.shape, o.w, o.h, o.adj, o.path);
     const sw = o.stroke !== "none" ? o.strokeW : 0;
     const fill = g.open ? "none" : o.fill;
@@ -2629,6 +2654,15 @@
       const grad = s("linearGradient", { id, x1: `${50 - dx}%`, y1: `${50 - dy}%`, x2: `${50 + dx}%`, y2: `${50 + dy}%` });
       for (const stop of o.gradient.stops) grad.append(s("stop", { offset: `${stop.at * 100}%`, "stop-color": stop.color, "stop-opacity": stop.opacity }));
       svg.append(s("defs", {}, grad));
+      paint = `url(#${id})`;
+    }
+    // 図で塗りつぶし: the picture covers the shape's box (cut to its outline), or repeats as tiles.
+    const picture = !g.open && o.fillImg ? E.resolveSrc(o.fillImg, ctx) : "";
+    if (picture) {
+      const id = newId();
+      const [pw, ph] = o.fillTile ? [160, 160] : [r2(Math.max(1, o.w)), r2(Math.max(1, o.h))];
+      svg.append(s("defs", {}, s("pattern", { id, patternUnits: "userSpaceOnUse", x: 0, y: 0, width: pw, height: ph },
+        s("image", { href: picture, x: 0, y: 0, width: pw, height: ph, preserveAspectRatio: "xMidYMid slice" }))));
       paint = `url(#${id})`;
     }
     for (const d of g.paths) {
@@ -2692,6 +2726,42 @@
     gray: { label: "グレー", vars: { "--c1": "#808080", "--c2": "#d9d9d9", "--c3": "#f2f2f2", "--c4": "#b7c3da", "--c5": "#1f3864", "--c6": "#d6c9b8", "--k1": "#d9d9d9", "--k2": "#f2f2f2", "--k3": "#808080", "--k4": "#b7c3da", "--k5": "#dce4f2", "--k6": "#d6c9b8", "--accent": "#808080", "--c-muted": "#d9d9d9" } },
     brown: { label: "茶", vars: { "--c1": "#d6c9b8", "--c2": "#f5f0ea", "--c3": "#808080", "--c4": "#d9d9d9", "--c5": "#b7c3da", "--c6": "#dce4f2", "--k1": "#d6c9b8", "--k2": "#f5f0ea", "--k3": "#d9d9d9", "--k4": "#f2f2f2", "--k5": "#b7c3da", "--k6": "#dce4f2", "--accent": "#d6c9b8", "--c-muted": "#f5f0ea" } },
   };
+  /**
+   * グラフのデザイン → クイック レイアウト: a set of chart elements at once (data labels, the legend's place, gridlines,
+   * axis titles). The title, the unit, the axis bounds, a trendline and the waterfall's totals stay as they are.
+   */
+  const CHART_LAYOUTS = {
+    layout1: { label: "レイアウト 1", desc: "データ ラベル・凡例（上）・目盛線", labels: true, legend: "top", grid: true },
+    layout2: { label: "レイアウト 2", desc: "データ ラベル・凡例（右）", labels: true, legend: "right", grid: false },
+    layout3: { label: "レイアウト 3", desc: "凡例（下）・目盛線（データ ラベルなし）", labels: false, legend: "bottom", grid: true },
+    layout4: { label: "レイアウト 4", desc: "データ ラベルだけ（凡例・目盛線なし）", labels: true, legend: "none", grid: false },
+    layout5: { label: "レイアウト 5", desc: "軸ラベル・凡例（上）・目盛線", labels: false, legend: "top", grid: true, axes: true },
+    layout6: { label: "レイアウト 6", desc: "軸ラベル・データ ラベル・凡例（下）", labels: true, legend: "bottom", grid: false, axes: true },
+    layout7: { label: "レイアウト 7", desc: "要素なし（グラフだけ）", labels: false, legend: "none", grid: false },
+  };
+  /** The quick layout a chart matches now (or ""). */
+  function chartLayoutOf(chart) {
+    const o = chart?.opts || {};
+    const axes = Boolean(o.axisX || o.axisY);
+    return Object.keys(CHART_LAYOUTS).find((k) => {
+      const l = CHART_LAYOUTS[k];
+      return (o.labels !== false) === l.labels && (o.legend || "top") === l.legend && (o.grid !== false) === l.grid && axes === Boolean(l.axes);
+    }) || "";
+  }
+  /** The chart with a quick layout's elements (axis titles kept, or named after the unit when the layout adds them). */
+  function applyChartLayout(chart, key) {
+    const l = CHART_LAYOUTS[key];
+    if (!chart || !l) return chart;
+    const { labels: _l, legend: _g, grid: _d, axisX, axisY, ...rest } = chart.opts || {};
+    const opts = { ...rest };
+    if (!l.labels) opts.labels = false;
+    if (l.legend !== "top") opts.legend = l.legend;
+    if (!l.grid) opts.grid = false;
+    if (l.axes) { opts.axisX = axisX || "項目"; opts.axisY = axisY || chart.unit || "値"; }
+    const out = { ...chart };
+    if (Object.keys(opts).length) out.opts = opts; else delete out.opts;
+    return out;
+  }
   /** A chart drawn by the engine's own charts (the same look as the layouts' charts), with an optional title. */
   // Kinds only the studio's own charts draw: an imported chart turned into one of them keeps its colours' order only.
   const STUDIO_ONLY_CHARTS = new Set(["hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst"]);
@@ -2719,6 +2789,34 @@
     set("rewind", o.rewind);
     set("across", o.across);
     set("fullscreen", o.fullscreen);
+    if (o.bookmarks?.length) el.setAttribute("data-bookmarks", JSON.stringify(o.bookmarks.map(({ id, t }) => ({ id, t }))));
+  }
+  /** The bookmarks of a media element (from data-bookmarks): [{ id, t }]. */
+  function mediaMarks(el) {
+    try { const list = JSON.parse(el?.getAttribute("data-bookmarks") || "[]"); return Array.isArray(list) ? list.filter((b) => b && Number.isFinite(b.t)) : []; } catch { return []; }
+  }
+  /** The bookmark marks on the show's bar (a sound) or over the picture (a video), placed along the trimmed part. */
+  function bookmarkMarks(o) {
+    return (o.bookmarks || []).map((b) => h("b", { class: "hs-mark", "data-t": String(b.t), "data-mark": b.id, title: `${b.name}（${Math.floor(b.t / 60)}:${String(Math.floor(b.t % 60)).padStart(2, "0")}）`, role: "button", "aria-label": `ブックマーク：${b.name}` }));
+  }
+  function placeMarks(el) {
+    const host = el.closest(".hs-obj");
+    if (!host) return;
+    const [start, end] = mediaSpan(el);
+    for (const mark of host.querySelectorAll(".hs-mark[data-t]")) {
+      const t = Number(mark.dataset.t);
+      const inside = Number.isFinite(end) && t >= start && t <= end;
+      mark.hidden = !inside;
+      if (inside) mark.style.left = `${(((t - start) / Math.max(0.01, end - start)) * 100).toFixed(3)}%`;
+    }
+  }
+  /** Bookmark marks placed once the length is known (and again if it changes). */
+  function watchMarks(el) {
+    if (!el.hasAttribute("data-bookmarks")) return;
+    const place = () => placeMarks(el);
+    el.addEventListener("loadedmetadata", place);
+    el.addEventListener("durationchange", place);
+    if (el.readyState >= 1) (globalThis.requestAnimationFrame || setTimeout)(place);
   }
 
   const SPEAKER = '<path d="M5 9.5h3.6L13.5 5v14L8.6 14.5H5z" fill="currentColor" stroke="none"/><path d="M16.2 9a4.2 4.2 0 0 1 0 6M18.8 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>';
@@ -2738,8 +2836,9 @@
       playbackData(audio, o);
       box.append(audio, h("div", { class: "hs-audio-bar" },
         h("button", { type: "button", class: "hs-audio-play", "aria-label": "再生・一時停止", title: "再生・一時停止" }),
-        h("span", { class: "hs-audio-track" }, h("i")),
+        h("span", { class: "hs-audio-track" }, h("i"), ...bookmarkMarks(o)),
         h("span", { class: "hs-audio-time" }, "0:00")));
+      watchMarks(audio);
     } else if (ctx.mode !== "thumb" && o.fileName) box.title = o.fileName;
     rotEl.append(box);
   }
@@ -3349,7 +3448,7 @@
     const transform = [o.rot ? `rotate(${o.rot}deg)` : "", o.flipH || o.flipV ? `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1})` : ""].filter(Boolean).join(" ");
     if (transform) rot.style.transform = transform;
     if (o.kind === "shape" || o.kind === "text") {
-      shapeBody(o, rot, scale);
+      shapeBody(o, rot, scale, ctx);
       // A flipped shape keeps its words readable: the text is flipped back.
       const text = rot.querySelector(".hs-obj-text");
       if (text && (o.flipH || o.flipV)) text.style.transform = `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1})`;
@@ -3373,6 +3472,7 @@
       const media = E.mediaEl(desc, ctx, "hs-obj-media");
       const video = media.querySelector("video");
       if (video) playbackData(video, o);
+      if (video && ctx.live && o.bookmarks?.length) { media.append(h("div", { class: "hs-media-marks" }, bookmarkMarks(o))); watchMarks(video); }
       if (video && o.poster) video.setAttribute("poster", o.poster);
       if (!video && o.poster && !yt) media.prepend(h("img", { class: "hs-video-poster", src: o.poster, alt: "", draggable: "false" }));
       if (video && o.captions) {
@@ -3531,10 +3631,10 @@
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
-    LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
+    LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
-    VOLUMES, normalizePlayback, mediaPlay, mediaPause, mediaToggle, mediaSpan,
+    VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,
     normalizeStrokes, inkPath, INK_COLORS, texToMathML,
   });

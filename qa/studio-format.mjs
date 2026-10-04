@@ -598,6 +598,66 @@ await step("グラフの色の変更（茶）; 表の行の高さ・列の幅（
   assert(!(await page.locator(".rb-qat-row").count()), "the toolbar off again");
 });
 
+await step("クイック レイアウト（グラフ）; 図形の塗りつぶし → 図・並べて表示・色に戻す", async () => {
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="clustered-bar"]');
+  await page.waitForTimeout(400);
+  if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
+  const chartId = (await slide()).elements.at(-1).id;
+  const chartOf = async () => (await slide()).elements.find((x) => x.id === chartId).chart;
+  await tab("グラフのデザイン");
+  await byTitle("グラフ要素の組み合わせ");
+  assert(await page.locator(".rb-pop .tb-layout-row").count() === 7, "seven layouts, each with a picture");
+  await page.click('.rb-pop .tb-layout-row[data-layout="layout5"]');
+  await page.waitForTimeout(300);
+  let c = await chartOf();
+  assert(c.opts?.axisX && c.opts?.axisY && c.opts.labels === false, `レイアウト 5: axis titles, no data labels: ${JSON.stringify(c.opts)}`);
+  await byTitle("グラフ要素の組み合わせ");
+  await page.click('.rb-pop .tb-layout-row[data-layout="layout7"]');
+  await page.waitForTimeout(300);
+  c = await chartOf();
+  assert(c.opts?.legend === "none" && c.opts.grid === false && c.opts.labels === false && !c.opts.axisX, `レイアウト 7: the chart alone: ${JSON.stringify(c.opts)}`);
+  await undo();
+  assert((await chartOf()).opts?.axisX, "⌘Z goes back to レイアウト 5 in one step");
+  // 図で塗りつぶし: a rectangle filled with the logo, then tiled, then a colour again.
+  await page.keyboard.press("Escape");
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.click('.rb-pop .rb-gallery button[title="正方形/長方形"]');
+  const box = await page.locator("#stageBody .hs-slide").first().boundingBox();
+  const pt = (x, y) => [box.x + (x * box.width) / 1920, box.y + (y * box.height) / 1080];
+  await page.mouse.move(...pt(1300, 300));
+  await page.mouse.down();
+  await page.mouse.move(...pt(1700, 600), { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const rect = (await slide()).elements.at(-1);
+  assert(rect.kind === "shape", `the rectangle: ${rect.kind}`);
+  await tab("図形の書式");
+  await byTitle("図形の塗りつぶし");
+  await withFiles(logo, () => page.click('.rb-pop .rb-extra[data-fill="picture"]'));
+  await page.waitForFunction((id) => window.__hsej.slide().elements.find((o) => o.id === id)?.fillImg, rect.id, { timeout: 8000 });
+  let o = (await slide()).elements.find((x) => x.id === rect.id);
+  assert(o.fillImg.startsWith("idb:"), `the picture kept in this browser: ${o.fillImg.slice(0, 20)}`);
+  const drawn = await page.evaluate((id) => { const el = document.querySelector(`#stageBody .hs-obj[data-el="${id}"]`); const p = el?.querySelector("pattern"); return p ? { fill: el.querySelector("path").getAttribute("fill"), id: p.id, w: p.getAttribute("width"), href: p.querySelector("image").getAttribute("href") } : null; }, rect.id);
+  assert(drawn && drawn.fill === `url(#${drawn.id})` && drawn.href.startsWith("blob:"), `drawn with the picture: ${JSON.stringify(drawn)}`);
+  await shot("picture-fill");
+  await byTitle("図形の塗りつぶし");
+  await page.click('.rb-pop .rb-extra[data-fill="tile"]');
+  await page.waitForTimeout(300);
+  o = (await slide()).elements.find((x) => x.id === rect.id);
+  assert(o.fillTile === true, "並べて表示");
+  assert(await page.evaluate((id) => document.querySelector(`#stageBody .hs-obj[data-el="${id}"] pattern`)?.getAttribute("width"), rect.id) === "160", "tiles");
+  await byTitle("図形の塗りつぶし");
+  await page.locator(".rb-pop .rb-sw").first().click();
+  await page.waitForTimeout(300);
+  o = (await slide()).elements.find((x) => x.id === rect.id);
+  assert(!o.fillImg && !o.fillTile, `a colour replaces the picture: ${JSON.stringify({ fillImg: o.fillImg, fillTile: o.fillTile })}`);
+  await undo();
+  assert((await slide()).elements.find((x) => x.id === rect.id).fillImg, "⌘Z brings the picture back");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

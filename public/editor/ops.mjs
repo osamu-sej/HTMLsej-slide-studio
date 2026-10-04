@@ -604,7 +604,8 @@ export function reconcileTimeline(timeline, before, after) {
       entries = members.map((o, i) => ({ ...e, id: i ? `${e.id}-${i}`.slice(0, 32) : e.id, el: o.id, ...(i ? { start: "with", delay: e.delay || 0 } : {}) }));
     } else if (!e.el.startsWith("@") && !e.el.startsWith("grp:") && !ids.has(e.el)) entries = [];
     for (const entry of entries) {
-      if (entry.trigger && !ids.has(entry.trigger)) { const { trigger: _, ...rest } = entry; out.push(rest); } else out.push(entry);
+      // A trigger may be an object ("id") or one of a media's bookmarks ("id@mark"): gone with its object.
+      if (entry.trigger && !ids.has(String(entry.trigger).split("@")[0])) { const { trigger: _, ...rest } = entry; out.push(rest); } else out.push(entry);
     }
   }
   return out;

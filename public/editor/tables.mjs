@@ -374,6 +374,8 @@ export function createTableUi(editor, app, kit) {
       group("データ", btn("table", "データの|編集", "項目と値を表で直す（Excelから貼り付けもできます）", () => { const o = chart(); if (o) editChart(o.id); }, { big: true, enabled: isChart }),
         // A chart brought over from PowerPoint keeps its formatting until it is reset to the studio's look.
         btn("reset", "書式を|リセット", "PowerPointから取り込んだグラフの書式（色・ラベル・軸・凡例）を外し、スタジオのグラフの描き方にします", resetStyle, { big: true, enabled: () => Boolean(chart()?.chart.style) })),
+      group("グラフのレイアウト",
+        drop("layout", "クイック|レイアウト", "グラフ要素の組み合わせ（データ ラベル・凡例の位置・目盛線・軸ラベル）をまとめて変える", () => quickLayouts(), { big: true, enabled: isChart })),
       group("グラフ要素",
         drop("plus", "グラフ要素|を追加", "データ ラベル・凡例・目盛線", () => elementsMenu(), { big: true, enabled: isChart }),
         col(btn("textbox", "タイトル…", "グラフの上に出す見出し", () => ask("title", "グラフのタイトル", "空にすると消えます"), { enabled: isChart }), btn("font", "単位…", "値の単位（例：億円）", () => ask("unit", "値の単位", "例：億円・%"), { enabled: isChart }),
@@ -381,6 +383,28 @@ export function createTableUi(editor, app, kit) {
       group("グラフ スタイル",
         drop("fill", "色の|変更", "グラフの色（SEJの配色・青・グレー・茶。どれもSEJの色だけ）", () => colorSets(), { big: true, enabled: () => Boolean(chart()) && !chart().chart.style })),
     ];
+  }
+  /** クイック レイアウト: the chart's elements at once, each shown as a small picture of where they go. */
+  function quickLayouts() {
+    const now = chart() ? E.chartLayoutOf(chart().chart) : "";
+    const apply = (key) => { const o = chart(); if (o) editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: E.applyChartLayout(x.chart, key) } : x)), { select: [o.id] }); };
+    const pic = (l) => {
+      const box = h("span", { class: "tb-layout-pic", "aria-hidden": "true" });
+      const parts = [];
+      if (l.grid) for (const y of [10, 16, 22]) parts.push(`<line x1="${l.axes ? 11 : 6}" x2="${l.legend === "right" ? 40 : 46}" y1="${y}" y2="${y}" stroke="#d9d9d9"/>`);
+      const x0 = l.axes ? 13 : 9;
+      [[0, 15], [9, 9], [18, 5]].forEach(([dx, y]) => {
+        parts.push(`<rect x="${x0 + dx}" y="${y + (l.legend === "top" ? 2 : 0)}" width="6" height="${26 - y - (l.legend === "top" ? 2 : 0) - (l.legend === "bottom" ? 3 : 0)}" fill="#b7c3da"/>`);
+        if (l.labels) parts.push(`<rect x="${x0 + dx + 1}" y="${y - 3 + (l.legend === "top" ? 2 : 0)}" width="4" height="2" fill="#1f3864"/>`);
+      });
+      const legend = { top: '<rect x="16" y="1.5" width="20" height="3" fill="#808080"/>', bottom: '<rect x="16" y="29" width="20" height="3" fill="#808080"/>', right: '<rect x="43" y="10" width="6" height="12" fill="#808080"/>' }[l.legend];
+      if (legend) parts.push(legend);
+      if (l.axes) parts.push('<rect x="3" y="10" width="2" height="12" fill="#808080"/>', `<rect x="20" y="${l.legend === "bottom" ? 25.5 : 29}" width="14" height="2" fill="#808080"/>`);
+      box.innerHTML = `<svg viewBox="0 0 52 34" width="52" height="34">${parts.join("")}</svg>`;
+      return box;
+    };
+    return menu([{ head: "クイック レイアウト" },
+      ...Object.entries(E.CHART_LAYOUTS).map(([key, l]) => ({ label: h("span", { class: "tb-layout-row", "data-layout": key }, pic(l), h("span", {}, h("b", {}, l.label), h("small", {}, l.desc))), on: now === key, run: () => apply(key) }))]);
   }
   /** 色の変更: the chart's colour set, each shown with its first colours. */
   function colorSets() {

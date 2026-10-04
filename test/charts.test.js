@@ -229,3 +229,26 @@ test("色の変更: a chart takes one of the SEJ's colour sets (all its colours 
     for (const k of ["--k1", "--k2", "--k3", "--k4", "--k5", "--k6"]) assert.notEqual(def.vars[k], "#1f3864", `${key} ${k}`);
   }
 });
+
+test("クイック レイアウト: a set of chart elements at once; the title, unit and axis bounds stay", async () => {
+  const E = await loadEngine();
+  const norm = (c) => E.normalizeObject({ id: "c", kind: "chart", x: 0, y: 0, w: 960, h: 560, chart: c }).chart;
+  const chart = { type: "bar", title: "売上", unit: "億円", labels: ["4月", "5月"], series: [{ name: "売上", values: [3, 5] }, { name: "目標", values: [4, 4] }], opts: { axisMax: 10, legend: "right", grid: false } };
+  assert.equal(E.chartLayoutOf(norm(chart)), "layout2", "data labels with the legend on the right");
+  const four = norm(E.applyChartLayout(chart, "layout4"));
+  assert.equal(JSON.stringify(four.opts), JSON.stringify({ legend: "none", grid: false, axisMax: 10 }));
+  assert.equal(four.title, "売上");
+  assert.equal(E.chartLayoutOf(four), "layout4");
+  const five = norm(E.applyChartLayout(four, "layout5"));
+  assert.equal(five.opts.axisX, "項目", "axis titles come with the layout");
+  assert.equal(five.opts.axisY, "億円", "named after the unit");
+  assert.equal(five.opts.labels, false);
+  assert.equal(five.opts.legend, undefined, "the legend on top is the default");
+  assert.equal(E.chartLayoutOf(five), "layout5");
+  const one = norm(E.applyChartLayout({ ...five, opts: { ...five.opts, axisX: "月" } }, "layout1"));
+  assert.equal(one.opts?.axisX, undefined, "a layout without axis titles takes them away");
+  assert.equal(one.opts?.axisMax, 10);
+  assert.equal(E.chartLayoutOf(one), "layout1");
+  assert.equal(E.applyChartLayout(chart, "nope"), chart, "an unknown layout changes nothing");
+  for (const key of Object.keys(E.CHART_LAYOUTS)) assert.equal(E.chartLayoutOf(norm(E.applyChartLayout(chart, key))), key, `${key} is found again`);
+});

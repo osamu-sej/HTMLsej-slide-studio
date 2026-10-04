@@ -215,7 +215,7 @@ export function createEditorUi(editor, app) {
   }
 
   /** Colour swatches of the SEJ palette (plus none and, for fills and lines, any colour with a warning). */
-  function colors(list, current, pick, { none = null, custom = true, note = "" } = {}) {
+  function colors(list, current, pick, { none = null, custom = true, note = "", extra = null } = {}) {
     return (close) => {
       const wrap = h("div", { class: "rb-colors" });
       if (none) wrap.append(h("button", { type: "button", class: ["rb-none", current === "none" ? "on" : ""], onmousedown: (e) => e.preventDefault(), onclick: () => { close(); pick("none"); } }, none));
@@ -236,6 +236,10 @@ export function createEditorUi(editor, app) {
         if (color !== got) app.toast(`スポイト：${got.toUpperCase()} にいちばん近いSEJの色（${color.toUpperCase()}）にしました`);
         pick(color);
       } }, ico("eyedrop", 16), h("span", {}, "スポイト")));
+      // More ways to fill (図・並べて表示), each closing the menu first.
+      for (const item of (typeof extra === "function" ? extra() : extra) || []) {
+        wrap.append(h("button", { type: "button", class: ["rb-extra", item.on ? "on" : ""], disabled: item.disabled || null, "data-fill": item.key || null, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); item.run(); } }, item.icon ? ico(item.icon, 16) : null, h("span", {}, item.label)));
+      }
       if (note) wrap.append(h("p", { class: "rb-note" }, note));
       return wrap;
     };
@@ -333,7 +337,24 @@ export function createEditorUi(editor, app) {
   const fillOf = () => { const o = selected().find((x) => ["shape", "text"].includes(x.kind)); return o ? E.withDefaults(o).fill : null; };
   const strokeOf = () => { const o = selected()[0]; return o ? E.withDefaults(o).stroke : null; };
   const textColorOf = () => editor.textState()?.color ?? "#1a1a1a";
-  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color } : null));
+  // A colour replaces a picture fill (図で塗りつぶし), as in PowerPoint.
+  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color, fillImg: undefined, fillTile: undefined } : null));
+  /** 図形の塗りつぶし → 図: a picture from this device fills the selected shapes (cut to their outline). */
+  async function pictureFill() {
+    const [file] = await app.pickFiles("image/png,image/jpeg,image/webp,image/gif");
+    if (!file) return;
+    try {
+      const { src } = await app.storePicture(file);
+      editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fillImg: src } : null));
+      app.toast("図で塗りつぶしました（図形の形に切り抜き。「並べて表示」で繰り返しにできます）");
+    } catch (error) { app.toast(`画像を読み込めませんでした（${error.message}）`); }
+  }
+  const pictureFilled = () => editor.selectedObjects().some((o) => o.fillImg);
+  const fillExtras = () => [
+    { key: "picture", label: "図…", icon: "image", run: () => pictureFill() },
+    { key: "tile", label: "図を並べて表示", icon: "grid", on: editor.selectedObjects().some((o) => o.fillTile), disabled: !pictureFilled(), run: () => { const on = !editor.selectedObjects().some((o) => o.fillTile); editor.apply((o) => (o.fillImg ? { fillTile: on || undefined } : null)); } },
+    { key: "nopicture", label: "図を外す", icon: "trash", disabled: !pictureFilled(), run: () => editor.apply((o) => (o.fillImg ? { fillImg: undefined, fillTile: undefined } : null)) },
+  ];
   const setStroke = (color) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { stroke: color, ...(color !== "none" && o.kind !== "line" && E.withDefaults(o).stroke === "none" ? { strokeW: E.withDefaults(o).strokeW || 2 } : {}) } : o.kind === "icon" ? { color } : null));
   const setStrokeWidth = (pt) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { strokeW: ops.fromPt(pt), ...(E.withDefaults(o).stroke === "none" && o.kind !== "line" ? { stroke: "#1f3864" } : {}) } : o.kind === "icon" ? { strokeW: Math.max(0.5, pt) } : null));
   const setDash = (dash) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { dash: dash === "solid" ? undefined : dash } : null));
@@ -626,7 +647,7 @@ export function createEditorUi(editor, app) {
   // A narrow window squeezes the ribbon as PowerPoint does, from the right-hand groups first: small buttons
   // lose their words (the tooltip keeps them), then whole groups fold into one button that opens them;
   // past that the groups draw closer, and last of all the ribbon scrolls sideways.
-  const GROUP_ICONS = { グラフィックの作成: "smartart", "SmartArt のスタイル": "fill", 文字: "font", リセット: "reset", プレビュー: "play", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
+  const GROUP_ICONS = { グラフィックの作成: "smartart", "SmartArt のスタイル": "fill", 文字: "font", リセット: "reset", プレビュー: "play", ブックマーク: "pin", グラフのレイアウト: "layout", オプション: "audio", "オーディオ スタイル": "audio", スライド: "slide", クリップボード: "paste", フォント: "font", 段落: "textLeft", 図形描画: "shapes", 編集: "selectAll", 画像: "image", 図: "shapes", テキスト: "textbox", 線: "line", メディア: "video", リンク: "link",
     図形の挿入: "shapes", 図形のスタイル: "style", ワードアートのスタイル: "fontColor", 配置: "front", サイズ: "zoomFit", 調整: "bright", 図のスタイル: "outline", 表示: "slide", "表示/非表示": "grid", ズーム: "zoomIn", ウィンドウ: "pane",
     プレゼンテーションの表示: "slide", "カラー/グレースケール": "grayView", 記号と日付: "symbol", コメント: "comment", デザイナー: "magic", コード: "effectOpts", 資料のデータ: "down", 書き出し: "play", テーマ: "theme", "動き（資料全体）": "motionPath", ユーザー設定: "slide", "スライド ショーの開始": "showStart", 設定: "presenter", チェック: "check", 検索: "find", ノート: "notes", AI: "magic", レビュー: "review", 描画ツール: "pen", 変換: "inkShape", 再生: "play", 音声: "mic", ズームのオプション: "zoomSlide", ズームのスタイル: "outline", 数式と記号: "equation", モニター: "presenter", キャプションと字幕: "subtitles", 文章校正: "spell", キャプション: "caption", 言語: "textCase", アクセシビリティ: "accessibility", 比較: "thumbs", インク: "pen" };
   function fold(g) {
@@ -759,7 +780,7 @@ export function createEditorUi(editor, app) {
         drop("shapes", "図形", "図形を描く", () => shapeGallery(pickTool), { big: true }),
         col(drop("front", "配置", "前面・背面・整列・グループ・回転", () => arrangeMenu(), { enabled: any }),
           drop("style", "スタイル", "図形のクイックスタイル（SEJの色）", () => styleMenu(), { enabled: hasText })),
-        col(drop("fill", "塗り", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし" }), { enabled: hasText, swatch: fillOf }),
+        col(drop("fill", "塗り", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし", extra: fillExtras }), { enabled: hasText, swatch: fillOf }),
           drop("outline", "枠線", "図形の枠線", () => outlineMenu(), { enabled: () => any() && !kinds().has("icon") || kinds().has("icon"), swatch: strokeOf }))),
       group("編集",
         col(btn("find", "検索・置換", "資料全体の文字を検索・置換（⌘F）", () => app.openReplace()),
@@ -1050,7 +1071,7 @@ export function createEditorUi(editor, app) {
           drop("union", "図形の結合", "選んだ2つ以上の図形を1つにする：接合・型抜き/合成・切り出し・重なり抽出・単純型抜き（最初に選んだ図形の書式になります）", () => mergeMenu(), { enabled: () => canMerge(selected()) }))),
       group("図形のスタイル",
         drop("style", "クイック|スタイル", "SEJの色の組み合わせ", () => styleMenu(), { big: true, enabled: hasText }),
-        col(drop("fill", "塗りつぶし", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし" }), { enabled: hasText, swatch: fillOf }),
+        col(drop("fill", "塗りつぶし", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし", extra: fillExtras }), { enabled: hasText, swatch: fillOf }),
           drop("outline", "枠線", "図形の枠線（色・太さ・実線/点線）", () => outlineMenu(), { enabled: any, swatch: strokeOf }),
           drop("arrows", "矢印", "線の始点・終点の形", () => arrowMenu(), { enabled: () => kinds().has("line") })),
         col(drop("transparency", "透明度", "オブジェクトの透明度", () => menu([0, 0.15, 0.3, 0.5, 0.7].map((t) => ({ label: `${Math.round(t * 100)}%`, on: Math.abs((1 - (one()?.opacity ?? 1)) - t) < 0.01, run: () => editor.apply({ opacity: t ? Math.round((1 - t) * 100) / 100 : undefined }) }))), { enabled: any }),
@@ -1403,6 +1424,9 @@ export function createEditorUi(editor, app) {
       out.push(section("fill", "塗りつぶし", true,
         swatchRow(E.PALETTE.fill, fill, setFill, { none: "塗りつぶしなし" }),
         line("その他の色", h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(fill) ? fill : "#dce4f2", onchange: (event) => setFill(event.target.value) }), eyedrop(setFill), h("small", { class: "hint" }, "SEJの面の色以外はチェックで知らせます")),
+        line("図", h("button", { type: "button", class: "btn btn-sm fp-picfill", onclick: () => pictureFill() }, o.fillImg ? "図を変更…" : "図で塗りつぶし…"),
+          o.fillImg ? h("label", { class: "fp-check" }, h("input", { type: "checkbox", checked: o.fillTile || null, onchange: (event) => editor.apply((x) => (x.fillImg ? { fillTile: event.target.checked || undefined } : null)) }), "並べて表示") : null,
+          o.fillImg ? h("button", { type: "button", class: "btn btn-sm btn-ghost", onclick: () => editor.apply((x) => (x.fillImg ? { fillImg: undefined, fillTile: undefined } : null)) }, "外す") : null),
         line("透明度", slider((1 - (o.fillOpacity ?? 1)) * 100, (v) => editor.apply((x) => (["shape", "text"].includes(x.kind) ? { fillOpacity: v ? Math.round((1 - v / 100) * 100) / 100 : undefined } : null))))));
     }
     if (chosen.some((x) => ["shape", "text", "image", "line"].includes(x.kind))) {

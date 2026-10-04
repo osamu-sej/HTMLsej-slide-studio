@@ -123,8 +123,15 @@
 .hs-audio-play { flex: none; width: 28px; height: 28px; border: 0; padding: 0; background: transparent; cursor: pointer; position: relative; }
 .hs-audio-play::before { content: ""; position: absolute; left: 7px; top: 4px; border-style: solid; border-width: 10px 0 10px 16px; border-color: transparent transparent transparent #fff; }
 .hs-audio.playing .hs-audio-play::before { left: 7px; top: 5px; width: 4px; height: 18px; border-style: solid; border-color: #fff; border-width: 0 5px; }
-.hs-audio-track { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .3); overflow: hidden; }
+.hs-audio-track { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .3); overflow: hidden; position: relative; }
 .hs-audio-track i { display: block; height: 100%; width: 0; background: #fff; }
+/* ブックマーク: a tick on a sound's bar, a dot along the top of a video; a click jumps there. */
+.hs-audio-track .hs-mark { position: absolute; top: 0; width: 5px; height: 100%; margin-left: -2px; background: #b7c3da; cursor: pointer; }
+.hs-media-marks { position: absolute; left: 0; right: 0; top: 6px; height: 12px; pointer-events: none; z-index: 1; }
+.hs-media-marks .hs-mark { position: absolute; top: 0; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #1f3864; pointer-events: auto; cursor: pointer; }
+.hs-mark[hidden] { display: none; }
+/* スライド ショーの設定 → メディア コントロールを表示 off. */
+.hs-no-controls .hs-audio-bar, .hs-no-controls .hs-media-marks { display: none; }
 .hs-audio-time { flex: none; min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
 .hs-obj[data-kind="audio"] { cursor: pointer; }
 /* SmartArt: one positioned box per item (its shapes and the connector into it), so items can come in one by one. */

@@ -213,3 +213,26 @@ test("セルのサイズ: rows (or columns) set in pixels, the table growing by 
   assert.deepEqual(narrow.cols, [0.5, 0.5]);
   assert.equal(ops.tableSetSize(t, "rows", 0, 0, 2).rows.length, 3, "never below the smallest size");
 });
+
+test("図で塗りつぶし: a picture fills the shape (cut to its outline), stretched or tiled; only real pictures", async () => {
+  const { E } = await loadEngine();
+  const o = E.normalizeObject({ id: "s1", kind: "shape", shape: "ellipse", x: 100, y: 100, w: 400, h: 200, fill: "#dce4f2", fillImg: "data:image/png;base64,AAAA", fillTile: true });
+  assert.equal(o.fillImg, "data:image/png;base64,AAAA");
+  assert.equal(o.fillTile, true);
+  assert.equal(E.normalizeObject({ id: "s2", kind: "shape", shape: "rect", fillImg: "javascript:alert(1)", fillTile: true }).fillImg, undefined, "only pictures");
+  assert.equal(E.normalizeObject({ id: "s3", kind: "shape", shape: "rect", fillImg: "data:text/html,x" }).fillImg, undefined);
+  const draw = (obj, ctx = {}) => { const slide = { type: "blank", elements: [obj] }; return E.render(slide, { mode: "present", index: 0, deck: { slides: [slide], theme: "sej" }, ...ctx }); };
+  const tiled = draw(o);
+  const pattern = tiled.querySelector(".hs-obj pattern");
+  assert.ok(pattern, "a pattern of the picture");
+  assert.equal(pattern.getAttribute("width"), "160", "tiles");
+  assert.equal(pattern.querySelector("image").getAttribute("href"), "data:image/png;base64,AAAA");
+  assert.equal(pattern.querySelector("image").getAttribute("preserveAspectRatio"), "xMidYMid slice");
+  assert.equal(tiled.querySelector(".hs-obj path").getAttribute("fill"), `url(#${pattern.getAttribute("id")})`, "the outline is filled with it");
+  const stretched = draw({ ...o, fillTile: undefined });
+  assert.equal(stretched.querySelector(".hs-obj pattern").getAttribute("width"), "400", "one picture over the whole shape");
+  // A picture kept in this browser is drawn once its address is known (and left out until then).
+  const stored = E.normalizeObject({ ...o, fillImg: "idb:abc" });
+  assert.equal(draw(stored).querySelector(".hs-obj pattern"), null);
+  assert.equal(draw(stored, { mediaUrls: { "idb:abc": "blob:x" } }).querySelector(".hs-obj pattern image").getAttribute("href"), "blob:x");
+});

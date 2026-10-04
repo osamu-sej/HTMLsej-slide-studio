@@ -13,7 +13,7 @@ const clean = (text, max) => String(text ?? "").replace(/[\u0000-\u001f<>]/g, ""
 export function showOf(value) {
   const v = value && typeof value === "object" ? value : {};
   const out = {};
-  for (const key of ["kiosk", "loop", "noAnimation", "noNarration", "captions"]) if (v[key] === true) out[key] = true;
+  for (const key of ["kiosk", "loop", "noAnimation", "noNarration", "captions", "noControls"]) if (v[key] === true) out[key] = true;
   if (v.useTimings === false) out.useTimings = false;
   if (CAPTION_LANGS.some(([k]) => k === v.captionLang) && v.captionLang !== "ja-JP") out.captionLang = v.captionLang;
   if (PEN_COLORS.some(([c]) => c === v.penColor) && v.penColor !== "#c00000") out.penColor = v.penColor;
@@ -65,6 +65,8 @@ export function playerOptions(settings) {
   return {
     loop: Boolean(s.loop), kiosk: Boolean(s.kiosk), kioskSeconds: s.kioskSeconds || 8, useTimings: s.useTimings !== false,
     static: Boolean(s.noAnimation), noAnimation: Boolean(s.noAnimation), narration: !s.noNarration, penColor: s.penColor || "#c00000", captions: Boolean(s.captions), captionLang: s.captionLang || "ja-JP",
+    // メディア コントロールの表示 (on unless turned off): a video's controls and a sound's bar during the show.
+    mediaControls: !s.noControls,
   };
 }
 
@@ -126,7 +128,8 @@ export function createShowTools(app) {
         check("noAnimation", cur.noAnimation, "アニメーションを表示しない"),
         h("label", { class: "sh-inline" }, "ペンの色 ", pen),
         check("captions", cur.captions, "常に字幕を使用する"),
-        h("label", { class: "sh-inline" }, "字幕の言語 ", lang)),
+        h("label", { class: "sh-inline" }, "字幕の言語 ", lang),
+        h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "mediaControls", checked: !cur.noControls || null }), h("span", {}, "メディア コントロールを表示する"))),
       h("fieldset", {}, h("legend", {}, "スライドの表示"),
         radio("slides", "all", !cur.range && !cur.custom, "すべて"),
         radio("slides", "range", Boolean(cur.range) && !cur.custom, "", h("span", { class: "sh-inline" }, "開始 ", from, " 終了 ", to)),
@@ -141,7 +144,7 @@ export function createShowTools(app) {
         const f = new FormData(form);
         const which = f.get("slides");
         const next = showOf({
-          kiosk: f.get("kind") === "kiosk", loop: f.has("loop"), noNarration: f.has("noNarration"), noAnimation: f.has("noAnimation"), captions: f.has("captions"),
+          kiosk: f.get("kind") === "kiosk", loop: f.has("loop"), noNarration: f.has("noNarration"), noAnimation: f.has("noAnimation"), captions: f.has("captions"), noControls: !f.has("mediaControls"),
           useTimings: f.get("advance") !== "manual", penColor: f.get("penColor"), captionLang: f.get("captionLang"), kioskSeconds: Number(f.get("kioskSeconds")),
           range: which === "range" ? { from: Number(f.get("from")), to: Number(f.get("to")) } : null,
           custom: which === "custom" ? f.get("customShow") : null,

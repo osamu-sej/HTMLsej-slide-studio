@@ -220,3 +220,46 @@ test("アニメーションの後 and an effect's sound: kept where they fit; a 
     assert.ok(seen.some(([id, f]) => id === "box1" && /0\.35/.test(f)), `the box faded after its entrance: ${JSON.stringify(seen.filter(([id]) => id === "box1"))}`);
   } finally { window.Element.prototype.animate = animate; }
 });
+
+test("ブックマーク時: a trigger on a media's bookmark is kept, plays as the media passes it, and the media stays a player", async () => {
+  const { E, window } = await loadEngine();
+  const slide = { type: "blank", elements: [
+    E.normalizeObject({ id: "snd", kind: "audio", x: 0, y: 0, w: 120, h: 120, src: "https://example.com/a.mp3", bookmarks: [{ id: "m1", t: 2, name: "サビ" }, { t: 5 }] }),
+    E.normalizeObject({ id: "box", kind: "shape", shape: "rect", x: 300, y: 100, w: 200, h: 100, fill: "#dce4f2" }),
+  ], timeline: [
+    { id: "a1", el: "box", cls: "in", fx: "fade", start: "click", trigger: "snd@m1" },
+    { id: "a2", el: "box", cls: "em", fx: "pulse", start: "click", trigger: "snd@nope" },
+    { id: "a3", el: "box", cls: "em", fx: "pulse", start: "click", trigger: "ghost@m1" },
+  ] };
+  const list = plain(E.normalizeTimeline(slide.timeline, slide));
+  assert.equal(list[0].trigger, "snd@m1");
+  assert.equal(list[1].trigger, undefined, "only a bookmark the media has");
+  assert.equal(list[2].trigger, undefined, "only media on the slide");
+  assert.deepEqual(plain([...E.timelinePlan(slide).triggers.keys()]), ["snd@m1"]);
+  const el = E.render(slide, { mode: "present", index: 0, deck: { slides: [slide], theme: "sej" } });
+  window.document.body.append(el);
+  assert.equal(el.querySelector('.hs-obj[data-el="snd"]').hasAttribute("data-trigger"), false, "a bookmark trigger leaves the sound a player");
+  const audio = el.querySelector("audio");
+  assert.deepEqual(JSON.parse(audio.getAttribute("data-bookmarks")).map((b) => b.t), [2, 5]);
+  assert.equal(el.querySelectorAll(".hs-audio-track .hs-mark").length, 2, "a mark per bookmark on the bar");
+  let now = 0;
+  Object.defineProperty(audio, "currentTime", { get: () => now, set: (v) => { now = v; }, configurable: true });
+  const seen = [];
+  const animate = window.Element.prototype.animate;
+  window.Element.prototype.animate = function (frames, opts) { seen.push(this.closest(".hs-obj")?.dataset.el); return animate ? animate.call(this, frames, opts) : { finished: Promise.resolve(), finish() {}, cancel() {}, effect: { updateTiming() {} } }; };
+  try {
+    E.animStart(el, 0);
+    const tick = (t) => { now = t; audio.dispatchEvent(new window.Event("timeupdate")); };
+    tick(0.5); tick(1.8);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(seen.filter((id) => id === "box").length, 0, "nothing before the bookmark");
+    tick(2.1);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(seen.includes("box"), "passing the bookmark plays the entrance");
+    const count = seen.length;
+    now = 1; audio.dispatchEvent(new window.Event("seeked"));
+    tick(4.5);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(seen.length, count, "a jump past the bookmark does not play it");
+  } finally { window.Element.prototype.animate = animate; }
+});

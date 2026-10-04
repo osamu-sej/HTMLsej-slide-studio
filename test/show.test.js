@@ -43,7 +43,7 @@ test("which slides a show plays: a custom show in its own order, a range, or all
 });
 
 test("player options from the settings", () => {
-  assert.deepEqual(playerOptions(null), { loop: false, kiosk: false, kioskSeconds: 8, useTimings: true, static: false, noAnimation: false, narration: true, penColor: "#c00000", captions: false, captionLang: "ja-JP" });
+  assert.deepEqual(playerOptions(null), { loop: false, kiosk: false, kioskSeconds: 8, useTimings: true, static: false, noAnimation: false, narration: true, penColor: "#c00000", captions: false, captionLang: "ja-JP", mediaControls: true });
   const o = playerOptions({ kiosk: true, noAnimation: true, noNarration: true, useTimings: false, kioskSeconds: 5, penColor: "#1a1a1a", captions: true, captionLang: "en-US" });
   assert.equal(o.kiosk, true);
   assert.equal(o.static, true);
@@ -73,4 +73,11 @@ test("the server keeps the show settings and custom shows through AI edits", () 
   const parsed = deckShape.parse({ title: "t", slides: [{ type: "blank", title: "" }], show: { loop: true }, customShows: [{ id: "cs1", name: "n", sids: ["a"] }] });
   assert.deepEqual(parsed.show, { loop: true });
   assert.deepEqual(parsed.customShows, [{ id: "cs1", name: "n", sids: ["a"] }]);
+});
+
+test("メディア コントロールを表示: on unless turned off; the player is told", () => {
+  assert.equal(showOf({ noControls: false }), null, "on is the default");
+  assert.equal(showOf({ noControls: true }).noControls, true);
+  assert.equal(playerOptions(null).mediaControls, true);
+  assert.equal(playerOptions(showOf({ noControls: true })).mediaControls, false);
 });

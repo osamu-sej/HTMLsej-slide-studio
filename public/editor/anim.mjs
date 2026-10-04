@@ -45,6 +45,15 @@ export function createAnimations(editor, app, kit) {
     const o = byId(el);
     return o ? E.objectName(o, objects().indexOf(o)) : "（見つからない）";
   }
+  /** A trigger's name: the object clicked, or a bookmark of a video or a sound ("id@mark"). */
+  function triggerName(key) {
+    const [id, mark] = String(key).split("@");
+    if (!mark) return `クリック：${targetName(id)}`;
+    return `ブックマーク時：${targetName(id)}「${byId(id)?.bookmarks?.find((b) => b.id === mark)?.name || mark}」`;
+  }
+  /** Every bookmark on the slide as a trigger choice: [key, label]. */
+  const bookmarkTriggers = () => objects().filter((o) => (o.kind === "video" || o.kind === "audio") && o.bookmarks?.length)
+    .flatMap((o) => o.bookmarks.map((b) => [`${o.id}@${b.id}`, `${targetName(o.id)}「${b.name}」`]));
 
   /** What the selection animates: a whole group as one ("grp:…"), otherwise each object. */
   function selectionTargets() {
@@ -65,6 +74,11 @@ export function createAnimations(editor, app, kit) {
   }
   const targetsOf = (e) => (e.el.startsWith("grp:") ? objects().filter((o) => o.group === e.el.slice(4)).map((o) => o.id) : e.el.startsWith("@") ? [] : [e.el]);
 
+  /** Picks are of this slide's animations only (a pick left on another slide is forgotten). */
+  function prunePicked() {
+    const list = timeline();
+    if (picked.some((id) => !list.some((e) => e.id === id))) picked = picked.filter((id) => list.some((e) => e.id === id));
+  }
   /** The animations the ribbon's options change: those picked in the pane, else the selection's. */
   function active() {
     const list = timeline();
@@ -111,6 +125,7 @@ export function createAnimations(editor, app, kit) {
 
   /** The gallery: the picked animations (or the selection's) become this effect; what has none gets it. */
   function apply(cls, fx) {
+    prunePicked();
     if (cls === "path" && fx === "custom") { const t = selectionTargets()[0] || active()[0]?.el; if (t) startDrawing(t, active().find((e) => e.el === t && e.cls === "path")?.id); else app.toast("パスを描く図形を選んでください"); return; }
     const chosen = active();
     const targets = selectionTargets();
@@ -376,6 +391,11 @@ export function createAnimations(editor, app, kit) {
     const own = new Set(active().map((x) => x.el));
     const items = [{ label: "スライドのクリック順（トリガーなし）", on: !e?.trigger, run: () => setOption({ trigger: undefined }) }, "-", { head: "次の図形をクリックしたとき" }];
     for (const o of objects()) if (!own.has(o.id) && !o.hidden) items.push({ label: E.objectName(o, objects().indexOf(o)), on: e?.trigger === o.id, run: () => setOption({ trigger: o.id }) });
+    // ブックマーク時: as a video or a sound passes one of its bookmarks (再生 → ブックマークの追加).
+    const marks = bookmarkTriggers();
+    items.push("-", { head: "ブックマーク時" });
+    if (marks.length) for (const [key, text] of marks) items.push({ label: text, on: e?.trigger === key, run: () => setOption({ trigger: key }) });
+    else items.push({ label: "（ビデオ・オーディオにブックマークがありません）", disabled: true });
     items.push("-", { label: "スライド上でクリックして選ぶ…", icon: "bolt", run: pickTrigger });
     return menu(items);
   }
@@ -461,7 +481,7 @@ export function createAnimations(editor, app, kit) {
     p.main.forEach((grp, g) => grp.items.forEach((item, i) => listEl.append(rowEl(item, { number: i === 0 && g > 0 ? String(g) : i === 0 && g === 0 ? "0" : "", scale, seq: null }))));
     body.append(listEl);
     for (const [trigger, seq] of p.triggers) {
-      body.append(h("div", { class: "an-trigger-head" }, ico("bolt", 14), `トリガー：${targetName(trigger)}`));
+      body.append(h("div", { class: "an-trigger-head" }, ico("bolt", 14), `トリガー：${triggerName(trigger)}`));
       const tl = h("ol", { class: "an-list" });
       seq.forEach((grp) => grp.items.forEach((item, i) => tl.append(rowEl(item, { number: i === 0 ? "⚡" : "", scale, seq: trigger }))));
       body.append(tl);
@@ -609,7 +629,8 @@ export function createAnimations(editor, app, kit) {
       ...Object.keys(E.ANIM_PATHS).map((fx) => [`path:${fx}`, `軌跡：${E.ANIM_PATHS[fx].label}`]), ...(mediaOk(e.el) ? Object.keys(E.ANIM_MEDIA).map((fx) => [`media:${fx}`, `メディア：${E.ANIM_MEDIA[fx].label}`]) : [])];
     const dirs = same ? E.animDirs(e.cls, e.fx) : null;
     const def = defOf(e);
-    const triggers = [["", "スライドのクリック順"], ...objects().filter((o) => !chosen.some((x) => targetsOf(x).includes(o.id))).map((o) => [o.id, `クリック：${E.objectName(o, objects().indexOf(o))}`])];
+    const triggers = [["", "スライドのクリック順"], ...objects().filter((o) => !chosen.some((x) => targetsOf(x).includes(o.id))).map((o) => [o.id, `クリック：${E.objectName(o, objects().indexOf(o))}`]),
+      ...bookmarkTriggers().map(([key, text]) => [key, `ブックマーク時：${text}`])];
     const box = h("div", { class: "fp-sec an-details" },
       h("div", { class: "an-details-head" }, h("b", {}, chosen.length > 1 ? `${chosen.length}個のアニメーション` : `${targetName(e.el)}`), h("small", {}, chosen.length > 1 ? "" : `${E.ANIM_CLASSES[e.cls]}「${label(e)}」`)),
       line("効果", same ? choice(effects, `${e.cls}:${e.fx}`, (v) => { const [cls, fx] = v.split(":"); if (cls === "path" && fx === "custom") { startDrawing(e.el, e.id); return; } apply(cls, fx); }, "効果") : h("span", { class: "hint" }, "（いろいろ）")),
@@ -805,9 +826,11 @@ export function createAnimations(editor, app, kit) {
   editor.overlay(overlay);
   editor.subscribe(() => {
     // Picking an object on the stage picks its animations in the pane.
+    prunePicked();
     const targets = new Set(selectionTargets());
     const sel = new Set(editor.selection);
-    if (picked.length && !timeline().filter((e) => picked.includes(e.id)).every((e) => targets.has(e.el) || targetsOf(e).some((id) => sel.has(id)))) picked = [];
+    // A part of the layout (@title…) has no object to select: picking its row empties the selection, and it stays picked.
+    if (picked.length && !timeline().filter((e) => picked.includes(e.id)).every((e) => targets.has(e.el) || targetsOf(e).some((id) => sel.has(id)) || (e.el.startsWith("@") && !sel.size))) picked = [];
     renderPane();
   });
 

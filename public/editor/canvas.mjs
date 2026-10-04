@@ -1220,7 +1220,10 @@ export function createCanvas(app) {
       const el = e.el?.startsWith("grp:") ? (groupMap.has(e.el.slice(4)) ? `grp:${groupMap.get(e.el.slice(4))}` : null) : idMap.get(e.el);
       if (!el) continue;
       const copy = { ...JSON.parse(JSON.stringify(e)), id: ops.newId().replace(/^o/, "a"), el };
-      if (copy.trigger) { if (idMap.has(copy.trigger)) copy.trigger = idMap.get(copy.trigger); else delete copy.trigger; }
+      if (copy.trigger) {
+        const [tid, mark] = String(copy.trigger).split("@");
+        if (idMap.has(tid)) copy.trigger = mark ? `${idMap.get(tid)}@${mark}` : idMap.get(tid); else delete copy.trigger;
+      }
       out.push(copy);
     }
     return out;
