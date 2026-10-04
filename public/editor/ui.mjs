@@ -1263,6 +1263,8 @@ export function createEditorUi(editor, app) {
 
   function pictureTab() {
     const img = () => selected().find((o) => o.kind === "image");
+    // 図のリセット (with the size, 図とサイズのリセット): every chosen picture, one Undo.
+    const resetImages = (withSize) => editor.resetPicture(selected().filter((o) => o.kind === "image").map((o) => o.id), withSize);
     return [
       group("調整",
         btn("eraser", "背景の|削除", "写真・ロゴの一色に近い背景を透明にする（周りから背景を見つけます）", () => pictureTools.background(), { big: true, enabled: hasImage }),
@@ -1277,7 +1279,10 @@ export function createEditorUi(editor, app) {
         col(btn("transparency", "透明色を指定", "図の上でクリックした色を透明にする", () => pictureTools.transparentColor(), { enabled: hasImage }),
           btn("down", "図の圧縮", "画像を小さくして資料を軽くする（トリミング部分の削除も）", () => pictureTools.compressDialog())),
         col(btn("change", "図の変更", "画像を差し替える（大きさ・位置はそのまま）", async () => { const o = img(); if (!o) return; const [file] = await app.pickFiles("image/*", false); if (file) await app.replaceImage(o.id, file); }, { enabled: hasImage }),
-          btn("reset", "リセット", "トリミング・修整・枠線を元に戻す", () => editor.apply((o) => (o.kind === "image" ? { crop: undefined, mask: undefined, adj: undefined, bright: undefined, contrast: undefined, sat: undefined, gray: undefined, opacity: undefined, stroke: undefined, strokeW: undefined } : null)), { enabled: hasImage }))),
+          row(btn("reset", "リセット", "トリミング・修整・枠線・影を元に戻す", () => resetImages(false), { enabled: hasImage }), caret("図のリセット・図とサイズのリセット", () => menu([
+            { label: "図のリセット", icon: "reset", run: () => resetImages(false) },
+            { label: "図とサイズのリセット", icon: "zoomFit", run: () => resetImages(true) },
+          ]), { enabled: hasImage })))),
       group("アクセシビリティ", btn("textbox", "代替|テキスト", "画面読み上げが読む図の説明（装飾用にもできます）", () => { const o = one(); if (o) app.editAlt(o.id); }, { big: true, enabled: () => Boolean(one()) })),
       group("図のスタイル",
         drop("outline", "図の枠線", "枠線の色・太さ", () => outlineMenu(), { enabled: hasImage, swatch: strokeOf }),

@@ -24,6 +24,7 @@ import { createCompare } from "./editor/compare.mjs?v=__APP_VERSION__";
 import { createOnline } from "./editor/online.mjs?v=__APP_VERSION__";
 import { createCoach } from "./editor/coach.mjs?v=__APP_VERSION__";
 import { createImageExport } from "./editor/imagexport.mjs?v=__APP_VERSION__";
+import { createPictureSaver } from "./editor/picsave.mjs?v=__APP_VERSION__";
 import { createGifExport } from "./editor/gif.mjs?v=__APP_VERSION__";
 import { lockHtml } from "./editor/protect.mjs?v=__APP_VERSION__";
 import { createBackground } from "./editor/background.mjs?v=__APP_VERSION__";
@@ -2470,6 +2471,9 @@ const editorApp = {
   openVideoExport: () => videoExport.openDialog(),
   // 画像として保存 (public/editor/imagexport.mjs).
   openImageExport: () => imageExport.openDialog(),
+  // 図として保存 (public/editor/picsave.mjs): one object as a PNG / JPEG / SVG.
+  saveAsPicture: (id) => pictureSaver.open(id),
+  editorObjects: () => editor.objects(),
   openGifExport: () => gifExport.openDialog(),
   exportLockedHtml: () => exportLockedHtml(),
   formatBackground: () => background.open(),
@@ -2524,6 +2528,7 @@ const slideTools = createSlideTools(editorApp);
 const videoExport = createVideoExport(editorApp);
 // ファイル → エクスポート → 画像として保存 (public/editor/imagexport.mjs).
 const imageExport = createImageExport(editorApp);
+const pictureSaver = createPictureSaver(editorApp);
 // ファイル → エクスポート → アニメーション GIF の作成 (public/editor/gif.mjs).
 const gifExport = createGifExport(editorApp);
 // デザイン → 背景の書式設定 (public/editor/background.mjs).

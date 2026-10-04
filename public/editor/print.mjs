@@ -73,6 +73,35 @@ export function handoutBoxes(layout, count, { order = "rows" } = {}) {
   });
 }
 
+/** A slide's comments as printed lines (PowerPoint's 「コメントを印刷する」): each comment, then its replies. */
+export function commentLines(slide) {
+  const day = (at) => { const d = new Date(at || ""); return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("ja-JP", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }); };
+  const line = (x, level, done) => ({ level, by: String(x?.by || "").trim() || "（名前なし）", at: day(x?.at), text: String(x?.text || ""), done: Boolean(done) });
+  const out = [];
+  for (const c of Array.isArray(slide?.comments) ? slide.comments : []) {
+    if (!c || !String(c.text || "").trim()) continue;
+    out.push(line(c, 0, c.done));
+    for (const r of Array.isArray(c.replies) ? c.replies : []) if (r && String(r.text || "").trim()) out.push(line(r, 1, false));
+  }
+  return out;
+}
+
+/** Comment lines in page-sized runs: about `rows` rows a page, a row holding `perRow` characters (each comment takes
+ *  its name line, its text rows and a gap; a comment longer than a page gets a page of its own). */
+export function commentChunks(lines, { perRow = 52, rows = 44 } = {}) {
+  const out = [];
+  let run = [];
+  let used = 0;
+  for (const l of lines) {
+    const need = 2 + String(l.text).split(/\n/).reduce((n, t) => n + Math.max(1, Math.ceil(t.length / perRow)), 0);
+    if (run.length && used + need > rows) { out.push(run); run = []; used = 0; }
+    run.push(l);
+    used += need;
+  }
+  if (run.length) out.push(run);
+  return out;
+}
+
 export function createPrinter(app) {
   const { h, E } = app;
   const strip = (t) => E.strip(String(t ?? ""));
@@ -104,15 +133,33 @@ export function createPrinter(app) {
     return [...new Set(lines)].slice(0, 30);
   }
 
+  /** The pages of one slide's comments (after the slide, or at the end): who wrote each, when, and the replies. */
+  function commentsPages(i, full, first, opts) {
+    const lines = commentLines(app.deck().slides[i]);
+    const chunks = commentChunks(lines, full ? { perRow: 50, rows: 15 } : { perRow: 52, rows: 44 });
+    return chunks.map((chunk, k) => {
+      const page = h("div", { class: [full ? "pr-full" : "pr-page", "pr-comments"] },
+        h("h2", {}, `スライド ${i + 1} のコメント${chunks.length > 1 ? `（${k + 1}/${chunks.length}）` : ""}`),
+        h("ul", {}, chunk.map((l) => h("li", { class: l.level ? "pr-cm-reply" : "" },
+          h("div", { class: "pr-cm-meta" }, h("b", {}, l.by), l.at ? h("span", {}, l.at) : null, l.done ? h("span", {}, "解決済み") : null),
+          h("div", { class: "pr-cm-text" }, l.text.split(/\n/).map((t) => h("p", {}, t || "\u00a0")))))));
+      if (!full) chrome(page, first + k, opts);
+      return page;
+    });
+  }
+
   /** The pages for the settings (each an element of PAGE size, or a slide-size page for full slides). */
   function pages(opts) {
     const deck = app.deck();
     const list = printedSlides(deck, { range: opts.range, current: app.index(), custom: opts.custom, hidden: opts.hidden });
     const out = [];
+    // Comments: after their slide (full pages, notes pages), or at the end (outline, handouts).
+    const commentsAfter = (i) => { if (opts.comments) out.push(...commentsPages(i, opts.layout === "full", out.length + 1, opts)); };
     if (opts.layout === "full") {
       for (const i of list) {
         const el = app.renderSlide(i);
         out.push(h("div", { class: ["pr-full", opts.frame ? "framed" : ""] }, el));
+        commentsAfter(i);
       }
       return out;
     }
@@ -129,6 +176,7 @@ export function createPrinter(app) {
         page.append(h("div", { class: "pr-ol" }, h("div", { class: "pr-ol-title" }, h("b", {}, `${i + 1}`), strip(slide.title) || "（タイトルなし）"), lines.length ? h("ul", {}, lines.map((t) => h("li", {}, t))) : null));
         used += need;
       }
+      for (const i of list) commentsAfter(i);
       return out;
     }
     if (opts.layout === "notes") {
@@ -140,6 +188,7 @@ export function createPrinter(app) {
         box.classList.add("pr-notes-slide");
         page.append(box, h("div", { class: "pr-notes-text" }, String(deck.slides[i].notes || "").split(/\n/).map((line) => h("p", {}, line || " "))));
         out.push(page);
+        commentsAfter(i);
       }
       return out;
     }
@@ -154,6 +203,7 @@ export function createPrinter(app) {
       });
       out.push(page);
     }
+    for (const i of list) commentsAfter(i);
     return out;
   }
 
@@ -181,7 +231,7 @@ export function createPrinter(app) {
     const deck = app.deck();
     if (!deck) return;
     const saved = load();
-    const opts = { range: "all", custom: "", hidden: false, layout: "full", order: "rows", frame: false, color: "color", header: true, date: true, pageNo: true, footer: false, headerText: "", footerText: "", ...saved, ...(saved.range === "custom" ? {} : { custom: "" }) };
+    const opts = { range: "all", custom: "", hidden: false, layout: "full", order: "rows", frame: false, color: "color", header: true, date: true, pageNo: true, footer: false, headerText: "", footerText: "", comments: false, ...saved, ...(saved.range === "custom" ? {} : { custom: "" }) };
     const preview = h("div", { class: "pr-preview", "aria-label": "印刷プレビュー" });
     const count = h("span", { class: "hint pr-count" });
     const sel = (name, entries, value) => h("select", { name }, entries.map(([v, label]) => h("option", { value: v, selected: v === value || null }, label)));
@@ -193,14 +243,17 @@ export function createPrinter(app) {
       h("label", {}, "順序（配布資料）", sel("order", [["rows", "横（左から右へ）"], ["columns", "縦（上から下へ）"]], opts.order)),
       h("label", {}, "色", sel("color", [["color", "カラー"], ["gray", "グレースケール"], ["bw", "単純白黒"]], opts.color)),
       h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "frame", checked: opts.frame || null }), h("span", {}, "スライドに枠を付ける")),
+      h("label", { class: "sh-choice", title: "コメントのあるスライドの後（配布資料・アウトラインでは最後）に、コメントと返信のページを入れます" }, h("input", { type: "checkbox", name: "comments", checked: opts.comments || null }), h("span", {}, "コメントを印刷する")),
       h("fieldset", { class: "pr-hf" }, h("legend", {}, "ヘッダーとフッター（ノート・配布資料・アウトライン）"),
         h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "header", checked: opts.header || null }), h("span", {}, "ヘッダー"), h("input", { type: "text", name: "headerText", value: opts.headerText, placeholder: deck.title })),
         h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "date", checked: opts.date || null }), h("span", {}, "日付")),
         h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "pageNo", checked: opts.pageNo || null }), h("span", {}, "ページ番号")),
         h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "footer", checked: opts.footer || null }), h("span", {}, "フッター"), h("input", { type: "text", name: "footerText", value: opts.footerText, placeholder: "例：社内限り" }))));
+    // Read from the fields themselves: a field turned off for this layout (the header and footer of full pages) keeps
+    // its setting for the next layout instead of reading as off.
     const read = () => {
-      const f = new FormData(form);
-      return { range: f.get("range"), custom: String(f.get("custom") || ""), hidden: f.has("hidden"), layout: f.get("layout"), order: f.get("order"), color: f.get("color"), frame: f.has("frame"), header: f.has("header"), date: f.has("date"), pageNo: f.has("pageNo"), footer: f.has("footer"), headerText: String(f.get("headerText") || ""), footerText: String(f.get("footerText") || "") };
+      const f = (name) => form.elements.namedItem(name);
+      return { range: f("range").value, custom: String(f("custom").value || ""), hidden: f("hidden").checked, layout: f("layout").value, order: f("order").value, color: f("color").value, frame: f("frame").checked, comments: f("comments").checked, header: f("header").checked, date: f("date").checked, pageNo: f("pageNo").checked, footer: f("footer").checked, headerText: String(f("headerText").value || ""), footerText: String(f("footerText").value || "") };
     };
     let timer = null;
     function refresh() {

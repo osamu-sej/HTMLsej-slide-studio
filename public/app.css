@@ -745,6 +745,17 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .pr-notes .pr-notes-slide { position: absolute; left: 78px; top: 70px; }
 .pr-notes-text { position: absolute; left: 78px; right: 78px; top: 470px; bottom: 60px; overflow: hidden; font-size: 14px; line-height: 1.7; }
 .pr-notes-text p { margin: 0 0 4px; }
+.pr-comments { padding: 64px 56px 48px; box-sizing: border-box; color: #1a1a1a; }
+.pr-full.pr-comments { padding: 96px 140px; font-size: 32px; }
+.pr-comments h2 { margin: 0 0 16px; font-size: 1.15em; color: #1f3864; }
+.pr-page.pr-comments h2 { font-size: 16px; }
+.pr-comments ul { list-style: none; margin: 0; padding: 0; }
+.pr-comments li { margin: 0 0 12px; padding-left: 10px; border-left: 3px solid #bdd7ee; }
+.pr-comments li.pr-cm-reply { margin-left: 28px; border-left-color: #d9d9d9; }
+.pr-page.pr-comments li { font-size: 12.5px; line-height: 1.6; }
+.pr-cm-meta { display: flex; gap: 10px; color: #808080; font-size: 0.9em; }
+.pr-cm-meta b { color: #1a1a1a; }
+.pr-cm-text p { margin: 0; }
 .pr-outline { padding: 64px 56px 48px; box-sizing: border-box; }
 .pr-ol { margin-bottom: 12px; }
 .pr-ol-title { display: flex; gap: 10px; font-size: 15px; font-weight: 700; color: #1f3864; }

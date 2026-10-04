@@ -46,4 +46,5 @@ test("a toolbar saved with a ribbon button's old tooltip still finds it", () => 
   const qat = normalizeQat({ show: true, items: [{ ref: "view|表示/非表示|1cmごとの線を表示", label: "グリッド線" }, { ref: "view|表示/非表示|0.25cmごとに吸着", label: "吸着" }] });
   assert.deepEqual(qat.items.map((it) => it.ref), ["view|表示/非表示|グリッド線を表示（間隔はグリッドとガイドの設定で）", "view|表示/非表示|グリッド線に吸着（間隔はグリッドとガイドの設定で）"]);
   assert.deepEqual(qat.items.map((it) => it.label), ["グリッド線", "吸着"], "its label stays");
+  assert.equal(normalizeQat({ items: [{ ref: "picture|調整|トリミング・修整・枠線を元に戻す" }] }).items[0].ref, "picture|調整|トリミング・修整・枠線・影を元に戻す", "図のリセット");
 });

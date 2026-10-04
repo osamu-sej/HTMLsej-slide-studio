@@ -53,6 +53,7 @@ export const qatKey = (item) => (typeof item === "string" ? item : item?.ref);
 const QAT_RENAMED = {
   "view|表示/非表示|1cmごとの線を表示": "view|表示/非表示|グリッド線を表示（間隔はグリッドとガイドの設定で）",
   "view|表示/非表示|0.25cmごとに吸着": "view|表示/非表示|グリッド線に吸着（間隔はグリッドとガイドの設定で）",
+  "picture|調整|トリミング・修整・枠線を元に戻す": "picture|調整|トリミング・修整・枠線・影を元に戻す",
 };
 
 export function normalizeQat(raw) {
