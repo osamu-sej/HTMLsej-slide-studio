@@ -2301,6 +2301,10 @@ const editorApp = {
   deck: () => state.deck,
   slide: () => (state.deck ? state.deck.slides[state.selected] ?? null : null),
   index: () => state.selected,
+  undo: () => undoRedo("undo"),
+  redo: () => undoRedo("redo"),
+  canUndo: () => state.undo.length > 0,
+  canRedo: () => state.redo.length > 0,
   setObjects,
   setTimeline,
   setSlideFields,
@@ -5414,6 +5418,8 @@ function commandList() {
       cmd("AI", "✦", "このスライドの別案を3つ見る", () => requestVariants(state.selected)),
       cmd("AI", "📌", "前提条件（AIへの共通の指示）を書く", () => { setPanel("chat"); $("memoBox").hidden = false; $("memoInput").value = deck.memo || ""; $("memoInput").focus(); }),
       ...deck.slides.map((slide, index) => cmd("移動", `${index + 1}`, strip(slide.title || slide.message || typeLabel(slide.type)), () => select(index), typeLabel(slide.type))),
+      // Every command of the ribbon, whichever tab it is on (shown once something is typed).
+      ...(state.ribbonCmds || []).map((c) => cmd("リボン", "▸", c.label, () => editorUi.runRibbonCommand(c.ref), `${[c.tabLabel, c.group].filter(Boolean).join(" › ")}${c.disabled ? "（今は使えません）" : ""}`)),
     );
   }
   list.push(
@@ -5433,6 +5439,7 @@ function openCommandPalette() {
   if (state.inline) finishInlineEdit(true);
   $("commandInput").value = "";
   state.commandActive = 0;
+  state.ribbonCmds = state.mode === "edit" && state.deck ? editorUi.ribbonCommands() : [];
   renderCommands();
   dialog.showModal();
   $("commandInput").focus();
@@ -5441,7 +5448,7 @@ function openCommandPalette() {
 function filteredCommands() {
   const query = $("commandInput").value.trim();
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const matches = commandList().filter((item) => words.every((word) => `${item.label} ${item.desc} ${item.group}`.toLowerCase().includes(word)));
+  const matches = commandList().filter((item) => (words.length || item.group !== "リボン") && words.every((word) => `${item.label} ${item.desc} ${item.group}`.toLowerCase().includes(word)));
   const canAsk = query && state.deck && state.mode === "edit" && state.codexAuthorized;
   if (!canAsk) return matches;
   const ask = { group: "AIに頼む", icon: "✦", label: `AIに頼む：「${query.slice(0, 40)}」`, run: () => sendChat(query), desc: "AIへの依頼として送る" };
@@ -6517,6 +6524,8 @@ function bind() {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable || document.querySelector("dialog[open]");
     const meta = event.metaKey || event.ctrlKey;
     if (meta && event.key.toLowerCase() === "k") { event.preventDefault(); openCommandPalette(); return; }
+    // ⌥Q / Alt+Q: the ribbon's 検索 box (PowerPoint's Microsoft Search).
+    if (event.altKey && !meta && event.code === "KeyQ" && state.mode === "edit" && state.deck && !typing) { event.preventDefault(); editorUi.focusSearch(); return; }
     // PowerPoint's window keys: ⌘F1 folds the ribbon, ⌘F finds, ⌘0 / ⌘＋ / ⌘− zoom the slide.
     if (state.mode === "edit" && state.deck && !document.querySelector("dialog[open]")) {
       if (meta && event.key === "F1") { event.preventDefault(); editorUi.toggleRibbon(); return; }
