@@ -252,3 +252,24 @@ test("クイック レイアウト: a set of chart elements at once; the title, 
   assert.equal(E.applyChartLayout(chart, "nope"), chart, "an unknown layout changes nothing");
   for (const key of Object.keys(E.CHART_LAYOUTS)) assert.equal(E.chartLayoutOf(norm(E.applyChartLayout(chart, key))), key, `${key} is found again`);
 });
+
+test("グラフ フィルター hides series and categories without losing them; データ テーブル shows the values under the chart", async () => {
+  const E = await loadEngine();
+  const chart = { type: "waterfall", labels: ["期首", "増", "減", "期末"], series: [{ name: "売上", values: [10, 5, -3, 12] }, { name: "目標", values: [9, 4, -2, 11] }],
+    opts: { totals: [0, 3], hideSeries: [1], hideLabels: [1, 99], table: true } };
+  const { o, el } = draw(E, chart);
+  assert.equal(JSON.stringify(o.chart.opts), JSON.stringify({ totals: [0, 3], hideSeries: [1], hideLabels: [1], table: true }), "only places that exist");
+  assert.equal(o.chart.series.length, 2, "the data stays");
+  const shown = E.visibleChart(o.chart);
+  assert.equal(JSON.stringify(shown.labels), JSON.stringify(["期首", "減", "期末"]));
+  assert.equal(JSON.stringify(shown.series.map((s) => s.values)), JSON.stringify([[10, -3, 12]]));
+  assert.equal(JSON.stringify(shown.opts.totals), JSON.stringify([0, 2]), "the totals follow the shown categories");
+  const table = el.querySelector(".hs-obj-chart .hs-chart-table");
+  assert.ok(table, "the data table");
+  assert.equal([...table.querySelectorAll("thead th")].map((th) => th.textContent).join("|"), "|期首|減|期末");
+  assert.equal([...table.querySelectorAll("tbody tr")].map((tr) => tr.textContent).join("|"), "売上10-312");
+  const all = E.normalizeObject({ id: "c2", kind: "chart", x: 0, y: 0, w: 900, h: 500, chart: { ...chart, opts: { hideSeries: [0, 1], hideLabels: [0, 1, 2, 3] } } });
+  assert.equal(all.chart.opts, undefined, "everything hidden is not a filter");
+  const pie = draw(E, { type: "pie", labels: ["a", "b"], series: [{ name: "s", values: [1, 2] }], opts: { table: true } });
+  assert.equal(pie.el.querySelector(".hs-chart-table"), null, "no table for a pie");
+});

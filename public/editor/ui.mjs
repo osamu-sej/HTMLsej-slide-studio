@@ -1281,7 +1281,13 @@ export function createEditorUi(editor, app) {
       group("アクセシビリティ", btn("textbox", "代替|テキスト", "画面読み上げが読む図の説明（装飾用にもできます）", () => { const o = one(); if (o) app.editAlt(o.id); }, { big: true, enabled: () => Boolean(one()) })),
       group("図のスタイル",
         drop("outline", "図の枠線", "枠線の色・太さ", () => outlineMenu(), { enabled: hasImage, swatch: strokeOf }),
-        drop("mask", "図形に合わせて|切り抜き", "画像を図形の形に切り抜く", () => (close) => h("div", { class: "rb-gallery" }, h("div", { class: "rb-gallery-grid" }, MASKS.map((key) => h("button", { type: "button", title: E.SHAPES[key].label, onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? { mask: key === "rect" ? undefined : key, adj: undefined } : null)); } }, shapeThumb(key))))), { big: true, enabled: hasImage })),
+        drop("mask", "図形に合わせて|切り抜き", "画像を図形の形に切り抜く", () => (close) => h("div", { class: "rb-gallery" }, h("div", { class: "rb-gallery-grid" }, MASKS.map((key) => h("button", { type: "button", title: E.SHAPES[key].label, onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? { mask: key === "rect" ? undefined : key, adj: undefined } : null)); } }, shapeThumb(key))))), { big: true, enabled: hasImage }),
+        drop("smartart", "図の|レイアウト", "図のレイアウト：選んだ図をキャプション付きで並べる（横に並べる・2列のグリッド・図と説明）。図とキャプションはグループになります", () => menu(Object.entries(ops.PICTURE_LAYOUTS).map(([kind, label]) => ({ label, run: () => {
+          const { list, ids } = ops.pictureLayout(editor.objects(), editor.selection, kind);
+          if (!ids.length) { app.toast("並べる図を選んでください"); return; }
+          editor.commit(list, { select: ids });
+          app.toast("図をキャプション付きで並べました（キャプションはダブルクリックで書き換えられます。⌘Zで戻せます）");
+        } }))), { big: true, enabled: hasImage })),
       arrangeGroup(),
       group("サイズ",
         btn("crop", "トリミング", "画像の端を切り取る：黒い印をドラッグ（Enterで確定）。数値は書式パネルで", () => { const o = one(); if (o?.kind === "image") crop.start(o.id); else app.openPanel("format", "picture"); }, { big: true, enabled: hasImage, pressed: () => crop.active }),
@@ -1504,7 +1510,8 @@ export function createEditorUi(editor, app) {
       h("p", { class: "hint fp-tips" }, "ドラッグで移動・四隅でサイズ・上の丸で回転。Shiftで比率を保つ、Altで吸着なし、Ctrlを押しながらドラッグでコピー。ダブルクリックで文字を入力。右クリックでメニュー。"));
     } else {
       const title = chosen.length === 1 ? E.objectName(chosen[0], list.indexOf(chosen[0])) : `${chosen.length}個のオブジェクト`;
-      head.append(h("b", {}, title), chosen.length === 1 ? h("button", { type: "button", class: "btn btn-ghost btn-sm", title: "名前を変える", onclick: async () => { const name = await app.ask("オブジェクトの名前", "選択ウィンドウやアニメーションに表示される名前", E.objectName(chosen[0], list.indexOf(chosen[0]))); if (name != null) editor.rename(chosen[0].id, name); } }, "名前") : null);
+      // (append writes a null as the word "null": the rename button only for one object)
+      head.append(...[h("b", {}, title), chosen.length === 1 ? h("button", { type: "button", class: "btn btn-ghost btn-sm", title: "名前を変える", onclick: async () => { const name = await app.ask("オブジェクトの名前", "選択ウィンドウやアニメーションに表示される名前", E.objectName(chosen[0], list.indexOf(chosen[0]))); if (name != null) editor.rename(chosen[0].id, name); } }, "名前") : null].filter(Boolean));
       body.append(...paneSections(chosen, list));
     }
     body.append(selectionPane(list));

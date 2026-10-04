@@ -250,6 +250,51 @@ export function withGroups(list, ids) {
   return list.filter((o) => set.has(o.id) || (o.group && groups.has(o.group))).map((o) => o.id);
 }
 
+/**
+ * 図のレイアウト: the chosen pictures set out evenly with a caption each (their alternative text or name), as
+ * PowerPoint's picture layouts do; the pictures fill their frames (cover), and pictures and captions are grouped.
+ */
+export const PICTURE_LAYOUTS = { row: "キャプション付きの図（横に並べる）", grid: "図のグリッド（2列・キャプション付き）", side: "図と説明（左に図・右に説明）" };
+export function pictureLayout(list, ids, kind) {
+  const pics = list.filter((o) => ids.includes(o.id) && o.kind === "image");
+  if (!pics.length || !PICTURE_LAYOUTS[kind]) return { list, ids: [] };
+  const b = bounds(pics);
+  // At least a good part of the slide, around where the pictures were, inside the slide.
+  const w = Math.min(W - 160, Math.max(b.w, 960));
+  const h = Math.min(H - 300, Math.max(b.h, 500));
+  const x = Math.min(Math.max(80, b.x + b.w / 2 - w / 2), W - 80 - w);
+  const y = Math.min(Math.max(200, b.y + b.h / 2 - h / 2), H - 100 - h);
+  const gap = 24;
+  const capH = 56;
+  const n = pics.length;
+  const g = `g${newId().slice(1)}`;
+  const caption = (o) => String(o.alt || o.name || (o.fileName || "").replace(/\.[a-z0-9]+$/i, "") || "説明を入力").replace(/[<>&]/g, "").slice(0, 80);
+  const placed = new Map();
+  const captions = [];
+  pics.forEach((o, i) => {
+    let pic;
+    let cap;
+    if (kind === "side") {
+      const rowH = (h - gap * (n - 1)) / n;
+      const picW = Math.min(rowH * (4 / 3), w * 0.45);
+      const top = y + i * (rowH + gap);
+      pic = { x, y: top, w: picW, h: rowH };
+      cap = { x: x + picW + gap, y: top, w: w - picW - gap, h: rowH, align: "left", valign: "middle" };
+    } else {
+      const cols = kind === "grid" ? Math.min(2, n) : n;
+      const rows = Math.ceil(n / cols);
+      const cellW = (w - gap * (cols - 1)) / cols;
+      const cellH = (h - gap * (rows - 1)) / rows;
+      const [cx, cy] = [x + (i % cols) * (cellW + gap), y + Math.floor(i / cols) * (cellH + gap)];
+      pic = { x: cx, y: cy, w: cellW, h: Math.max(40, cellH - capH - 8) };
+      cap = { x: cx, y: cy + pic.h + 8, w: cellW, h: capH, align: "center", valign: "top" };
+    }
+    placed.set(o.id, { ...o, ...Object.fromEntries(Object.entries(pic).map(([k, v]) => [k, round2(v)])), fit: "cover", crop: undefined, rot: undefined, group: g });
+    captions.push({ id: newId(), kind: "text", x: round2(cap.x), y: round2(cap.y), w: round2(cap.w), h: round2(cap.h), text: `<p>${caption(o)}</p>`, fs: 28, color: "#1a1a1a", align: cap.align, valign: cap.valign, group: g });
+  });
+  return { list: [...list.map((o) => placed.get(o.id) || o), ...captions], ids: [...pics.map((o) => o.id), ...captions.map((o) => o.id)] };
+}
+
 export function group(list, ids) {
   if (ids.length < 2) return list;
   const g = `g${newId().slice(1)}`;

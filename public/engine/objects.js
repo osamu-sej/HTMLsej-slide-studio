@@ -1900,6 +1900,14 @@
       const totals = [...new Set(raw.opts.totals.map(Number).filter((i) => Number.isInteger(i) && i >= 0 && i < labels.length))].sort((a, b) => a - b).slice(0, 50);
       if (totals.length) opts.totals = totals;
     }
+    // グラフ フィルター: series and categories kept in the data but not drawn (at least one of each stays shown).
+    for (const [key, count] of [["hideSeries", series.length], ["hideLabels", labels.length]]) {
+      if (!Array.isArray(raw.opts?.[key])) continue;
+      const list = [...new Set(raw.opts[key].map(Number).filter((i) => Number.isInteger(i) && i >= 0 && i < count))].sort((a, b) => a - b);
+      if (list.length && list.length < count) opts[key] = list;
+    }
+    // データ テーブル: the values in a table under the chart.
+    if (raw.opts?.table === true) opts.table = true;
     if (Object.keys(opts).length) out.opts = opts;
     const style = normalizeChartStyle(raw.style, labels.length);
     if (style) out.style = style;
@@ -2482,7 +2490,32 @@
     svg.append(g, labels);
   }
   /** The engine's chart spec (as the layouts' charts) for a chart object. */
-  function chartSpec(c) {
+  /** The chart as drawn: without the series and categories グラフ フィルター hides (a waterfall's totals follow). */
+  function visibleChart(c) {
+    const hs = new Set(c.opts?.hideSeries || []);
+    const hl = new Set(c.opts?.hideLabels || []);
+    if (!hs.size && !hl.size) return c;
+    const keep = c.labels.map((_, i) => !hl.has(i));
+    const at = [];
+    let n = 0;
+    keep.forEach((k, i) => { if (k) at[i] = n++; });
+    const { hideSeries: _s, hideLabels: _l, ...opts } = c.opts;
+    if (opts.totals) { opts.totals = opts.totals.filter((i) => keep[i]).map((i) => at[i]); if (!opts.totals.length) delete opts.totals; }
+    const out = { ...c, labels: c.labels.filter((_, i) => keep[i]), series: c.series.filter((_, i) => !hs.has(i)).map((s) => ({ ...s, values: s.values.filter((_, i) => keep[i]) })) };
+    if (Object.keys(opts).length) out.opts = opts; else delete out.opts;
+    return out;
+  }
+  // データ テーブル: the charts with categories along an axis.
+  const TABLE_CHARTS = new Set(["bar", "clustered-bar", "stacked-bar", "100-stacked-bar", "line", "multi-line", "area", "stacked-area", "combo", "waterfall"]);
+  function dataTable(c) {
+    const shown = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString("ja-JP"));
+    return h("table", { class: "hs-chart-table" },
+      h("thead", {}, h("tr", {}, h("th", {}), c.labels.map((label) => h("th", {}, label)))),
+      h("tbody", {}, c.series.map((series) => h("tr", {}, h("th", {}, series.name), series.values.map((v) => h("td", {}, shown(v)))))));
+  }
+
+  function chartSpec(chart) {
+    const c = visibleChart(chart);
     const data = { ...(c.title ? { title: c.title } : {}), ...(c.unit ? { unit: c.unit } : {}) };
     const first = c.series[0]?.values || [];
     if (c.type === "stacked-bar" || c.type === "100-stacked-bar") {
@@ -2790,7 +2823,11 @@
     for (const [name, value] of Object.entries(CHART_COLORS[o.chart.colors]?.vars || {})) box.style.setProperty(name, value);
     if (o.chart.title) box.append(h("div", { class: "hs-obj-chart-title" }, o.chart.title));
     const titleH = o.chart.title ? 52 : 0;
-    box.append(E.chart(chartSpec(o.chart), { w: Math.max(240, Math.round(o.w)), h: Math.max(140, Math.round(o.h - titleH)), key: `obj:${o.id}` }));
+    const shown = visibleChart(o.chart);
+    const table = o.chart.opts?.table && TABLE_CHARTS.has(o.chart.type) ? dataTable(shown) : null;
+    const tableH = table ? Math.round(Math.min(o.h * 0.45, (shown.series.length + 1) * 32 + 4)) : 0;
+    box.append(E.chart(chartSpec(o.chart), { w: Math.max(240, Math.round(o.w)), h: Math.max(140, Math.round(o.h - titleH - tableH)), key: `obj:${o.id}` }));
+    if (table) { table.style.height = `${tableH}px`; box.append(table); }
     rotEl.append(box);
   }
 
@@ -3647,7 +3684,7 @@
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
-    LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
+    LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
