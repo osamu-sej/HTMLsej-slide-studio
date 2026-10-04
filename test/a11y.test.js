@@ -9,7 +9,8 @@ import test from "node:test";
 import { parseHTML } from "linkedom";
 
 import { accessibilityIssues, contrast, visualOrder } from "../public/editor/a11y.mjs";
-import { handoutBoxes, PAGE, paginate, parseRange, printedSlides } from "../public/editor/print.mjs";
+import { commentChunks, commentLines, handoutBoxes, PAGE, paginate, parseRange, printedSlides } from "../public/editor/print.mjs";
+import { pictureFileName, rotatedBox } from "../public/editor/picsave.mjs";
 import { deckShape } from "../server/schemas.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -118,4 +119,41 @@ test("print: ranges, hidden slides, pages and handout boxes inside the page", ()
   assert.equal(cols[1].x, cols[0].x);
   assert.ok(cols[1].y > cols[0].y);
   assert.ok(handoutBoxes("h3", 3)[0].lines, "the 3-slide handout has lines for notes");
+});
+
+test("print: コメントを印刷する — each comment, then its replies; empty ones left out; pages of a sensible length", () => {
+  const slide = { comments: [
+    { id: "c1", text: "数字を確認\n（前年比）", by: "佐藤", at: "2026-10-01T01:00:00Z", done: true, replies: [{ id: "r1", text: "確認しました", by: "鈴木", at: "2026-10-01T02:00:00Z" }, { id: "r2", text: "  " }] },
+    { id: "c2", text: "   " },
+    { id: "c3", text: "図を差し替え", at: "not a date" },
+  ] };
+  const lines = commentLines(slide);
+  assert.deepEqual(JSON.parse(JSON.stringify(lines.map(({ level, by, text, done }) => ({ level, by, text, done })))), [
+    { level: 0, by: "佐藤", text: "数字を確認\n（前年比）", done: true },
+    { level: 1, by: "鈴木", text: "確認しました", done: false },
+    { level: 0, by: "（名前なし）", text: "図を差し替え", done: false },
+  ]);
+  assert.ok(lines[0].at.includes("2026"), "when it was written");
+  assert.equal(lines[2].at, "", "an unreadable time is left out");
+  assert.deepEqual(commentLines({}), []);
+  assert.deepEqual(commentLines({ comments: "x" }), []);
+  const many = Array.from({ length: 30 }, (_, i) => ({ level: 0, by: "A", at: "", text: "あ".repeat(60), done: false, i }));
+  const chunks = commentChunks(many, { perRow: 52, rows: 44 });
+  assert.equal(chunks.flat().length, 30, "nothing lost");
+  assert.ok(chunks.length > 1 && chunks.every((c) => c.length && 4 * c.length <= 44), "split into pages of at most 44 rows (each takes 4)");
+  assert.equal(commentChunks([{ text: "あ".repeat(5000) }]).length, 1, "a long comment still gets a page");
+  assert.deepEqual(commentChunks([]), []);
+});
+
+test("図として保存: the box a turned object needs, and a file name without the characters files cannot have", () => {
+  assert.deepEqual(rotatedBox(200, 100, 0), { w: 200, h: 100 });
+  assert.deepEqual(rotatedBox(200, 100, 90), { w: 100, h: 200 });
+  assert.deepEqual(rotatedBox(200, 100, -270), { w: 100, h: 200 });
+  const b = rotatedBox(100, 100, 45);
+  assert.ok(Math.abs(b.w - 141.42) < 0.01 && Math.abs(b.h - 141.42) < 0.01);
+  assert.equal(pictureFileName("図 3", "png"), "図 3.png");
+  assert.equal(pictureFileName('売上/2026: "上期"?', "svg"), "売上_2026_ _上期__.svg");
+  assert.equal(pictureFileName("", "jpg"), "図.jpg");
+  assert.equal(pictureFileName("  \u0001 ", "png"), "_.png");
+  assert.equal(pictureFileName("あ".repeat(200), "png").length, 84);
 });

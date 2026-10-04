@@ -1350,6 +1350,24 @@ export function createCanvas(app) {
     const anims = copiedAnims(timeline().filter((e) => chosen.has(e.el) || (e.el?.startsWith("grp:") && groups.has(e.el.slice(4)))), idMap, groupMap);
     commit(list, { select: ids, ...(anims.length ? { timeline: [...timeline(), ...anims] } : {}) });
   }
+  /** 図のリセット: trimming, adjustments, shape, outline and shadow back to none; 図とサイズのリセット also gives each
+   *  picture its own size again (made smaller only to fit in the slide, its middle where it was) and takes off its turn
+   *  and flips. Every picture in `ids` at once (one Undo). */
+  const PICTURE_LOOK = { crop: undefined, mask: undefined, adj: undefined, bright: undefined, contrast: undefined, sat: undefined, gray: undefined, opacity: undefined, stroke: undefined, strokeW: undefined, shadow: undefined };
+  function resetPicture(ids, withSize = false) {
+    const list = (Array.isArray(ids) ? ids : [ids]).filter((id) => byId(id)?.kind === "image" && !byId(id).locked);
+    if (!list.length) return;
+    commit(ops.update(objects(), list, (o) => {
+      const patch = { ...PICTURE_LOOK };
+      const img = withSize ? ed.wrap?.querySelector(`.hs-obj[data-el="${CSS.escape(o.id)}"] .hs-obj-img img`) : null;
+      if (img?.naturalWidth) {
+        const k = Math.min(1, (ops.W * 0.8) / img.naturalWidth, (ops.H * 0.8) / img.naturalHeight);
+        const [w, h] = [Math.round(img.naturalWidth * k), Math.round(img.naturalHeight * k)];
+        Object.assign(patch, { w, h, x: Math.round(o.x + o.w / 2 - w / 2), y: Math.round(o.y + o.h / 2 - h / 2), rot: undefined, flipH: undefined, flipV: undefined, fit: undefined });
+      }
+      return patch;
+    }));
+  }
   function groupSelection() {
     if (ed.sel.length < 2) return app.toast("グループ化するには2つ以上選んでください");
     const list = ops.group(objects(), ed.sel);
@@ -1621,9 +1639,14 @@ export function createCanvas(app) {
       any && { label: "図形の書式設定…", run: () => app.openPanel("format") },
       one && { label: "代替テキストを編集…", run: () => app.editAlt?.(one.id) },
       one && { label: "リンク・動作の設定…", run: () => app.openPanel("format", "action") },
+      // A link on the object: open it, or take it away.
+      one?.action?.type === "url" && { label: "リンクを開く", run: () => window.open(one.action.href, "_blank", "noopener") },
+      one?.action?.type === "url" && !one.locked && { label: "リンクの削除", run: () => commit(ops.update(objects(), [one.id], () => ({ action: undefined }))) },
+      one && { label: "図として保存…", run: () => app.saveAsPicture?.(one.id) },
       any && { label: "アニメーション…", run: () => { app.showTab("animation", { open: true }); app.openAnimationPane(); } },
       one?.kind === "shape" && one.shape === "custom" && !one.locked && { label: "頂点の編集", run: () => app.editPoints?.(one.id) },
       one?.kind === "image" && !one.locked && { label: "トリミング", run: () => app.startCrop?.(one.id) },
+      one?.kind === "image" && !one.locked && { label: "図とサイズのリセット", run: () => resetPicture([one.id], true) },
       one?.kind === "chart" && { label: "データの編集…", run: () => app.editChart?.(one.id) },
       one?.kind === "smartart" && !one.locked && { label: "テキスト ウィンドウ", run: () => app.editSmartart?.(one.id, null) },
       one?.kind === "smartart" && !one.locked && { label: "図形に変換", run: () => app.smartartToShapes?.(one.id) },
@@ -1698,7 +1721,7 @@ export function createCanvas(app) {
     get selection() { return [...ed.sel]; },
     get typing() { return Boolean(ed.typing); },
     selectedObjects: () => selected(),
-    batch,
+    batch, resetPicture,
     objects,
     attach, draw, emit,
     subscribe(fn) { subs.add(fn); return () => subs.delete(fn); },

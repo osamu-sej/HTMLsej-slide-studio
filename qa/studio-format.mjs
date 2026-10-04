@@ -1,6 +1,7 @@
 // 図の形式 and グラフ要素 and 校閲 in a real browser: 背景の削除 and 透明色を指定 (the new picture's pixels are checked),
 // 図の圧縮 (a 3000-pixel picture comes back 1280 wide), グラフ要素を追加 (data labels, legend) and 行/列の切り替え,
-// 比較 with a deck in the library (a changed slide taken back), and インクの非表示.
+// 比較 with a deck in the library (a changed slide taken back), インクの非表示, and the right-click menu's 図として保存,
+// リンクを開く / リンクの削除 and 図とサイズのリセット.
 // Usage: node qa/studio-format.mjs [--base=http://127.0.0.1:8787]   (with `npm start` running)
 import { mkdir, readFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -809,6 +810,102 @@ await step("グラフ フィルター（系列・項目を隠す）とデータ 
   await shot("picture-layout");
   await undo();
   assert(!(await slide()).elements.find((o) => o.id === p1.id).group, "⌘Z puts them back");
+});
+
+await step("右クリック: 図として保存（画像は PNG・図形は SVG）; リンクを開く・リンクの削除; 図とサイズのリセット", async () => {
+  await page.keyboard.press("Escape");
+  await page.locator(".film-item").nth(5).click();
+  await page.waitForTimeout(300);
+  const pic = await insertPicture(logo);
+  // The picture trimmed (its left quarter), brightened, turned 90°, outlined; and a shape with a link.
+  await page.evaluate((id) => {
+    const s = window.__hsej.slide();
+    Object.assign(s.elements.find((o) => o.id === id), { x: 300, y: 300, w: 300, h: 300, rot: 90, crop: { l: 0.25, t: 0, r: 0, b: 0 }, bright: 0.2, stroke: "#808080", strokeW: 4 });
+    s.elements.push({ id: "qaLink", kind: "shape", shape: "roundRect", x: 1000, y: 320, w: 420, h: 200, fill: "#DEEBF7", stroke: "none", text: "<p>リンク先</p>", fs: 40, color: "#1F3864", action: { type: "url", href: "https://example.com/sej" } });
+  }, pic.id);
+  const at = await page.evaluate(() => window.__hsej.deck().slides.indexOf(window.__hsej.slide()));
+  await page.locator(".film-item").nth(at + 1).click();
+  await page.locator(".film-item").nth(at).click();
+  await page.waitForSelector('#stageBody .hs-obj[data-el="qaLink"]');
+  const rightClick = async (id, item) => {
+    const r = await page.locator(`#stageBody .slide-wrap .hs-obj[data-el="${id}"]`).first().boundingBox();
+    await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2, { button: "right" });
+    await page.locator(`.ed-menu button:has-text("${item}")`).first().click();
+  };
+  // The file names given to the browser (a headless browser may call a download made after a wait "download").
+  await page.evaluate(() => { window.__names = []; const click = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { if (this.download) window.__names.push(this.download); return click.call(this); }; });
+  // 図として保存 (a picture): PNG as it shows on the slide.
+  await rightClick(pic.id, "図として保存");
+  await page.waitForSelector(".ps-dialog[open]");
+  const [png] = await Promise.all([page.waitForEvent("download", { timeout: 20000 }), page.click(".ps-dialog .ps-go")]);
+  const pngFile = join(outDir, "format-saved-picture.png");
+  await png.saveAs(pngFile);
+  const names = await page.evaluate(() => window.__names);
+  assert(/^[^/\\]+\.png$/.test(names.at(-1)), `named after the picture: ${names}`);
+  const facts = JSON.parse(execFileSync("python3", ["-c", `
+from PIL import Image; import json, sys
+im = Image.open(sys.argv[1]).convert("RGBA"); w, h = im.size
+print(json.dumps({"w": w, "h": h, "top": im.getpixel((w // 2, int(h * .12))), "bottom": im.getpixel((w // 2, int(h * .88))), "left": im.getpixel((int(w * .12), h // 2)), "edge": im.getpixel((1, h // 2))}))`, pngFile]).toString());
+  const navy = (p) => p[2] > p[0] + 40 && p[0] < 90 && p[3] > 200;
+  const white = (p) => p.slice(0, 3).every((v) => v > 230);
+  assert(Math.abs(facts.w - facts.h) <= 2 && facts.w >= 300 && facts.w <= 320, `the frame (with its outline): ${facts.w}×${facts.h}`);
+  assert(navy(facts.top) && white(facts.bottom) && white(facts.left), `trimmed and turned (the navy square at the top): ${JSON.stringify(facts)}`);
+  assert(facts.top[2] > 105, `brightened as on the slide: ${facts.top}`);
+  assert(facts.edge[0] < 160 && facts.edge[3] > 200, `outlined in grey: ${facts.edge}`);
+  // 図として保存 (a shape): SVG with its words.
+  await rightClick("qaLink", "図として保存");
+  await page.waitForSelector(".ps-dialog[open]");
+  await page.selectOption(".ps-dialog .ps-format", "svg");
+  const [svg] = await Promise.all([page.waitForEvent("download", { timeout: 20000 }), page.click(".ps-dialog .ps-go")]);
+  const svgFile = join(outDir, "format-saved-shape.svg");
+  await svg.saveAs(svgFile);
+  assert(/\.svg$/.test((await page.evaluate(() => window.__names)).at(-1)), "an .svg file");
+  const text = await readFile(svgFile, "utf8");
+  assert(/^<\?xml/.test(text) && text.includes("<svg") && text.includes("リンク先") && /width="420"/.test(text), `an SVG of the shape: ${text.slice(0, 160)}`);
+  const svgPng = await page.evaluate(async (t) => {
+    const img = new Image();
+    await new Promise((ok, no) => { img.onload = ok; img.onerror = no; img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(t)}`; });
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext("2d");
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(10, c.height / 2, 1, 1).data;
+    return { w: c.width, h: c.height, fill: [...d] };
+  }, text);
+  assert(svgPng.w === 420 && svgPng.h === 200 && svgPng.fill[2] > 200 && svgPng.fill[0] < 240 && svgPng.fill[3] > 200, `the SVG draws the shape's light blue: ${JSON.stringify(svgPng)}`);
+  // リンクを開く opens it in a new tab; リンクの削除 takes it off (one ⌘Z brings it back).
+  await context.route("https://example.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>sej</title>" }));
+  const [popup] = await Promise.all([context.waitForEvent("page", { timeout: 10000 }), rightClick("qaLink", "リンクを開く")]);
+  await popup.waitForLoadState().catch(() => {});
+  assert(popup.url() === "https://example.com/sej", `the link opened in a new tab: ${popup.url()}`);
+  await popup.close();
+  await rightClick("qaLink", "リンクの削除");
+  await page.waitForTimeout(300);
+  assert(!(await slide()).elements.find((o) => o.id === "qaLink").action, "the link is gone");
+  const r = await page.locator('#stageBody .slide-wrap .hs-obj[data-el="qaLink"]').boundingBox();
+  await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2, { button: "right" });
+  assert(!(await page.locator('.ed-menu button:has-text("リンクを開く")').count()), "no リンクを開く without a link");
+  await page.keyboard.press("Escape");
+  await undo();
+  assert((await slide()).elements.find((o) => o.id === "qaLink").action?.href === "https://example.com/sej", "⌘Z brings the link back");
+  // 図とサイズのリセット: the picture's own 400 × 300, not turned or trimmed, its middle where it was (one ⌘Z).
+  await rightClick(pic.id, "図とサイズのリセット");
+  await page.waitForTimeout(300);
+  let o = (await slide()).elements.find((x) => x.id === pic.id);
+  assert(o.w === 400 && o.h === 300 && !o.rot && !o.crop && !o.bright && o.stroke == null && o.x === 250 && o.y === 300, `reset: ${JSON.stringify(o)}`);
+  await undo();
+  o = (await slide()).elements.find((x) => x.id === pic.id);
+  assert(o.rot === 90 && o.crop && o.w === 300, "⌘Z puts it back");
+  // 図の形式 → リセット ▾ → 図のリセット keeps the size.
+  await page.click("#formatTab").catch(() => {});
+  await page.locator(`#formatPane .fp-sel-list li[data-id="${pic.id}"]`).click();
+  await tab("図の形式");
+  await byTitle("図のリセット・図とサイズのリセット");
+  await menuItem("図のリセット");
+  await page.waitForTimeout(300);
+  o = (await slide()).elements.find((x) => x.id === pic.id);
+  assert(!o.crop && !o.bright && o.stroke == null && o.w === 300 && o.rot === 90, `the look reset, the size kept: ${JSON.stringify(o)}`);
+  await shot("picture-save-reset");
 });
 
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.

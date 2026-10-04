@@ -1,7 +1,7 @@
 // PowerPoint's アクセシビリティ チェック, 印刷 and スライド ショーの記録 in a real browser: the checker in the task pane
 // (alternative text added or marked decorative, the reading order set to what the eye sees, ↑↓ in the 読み取り順序
 // list), 代替テキストを編集 from the right-click menu, the print dialog (layouts, a range, the preview, the pages
-// handed to the browser), and recording narration with timings (kept per slide, played unless 「ナレーションを
+// handed to the browser, コメントを印刷する), and recording narration with timings (kept per slide, played unless 「ナレーションを
 // 付けない」, cleared again).
 // Usage: node qa/studio-review.mjs [--base=http://127.0.0.1:8787]   (with `npm start` running)
 import { mkdir } from "node:fs/promises";
@@ -181,6 +181,42 @@ await step("印刷 (⌘P): layouts with a preview, a range, and the pages handed
   await page.waitForFunction(() => window.__printed, null, { timeout: 8000 });
   const printed = await page.evaluate(() => window.__printed);
   assert(printed.pages === 1 && printed.slides === 3 && printed.lines === 3 && /A4 portrait/.test(printed.page), `printed: ${JSON.stringify(printed)}`);
+});
+
+await step("印刷 → コメントを印刷する: a page of comments (and replies) after the slide that has them", async () => {
+  await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  await page.evaluate(() => {
+    const s = window.__hsej.deck().slides[1];
+    s.comments = [{ id: "qc1", text: "数字の出典を書く", by: "佐藤", at: new Date().toISOString(), replies: [{ id: "qr1", text: "注を足しました", by: "鈴木", at: new Date().toISOString() }] }, { id: "qc2", text: "済み", by: "佐藤", done: true }];
+  });
+  await page.mouse.click(...at(1850, 1040));
+  await page.keyboard.press("Control+p");
+  await page.waitForSelector(".print-dialog[open] .pr-sheet");
+  await page.selectOption('.print-dialog select[name="range"]', "custom");
+  await page.fill('.print-dialog input[name="custom"]', "1-3");
+  await page.selectOption('.print-dialog select[name="layout"]', "full");
+  await page.waitForTimeout(400);
+  assert((await page.textContent(".pr-count")).includes("3枚のスライド・3ページ"), `without comments: ${await page.textContent(".pr-count")}`);
+  await page.check('.print-dialog input[name="comments"]');
+  await page.waitForTimeout(400);
+  assert((await page.textContent(".pr-count")).includes("3枚のスライド・4ページ"), `a comments page: ${await page.textContent(".pr-count")}`);
+  const sheets = await page.$$eval(".pr-preview .pr-sheet", (els) => els.map((el) => (el.querySelector(".pr-comments") ? "comments" : "slide")));
+  assert(sheets.join() === "slide,slide,comments,slide", `after slide 2: ${sheets}`);
+  const words = await page.textContent(".pr-preview .pr-comments");
+  assert(words.includes("スライド 2 のコメント") && words.includes("佐藤") && words.includes("数字の出典を書く") && words.includes("注を足しました") && words.includes("解決済み"), `the comments, replies and who wrote them: ${words}`);
+  await shot("print-comments");
+  await page.selectOption('.print-dialog select[name="layout"]', "h6");
+  await page.waitForTimeout(400);
+  const handout = await page.$$eval(".pr-preview .pr-sheet", (els) => els.map((el) => (el.querySelector(".pr-comments") ? "comments" : "page")));
+  assert(handout.join() === "page,comments", `handouts: the comments at the end: ${handout}`);
+  assert(await page.locator(".pr-preview .pr-comments .pr-foot").count(), "with the page's footer");
+  await page.evaluate(() => { window.__printed = null; window.print = () => { const r = document.getElementById("printRoot"); window.__printed = { comments: r.querySelectorAll(".pr-comments li").length }; }; });
+  await page.click(".print-dialog .pr-go");
+  await page.waitForFunction(() => window.__printed, null, { timeout: 8000 });
+  const printed = await page.evaluate(() => window.__printed);
+  assert(printed.comments === 3, `printed: ${JSON.stringify(printed)}`);
+  await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  await page.evaluate(() => { delete window.__hsej.deck().slides[1].comments; });
 });
 
 await step("スライド ショーの記録: narration and timings per slide, kept when asked; ナレーションの再生 and クリア", async () => {
