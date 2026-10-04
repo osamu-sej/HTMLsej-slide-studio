@@ -242,9 +242,29 @@ export function createEditorUi(editor, app) {
   }
 
   /** The shape gallery, by PowerPoint's categories (and the lines). */
+  /** 書式のコピー/貼り付け: a click copies for one object; a double-click keeps it on for many (Esc ends it). */
+  function painterBtn() {
+    const b = btn("painter", "書式", "書式のコピー/貼り付け（⇧⌘C → クリック。ダブルクリックで続けて貼り付け）", () => {
+      if (editor.painter?.sticky) { editor.endPainter(); return; }
+      if (editor.painter) editor.pasteFormat(editor.selection); else editor.copyFormat();
+    }, { enabled: () => any() || Boolean(editor.painter), pressed: () => Boolean(editor.painter) });
+    b.addEventListener("dblclick", (event) => { event.preventDefault(); editor.copyFormat({ sticky: true }); });
+    return b;
+  }
+  // 最近使用した図形 (at the top of the shapes gallery, as in PowerPoint; kept in this browser).
+  const RECENT_SHAPES = "hsej-recent-shapes";
+  const recentShapes = () => { try { return JSON.parse(localStorage.getItem(RECENT_SHAPES) || "[]").filter((k) => E.SHAPES[k]).slice(0, 12); } catch { return []; } };
+  const rememberShape = (key) => { try { localStorage.setItem(RECENT_SHAPES, JSON.stringify([key, ...recentShapes().filter((k) => k !== key)].slice(0, 12))); } catch { /* private window */ } };
   function shapeGallery(onPick, { lines = true } = {}) {
     return (close) => {
       const box = h("div", { class: "rb-gallery shapes" });
+      const recent = recentShapes();
+      if (recent.length) {
+        box.append(h("div", { class: "rb-gallery-head" }, "最近使用した図形"));
+        box.append(h("div", { class: "rb-gallery-grid rb-recent-shapes" }, recent.map((key) => h("button", {
+          type: "button", title: E.SHAPES[key].label, "aria-label": E.SHAPES[key].label, "data-shape": key, onclick: () => { close(); rememberShape(key); onPick({ kind: "shape", shape: key }); },
+        }, shapeThumb(key)))));
+      }
       if (lines) {
         box.append(h("div", { class: "rb-gallery-head" }, "線"));
         box.append(h("div", { class: "rb-gallery-grid" }, [["line", "直線"], ["arrow", "矢印"], ["double", "両方向矢印"], ["elbow", "カギ線コネクタ"], ["curve", "曲線コネクタ"]].map(([variant, label]) => h("button", {
@@ -256,7 +276,7 @@ export function createEditorUi(editor, app) {
       for (const [name, keys] of E.SHAPE_GROUPS) {
         box.append(h("div", { class: "rb-gallery-head" }, name));
         box.append(h("div", { class: "rb-gallery-grid" }, keys.map((key) => h("button", {
-          type: "button", title: E.SHAPES[key].label, "aria-label": E.SHAPES[key].label, onclick: () => { close(); onPick({ kind: "shape", shape: key }); },
+          type: "button", title: E.SHAPES[key].label, "aria-label": E.SHAPES[key].label, onclick: () => { close(); rememberShape(key); onPick({ kind: "shape", shape: key }); },
         }, shapeThumb(key)))));
       }
       return box;
@@ -655,7 +675,7 @@ export function createEditorUi(editor, app) {
         ]), { big: true }),
         col(btn("cut", "切り取り", "切り取り（⌘X）", () => { document.execCommand("cut") || cutFallback(); }, { enabled: any }),
           btn("copy", "コピー", "コピー（⌘C）", () => { document.execCommand("copy") || copyFallback(); }, { enabled: any }),
-          btn("painter", "書式", "書式のコピー/貼り付け（⇧⌘C → クリック）", () => (editor.painter ? editor.pasteFormat(editor.selection) : editor.copyFormat()), { enabled: any, pressed: () => editor.painter }))),
+          painterBtn())),
       group("フォント",
         row(...fontControls()),
         row(btn("bold", "", "太字（⌘B）", () => editor.textFormat("bold"), { enabled: hasText, pressed: tState("bold"), keep: true }),

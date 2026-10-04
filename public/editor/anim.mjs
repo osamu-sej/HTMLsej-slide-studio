@@ -625,6 +625,9 @@ export function createAnimations(editor, app, kit) {
       e.cls !== "media" ? line("", h("label", { class: "fp-check" }, h("input", { type: "checkbox", checked: e.rewind || null, onchange: (event) => setOption({ rewind: event.target.checked || undefined }) }), "再生が終了したら巻き戻す")) : null,
       e.cls !== "media" && e.cls !== "in" && e.cls !== "out" ? line("", h("label", { class: "fp-check" }, h("input", { type: "checkbox", checked: e.autoReverse || null, onchange: (event) => setOption({ autoReverse: event.target.checked || undefined }) }), "自動的に元に戻す（往復）")) : null,
       e.cls !== "media" ? line("滑らかさ", choice(Object.entries(E.ANIM_EASES), e.ease || "auto", (v) => setOption({ ease: v === "auto" ? undefined : v }), "滑らかさ")) : null,
+      // 効果のオプション: アニメーションの後 (faded, hidden) and a sound as it starts.
+      e.cls !== "media" && e.cls !== "out" ? line("アニメーションの後", choice(Object.entries(E.ANIM_AFTERS), e.after || "none", (v) => setOption({ after: v === "none" ? undefined : v }), "アニメーションの後")) : null,
+      line("サウンド", choice([["", "［サウンドなし］"], ...Object.entries(E.TRANSITION_SOUNDS || {}).filter(([k]) => k !== "stop")], e.sound || "", (v) => { setOption({ sound: v || undefined }); if (v) E.playSound?.(v); }, "サウンド")),
       line("トリガー", choice(triggers, e.trigger || "", (v) => setOption({ trigger: v || undefined }), "トリガー")),
       e.cls === "path" ? line("パス",
         h("button", { type: "button", class: "btn btn-sm", onclick: () => setOption({ path: reversePath(e.path) }) }, "反転"),

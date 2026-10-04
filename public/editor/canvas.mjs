@@ -1508,13 +1508,15 @@ export function createCanvas(app) {
   }
 
   // -- format painter (書式のコピー/貼り付け)
-  function copyFormat() {
+  /** 書式のコピー: once (the next object clicked takes it), or kept on (a double-click) until Esc. */
+  function copyFormat({ sticky = false } = {}) {
     const o = selected()[0];
     if (!o) return;
     const full = E.withDefaults(o);
     ed.painter = Object.fromEntries(STYLE_KEYS.filter((key) => full[key] !== undefined).map((key) => [key, JSON.parse(JSON.stringify(full[key]))]));
     ed.painter.kind = o.kind;
-    app.toast("書式をコピーしました。貼り付ける図形をクリックしてください（Escでやめる）");
+    ed.painter.sticky = sticky;
+    app.toast(sticky ? "書式をコピーしました。クリックした図形に続けて貼り付けます（Escで終わる）" : "書式をコピーしました。貼り付ける図形をクリックしてください（Escでやめる）");
     emit();
   }
   function pasteFormat(ids) {
@@ -1524,7 +1526,7 @@ export function createCanvas(app) {
       const keys = o.kind === "line" ? ["stroke", "strokeW", "dash", "head", "tail", "headSize", "tailSize", "opacity"] : o.kind === "image" ? ["stroke", "strokeW", "dash", "opacity"] : STYLE_KEYS.filter((key) => !["head", "tail", "headSize", "tailSize", "route"].includes(key));
       return Object.fromEntries(keys.filter((key) => style[key] !== undefined && (style.kind !== "line" || ["stroke", "strokeW", "dash", "opacity"].includes(key) || o.kind === "line")).map((key) => [key, style[key]]));
     }), { select: ids });
-    ed.painter = null;
+    if (!style.sticky) ed.painter = null;
     emit();
   }
 
@@ -1676,6 +1678,7 @@ export function createCanvas(app) {
     removeSelection, duplicateSelection, groupSelection, ungroupSelection, order, alignSelection, distributeSelection, rotateSelection, flipSelection,
     setLocked, setHidden, rename, moveInOrder, copyFormat, pasteFormat,
     get painter() { return ed.painter; },
+    endPainter: () => { if (ed.painter) { ed.painter = null; app.toast("書式のコピーを終えました"); emit(); } },
     setZoom, zoomPercent, zoomStep, get zoom() { return ed.zoom; }, setView, applyZoom, openMenu, addGuide, clearGuides, customGuides,
     FONT_SIZES, closeMenu,
   };
