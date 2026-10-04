@@ -119,7 +119,7 @@ test("a chart keeps its kind, labels and numbers, and draws like the layouts' ch
   assert.equal(o.chart.series[1].name, "系列2");
   assert.equal(o.chart.title, "売上");
   assert.equal(E.normalizeObject({ kind: "chart", chart: { type: "pie", labels: [], series: [] } }), null, "a chart needs labels and a series");
-  assert.equal(E.normalizeObject({ kind: "chart", chart: { type: "bubble", labels: ["a"], series: [{ values: [1] }] } }).chart.type, "bar", "unknown kinds draw as bars");
+  assert.equal(E.normalizeObject({ kind: "chart", chart: { type: "contour", labels: ["a"], series: [{ values: [1] }] } }).chart.type, "bar", "unknown kinds draw as bars");
   // The object's data and the engine's chart model are the same thing, both ways.
   for (const type of Object.keys(E.CHART_KINDS)) {
     const chart = E.normalizeObject({ kind: "chart", chart: { type, labels: ["A", "B"], series: [{ name: "一", values: [1, 2] }, { name: "二", values: [3, 4] }] } }).chart;

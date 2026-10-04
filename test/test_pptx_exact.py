@@ -345,3 +345,71 @@ class Model3dTest(unittest.TestCase):
         self.assertGreater(o["w"], o["h"], "its box keeps PowerPoint's shape")
         self.assertEqual(deck["stats"]["models"], 1)
         self.assertFalse(any(x["kind"] == "image" for x in deck["slideData"][0]["elements"]), "not also its fallback picture")
+
+
+class ChartExTest(unittest.TestCase):
+    """Office 2016's charts (chartEx) come over as the studio's own editable charts; a kind the studio does not draw
+    keeps the picture PowerPoint stored with it."""
+
+    CX = "http://schemas.microsoft.com/office/drawing/2014/chartex"
+
+    def deck_with(self, charts):
+        from pptx.opc.package import Part
+        from pptx.opc.packuri import PackURI
+        import base64
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+        picture = Part(PackURI("/ppt/media/image7.png"), "image/png", prs.part.package, blob=png)
+        rid_pic = slide.part.relate_to(picture, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")
+        ns = ('xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+              'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+              f'xmlns:cx="{self.CX}"')
+        for k, body in enumerate(charts):
+            part = Part(PackURI(f"/ppt/charts/chartEx{k + 1}.xml"), "application/vnd.ms-office.chartex+xml", prs.part.package,
+                        blob=f'<cx:chartSpace xmlns:cx="{self.CX}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">{body}</cx:chartSpace>'.encode("utf-8"))
+            rid = slide.part.relate_to(part, "http://schemas.microsoft.com/office/2014/relationships/chartEx")
+            sid = 10 + k
+            box = f'<a:off x="{Inches(1 + k)}" y="{Inches(1)}"/><a:ext cx="{Inches(4)}" cy="{Inches(3)}"/>'
+            xml = (f'<mc:AlternateContent {ns}><mc:Choice Requires="cx1"><p:graphicFrame>'
+                   f'<p:nvGraphicFramePr><p:cNvPr id="{sid}" name="グラフ {sid}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>'
+                   f'<p:xfrm>{box}</p:xfrm><a:graphic><a:graphicData uri="{self.CX}"><cx:chart r:id="{rid}"/></a:graphicData></a:graphic></p:graphicFrame></mc:Choice>'
+                   f'<mc:Fallback><p:sp><p:nvSpPr><p:cNvPr id="{sid}" name="グラフ {sid}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+                   f'<p:spPr><a:xfrm>{box}</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:blipFill><a:blip r:embed="{rid_pic}"/><a:stretch><a:fillRect/></a:stretch></a:blipFill></p:spPr></p:sp>'
+                   '</mc:Fallback></mc:AlternateContent>')
+            slide.shapes._spTree.append(etree.fromstring(xml))
+        out = io.BytesIO()
+        prs.save(out)
+        return read_pptx_exact(out.getvalue())
+
+    @staticmethod
+    def dim(kind, tag, levels):
+        lv = "".join(f'<cx:lvl ptCount="{len(lvl)}">' + "".join(f'<cx:pt idx="{i}">{v}</cx:pt>' for i, v in enumerate(lvl) if v != "") + "</cx:lvl>" for lvl in levels)
+        return f'<cx:{tag} type="{kind}"><cx:f>Sheet1!A1</cx:f>{lv}</cx:{tag}>'
+
+    def chart(self, layout, data, series_extra="", title="", more_series=""):
+        t = f'<cx:title><cx:tx><cx:txData><cx:v>{title}</cx:v></cx:txData></cx:tx></cx:title>' if title else ""
+        return (f'<cx:chartData>{data}</cx:chartData><cx:chart>{t}<cx:plotArea><cx:plotAreaRegion>'
+                f'<cx:series layoutId="{layout}" uniqueId="{{1}}"><cx:tx><cx:txData><cx:v>売上</cx:v></cx:txData></cx:tx><cx:dataId val="0"/>{series_extra}</cx:series>{more_series}'
+                '</cx:plotAreaRegion></cx:plotArea></cx:chart>')
+
+    def test_treemap_boxplot_waterfall_come_over_and_a_map_keeps_its_picture(self):
+        treemap = self.chart("treemap", '<cx:data id="0">' + self.dim("cat", "strDim", [["おにぎり", "弁当", "お茶"], ["食品", "", "飲料"]]) + self.dim("size", "numDim", [["42", "35", "24"]]) + "</cx:data>", title="カテゴリ別売上")
+        box = self.chart("boxWhisker", '<cx:data id="0">' + self.dim("cat", "strDim", [["東", "東", "東", "西", "西"]]) + self.dim("val", "numDim", [["60", "70", "80", "50", "90"]]) + "</cx:data>")
+        fall = self.chart("waterfall", '<cx:data id="0">' + self.dim("cat", "strDim", [["前年", "増", "減", "今年"]]) + self.dim("val", "numDim", [["100", "30", "-10", "120"]]) + "</cx:data>",
+                          series_extra='<cx:layoutPr><cx:subtotals><cx:idx val="0"/><cx:idx val="3"/></cx:subtotals></cx:layoutPr>')
+        region = self.chart("regionMap", '<cx:data id="0">' + self.dim("cat", "strDim", [["東京", "大阪"]]) + self.dim("val", "numDim", [["5", "3"]]) + "</cx:data>")
+        deck = self.deck_with([treemap, box, fall, region])
+        els = deck["slideData"][0]["elements"]
+        charts = [x["chart"] for x in els if x["kind"] == "chart"]
+        self.assertEqual([c["type"] for c in charts], ["treemap", "boxplot", "waterfall"])
+        tm, bx, wf = charts
+        self.assertEqual(tm["labels"], ["食品/おにぎり", "食品/弁当", "飲料/お茶"], "the parent level carried down to its members")
+        self.assertEqual(tm["series"][0]["values"], [42, 35, 24])
+        self.assertEqual(tm["title"], "カテゴリ別売上")
+        self.assertEqual([s["name"] for s in bx["series"]], ["東", "西"], "one series grouped by its categories")
+        self.assertEqual(bx["series"][0]["values"], [60, 70, 80])
+        self.assertEqual(bx["series"][1]["values"], [50, 90, None], "a shorter group padded with empty cells")
+        self.assertEqual(wf["opts"], {"totals": [0, 3]})
+        self.assertEqual(deck["stats"]["charts"], 3)
+        self.assertEqual(len([x for x in els if x["kind"] != "chart"]), 1, "the map keeps PowerPoint's picture")

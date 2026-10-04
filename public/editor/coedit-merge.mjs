@@ -15,6 +15,37 @@ export function textHash(text) {
   return h.toString(16).padStart(8, "0");
 }
 
+/**
+ * A new slide id (s + time + 7 random characters, as the rooms accept: [A-Za-z0-9_-]{1,32}) that none of `taken` has.
+ * Many slides get theirs in the same millisecond, so the random part has to tell them apart.
+ */
+export function newSid(taken = new Set()) {
+  const random = () => (globalThis.crypto?.getRandomValues ? globalThis.crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 2 ** 32));
+  for (;;) {
+    const sid = `s${Date.now().toString(36).slice(-6)}${random().toString(36).padStart(7, "0")}`;
+    if (!taken.has(sid)) return sid;
+  }
+}
+
+/**
+ * Every slide with its own id: a missing one gets one, and a repeated one a new one (links keep pointing at the first
+ * slide with it). In place; gives back the slides.
+ */
+export function uniqueSids(slides) {
+  const taken = new Set(slides.map((slide) => slide?.sid).filter(Boolean));
+  const seen = new Set();
+  for (const slide of slides) {
+    if (!slide) continue;
+    if (!slide.sid || seen.has(slide.sid)) {
+      const sid = newSid(taken);
+      taken.add(sid);
+      slide.sid = sid;
+    }
+    seen.add(slide.sid);
+  }
+  return slides;
+}
+
 /** Three-way merge of one slide: our changes on top of theirs (objects by id, everything else field by field). */
 export function mergeSlide(base, mine, theirs) {
   if (json(mine) === json(base)) return theirs;

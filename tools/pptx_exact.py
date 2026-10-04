@@ -30,6 +30,7 @@ from PIL import Image
 W, H = 1920, 1080
 EMU_PT = 12700
 NS = {
+    "cx": "http://schemas.microsoft.com/office/drawing/2014/chartex",
     "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
     "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
     "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -1179,6 +1180,10 @@ class SlideReader:
             chart = self.chart(data, b, spid, part)
             if chart:
                 self.add(chart, spid, group)
+        elif uri == NS["cx"]:
+            chart = self.chartex(data, b, spid, part)
+            if chart:
+                self.add(chart, spid, group)
         elif uri.endswith("/diagram"):
             self.smartart(data, xf, tf, group, spid, part)
         elif uri == NS["am3d"]:
@@ -1341,6 +1346,41 @@ class SlideReader:
         self.deck.stats["charts"] += 1
         return {"id": self.new_id("c", spid), "kind": "chart", **b, "chart": out}
 
+    def chartex(self, data, b, spid, owner_part=None):
+        """Office 2016's charts (ツリーマップ・サンバースト・箱ひげ図・ヒストグラム・じょうご・ウォーターフォール) as the studio's own
+        editable charts."""
+        part = self.chartex_part(data, owner_part)
+        if part is None:
+            return None
+        try:
+            out = read_chartex(etree.fromstring(part.blob))
+        except Exception:
+            out = None
+        if not out:
+            return None
+        self.deck.stats["charts"] += 1
+        return {"id": self.new_id("c", spid), "kind": "chart", **b, "chart": out}
+
+    def chartex_part(self, data, owner_part=None):
+        ref = data.find(f"{{{NS['cx']}}}chart")
+        rid = ref.get(R + "id") if ref is not None else None
+        return self.rel_target(owner_part or self.slide.part, rid) if rid else None
+
+    def readable_choice(self, choice, owner_part=None):
+        """An mc:Choice this reader understands; otherwise the mc:Fallback (PowerPoint's picture of it) is taken. A
+        chart of a kind the studio does not draw (a map…) keeps its picture."""
+        for frame in choice.iter(P + "graphicFrame"):
+            data = frame.find(f"{A}graphic/{A}graphicData")
+            if data is None or data.get("uri") != NS["cx"]:
+                continue
+            part = self.chartex_part(data, owner_part)
+            try:
+                if part is None or not read_chartex(etree.fromstring(part.blob)):
+                    return False
+            except Exception:
+                return False
+        return True
+
     def smartart(self, data, xf, tf, group, spid, owner_part=None):
         rel_ids = data.find(f"{{{NS['dgm']}}}relIds")
         if rel_ids is None:
@@ -1407,7 +1447,7 @@ class SlideReader:
             if name == "AlternateContent":
                 choice = child.find(f"{{{NS['mc']}}}Choice")
                 fallback = child.find(f"{{{NS['mc']}}}Fallback")
-                inner = choice if choice is not None and len(choice) else fallback
+                inner = choice if choice is not None and len(choice) and self.readable_choice(choice, part) else fallback
                 if inner is not None:
                     self.walk(inner, tf, group, part, offset, decorations)
                 continue
@@ -2074,6 +2114,104 @@ def cache_of(container):
         return out, cache.findtext(C + "formatCode"), numeric
     v = container.findtext(C + "v")
     return ([v] if v is not None else []), None, False
+
+
+def _cx_levels(dim):
+    """A chartEx dimension's levels, each the text at every point (the leaves first, then their parents)."""
+    out = []
+    for lvl in dim.findall(f"{{{NS['cx']}}}lvl"):
+        pts = {int(pt.get("idx", 0)): (pt.text or "").strip() for pt in lvl.findall(f"{{{NS['cx']}}}pt")}
+        count = max(int(lvl.get("ptCount") or 0), (max(pts) + 1) if pts else 0)
+        out.append([pts.get(i, "") for i in range(min(count, 500))])
+    return out
+
+
+def _cx_num(text):
+    try:
+        v = float(str(text).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    return v if v == v and abs(v) < 1e12 else None
+
+
+def read_chartex(root):
+    """A chartEx part (cx:chartSpace) as the studio's chart: {type, labels, series, title?, opts?}; None for kinds the
+    studio does not draw (a map, a pareto line…)."""
+    q = lambda t: f"{{{NS['cx']}}}{t}"
+    data = {}
+    for d in root.iter(q("data")):
+        cats, vals = [], []
+        for dim in d:
+            if local(dim) == "strDim" and dim.get("type") == "cat":
+                cats = _cx_levels(dim)
+            elif local(dim) == "numDim" and dim.get("type") in ("val", "size"):
+                levels = _cx_levels(dim)
+                vals = levels[0] if levels else []
+        data[d.get("id")] = (cats, vals)
+    series = [sr for sr in root.iter(q("series")) if not sr.get("hidden") == "1"]
+    if not series:
+        return None
+    layout = series[0].get("layoutId", "")
+    if any(sr.get("layoutId") == "paretoLine" for sr in series):
+        series = [sr for sr in series if sr.get("layoutId") != "paretoLine"]
+
+    def name_of(sr, i):
+        v = sr.find(f"{q('tx')}/{q('txData')}/{q('v')}")
+        return (v.text or "").strip() if v is not None and (v.text or "").strip() else f"系列{i + 1}"
+
+    def data_of(sr):
+        ref = sr.find(q("dataId"))
+        return data.get(ref.get("val") if ref is not None else None, ([], []))
+
+    out = None
+    cats, vals = data_of(series[0])
+    if layout in ("treemap", "sunburst"):
+        leaves = cats[0] if cats else []
+        parents = cats[1] if len(cats) > 1 else []
+        labels, values, carry = [], [], ""
+        for i, leaf in enumerate(leaves):
+            parent = parents[i] if i < len(parents) and parents[i] else carry
+            carry = parent
+            labels.append(f"{parent}/{leaf}" if parent and leaf else (leaf or parent or f"項目{i + 1}"))
+            values.append(_cx_num(vals[i]) if i < len(vals) else None)
+        keep = [(l, v) for l, v in zip(labels, values) if v is not None and v > 0]
+        if keep:
+            out = {"type": layout, "labels": [l for l, _ in keep], "series": [{"name": name_of(series[0], 0), "values": [v for _, v in keep]}]}
+    elif layout == "boxWhisker":
+        groups = []
+        for i, sr in enumerate(series):
+            c, v = data_of(sr)
+            nums = [_cx_num(x) for x in v]
+            names = c[0] if c else []
+            if len(series) == 1 and len({n for n in names if n}) > 1:
+                for n in dict.fromkeys(names):
+                    groups.append((n or f"系列{len(groups) + 1}", [x for x, m in zip(nums, names) if m == n and x is not None]))
+            else:
+                groups.append((name_of(sr, i), [x for x in nums if x is not None]))
+        groups = [(n, v) for n, v in groups if v][:100]
+        if groups:
+            n = max(len(v) for _, v in groups)
+            out = {"type": "boxplot", "labels": [str(i + 1) for i in range(n)], "series": [{"name": name, "values": v + [None] * (n - len(v))} for name, v in groups]}
+    elif layout == "clusteredColumn":
+        nums = [x for x in (_cx_num(v) for v in vals) if x is not None][:500]
+        if nums:
+            out = {"type": "histogram", "labels": [str(i + 1) for i in range(len(nums))], "series": [{"name": name_of(series[0], 0), "values": nums}]}
+    elif layout in ("funnel", "waterfall"):
+        labels = cats[0] if cats else [str(i + 1) for i in range(len(vals))]
+        n = min(len(labels), len(vals))
+        if n:
+            out = {"type": layout, "labels": [labels[i] or f"項目{i + 1}" for i in range(n)], "series": [{"name": name_of(series[0], 0), "values": [_cx_num(vals[i]) or 0 for i in range(n)]}]}
+            if layout == "waterfall":
+                totals = [int(x.get("val")) for x in series[0].iter(q("idx")) if (x.get("val") or "").isdigit() and int(x.get("val")) < n]
+                if totals:
+                    out["opts"] = {"totals": sorted(set(totals))}
+    if out:
+        title = root.find(f"{q('chart')}/{q('title')}")
+        if title is not None:
+            text = " ".join(t.text or "" for t in title.iter() if local(t) in ("v", "t") and t.text).strip()
+            if text:
+                out["title"] = text[:80]
+    return out
 
 
 class ChartReader:

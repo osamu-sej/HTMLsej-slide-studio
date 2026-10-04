@@ -114,3 +114,80 @@ test("chart elements: no data labels, the legend below / at the right / none, no
   assert.equal(el.querySelectorAll(".hs-chart line.hs-grid").length, 0, "no gridlines");
   assert.ok(el.querySelector(".hs-chart line.hs-axisline"), "the axis stays");
 });
+
+const plain = (v) => JSON.parse(JSON.stringify(v));
+
+test("histogram bins, box statistics, treemap layout and 親/子 labels", async () => {
+  const E = await loadEngine();
+  const bins = E.histogramBins([2, 3, 3, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 9, 10, 11, 12, 14, 18]);
+  assert.equal(bins.reduce((a, b) => a + b.count, 0), 24, "every value counted once");
+  const width = bins[0].to - bins[0].from;
+  assert.ok(bins.every((b) => Math.abs(b.to - b.from - width) < 1e-9), "bins of one width");
+  assert.ok([1, 2, 2.5, 5].some((m) => Math.abs(width / 10 ** Math.floor(Math.log10(width)) - m) < 1e-9), `a round width: ${width}`);
+  assert.ok(bins[0].from <= 2 && bins.at(-1).to > 18, "the range covered");
+  assert.deepEqual(plain(E.histogramBins([])), []);
+
+  const st = E.boxStats([62, 68, 70, 71, 74, 77, 80, 95, 200]);
+  assert.equal(st.median, 74);
+  assert.equal(st.q1, 70);
+  assert.equal(st.q3, 80);
+  assert.deepEqual(plain(st.outliers), [200], "beyond 1.5 IQR");
+  assert.equal(st.max, 95, "the whisker stops at the last value inside");
+  assert.equal(E.boxStats([]), null);
+
+  const cells = E.squarify([{ name: "a", value: 6 }, { name: "b", value: 3 }, { name: "c", value: 1 }, { name: "z", value: 0 }], 0, 0, 100, 50);
+  assert.equal(cells.length, 3, "zero leaves no cell");
+  const area = (n) => { const c = cells.find((x) => x.name === n); return c.w * c.h; };
+  assert.ok(Math.abs(area("a") - 3000) < 1e-6 && Math.abs(area("b") - 1500) < 1e-6 && Math.abs(area("c") - 500) < 1e-6, "areas in proportion");
+  assert.ok(cells.every((c) => c.x >= -1e-9 && c.y >= -1e-9 && c.x + c.w <= 100 + 1e-9 && c.y + c.h <= 50 + 1e-9), "inside the box");
+
+  const tree = E.hierarchy(["食品/おにぎり", "食品／弁当", "飲料/お茶", "その他"], [4, 3, 2, 1]);
+  assert.deepEqual(plain(tree.map((n) => [n.name, n.value, n.children.length])), [["食品", 7, 2], ["飲料", 2, 1], ["その他", 1, 0]]);
+});
+
+test("the new chart kinds are kept and drawn, with 軸ラベル and 近似曲線", async () => {
+  const E = await loadEngine();
+  const two = { labels: ["東", "中", "西"], series: [{ name: "今期", values: [3, 5, 4] }, { name: "前期", values: [2, 4, 3] }] };
+  let { o, el } = draw(E, { type: "hbar", ...two });
+  assert.equal(o.chart.type, "hbar");
+  assert.equal(el.querySelectorAll(".hs-chart .hs-bar.h").length, 6, "a horizontal bar per label and series");
+  ({ el } = draw(E, { type: "stacked-hbar", ...two }));
+  assert.equal(el.querySelectorAll(".hs-chart .hs-bar.h").length, 6);
+  assert.equal(el.querySelectorAll(".hs-legend span").length, 2, "a legend for the stacked series");
+  ({ el } = draw(E, { type: "stacked-area", ...two }));
+  assert.equal(el.querySelectorAll(".hs-chart .hs-oarea").length, 2);
+  ({ el } = draw(E, { type: "bubble", labels: ["10", "20", "30"], series: [{ name: "Y", values: [5, 9, 7] }, { name: "大きさ", values: [1, 9, 4] }] }));
+  const rs = [...el.querySelectorAll(".hs-chart circle.hs-dot")].map((c) => Number(c.getAttribute("r")));
+  assert.equal(rs.length, 3);
+  assert.ok(Math.max(...rs) > Math.min(...rs) * 2, "bubbles sized by the second series");
+  assert.equal(el.querySelectorAll(".hs-legend").length, 0, "no legend");
+  ({ el } = draw(E, { type: "histogram", labels: ["1", "2", "3", "4", "5", "6"], series: [{ name: "分", values: [1, 2, 2, 3, 3, 9] }] }));
+  assert.ok(el.querySelectorAll(".hs-chart .hs-bar").length >= 2, "bins as bars");
+  ({ el } = draw(E, { type: "boxplot", labels: ["1", "2", "3", "4", "5"], series: [{ name: "A", values: [1, 2, 3, 4, 5] }, { name: "B", values: [2, 3, 4, 5, 9] }] }));
+  assert.equal(el.querySelectorAll(".hs-chart .hs-bar[data-center]").length, 2, "a box per series");
+  assert.equal(el.querySelectorAll(".hs-chart .hs-median").length, 2);
+  const hier = { labels: ["食品/おにぎり", "食品/弁当", "飲料/お茶"], series: [{ name: "売上", values: [4, 3, 2] }] };
+  ({ el } = draw(E, { type: "treemap", ...hier }));
+  assert.equal(el.querySelectorAll(".hs-chart .hs-bar[data-center]").length, 3, "a cell per member");
+  assert.equal(el.querySelectorAll(".hs-chart .hs-tm-group").length, 2, "the groups named");
+  ({ el } = draw(E, { type: "sunburst", ...hier }));
+  assert.equal(el.querySelectorAll(".hs-chart .hs-ochart-pie .hs-oslice").length, 5, "2 groups inside, 3 members outside");
+
+  ({ o, el } = draw(E, { type: "line", labels: ["1", "2", "3", "4"], series: [{ name: "Y", values: [1, 3, 2, 5] }], opts: { axisX: "月", axisY: "売上（億円）", trend: "linear", bogus: 1 } }));
+  assert.deepEqual(plain(o.chart.opts), { axisX: "月", axisY: "売上（億円）", trend: "linear" });
+  assert.deepEqual([...el.querySelectorAll(".hs-chart .hs-axis-title")].map((t) => t.textContent), ["売上（億円）", "月"]);
+  assert.equal(el.querySelectorAll(".hs-chart .hs-trend").length, 1, "the trendline");
+  ({ el } = draw(E, { type: "pie", labels: ["a", "b"], series: [{ name: "x", values: [1, 2] }], opts: { axisX: "月" } }));
+  assert.equal(el.querySelectorAll(".hs-chart .hs-axis-title").length, 0, "a pie has no axes");
+});
+
+test("動作設定ボタン: twelve of them, the ones that move through the show with their click set", async () => {
+  const E = await loadEngine();
+  const group = E.SHAPE_GROUPS.find(([name]) => name === "動作設定ボタン");
+  assert.equal(group?.[1].length, 12);
+  assert.deepEqual(plain(E.SHAPES.actionButtonForwardNext.action), { type: "next" });
+  assert.deepEqual(plain(E.SHAPES.actionButtonBeginning.action), { type: "first" });
+  assert.equal(E.SHAPES.actionButtonHelp.action, undefined);
+  for (const key of group[1]) assert.ok(E.geometry(key, 100, 100).paths.length, key);
+  assert.ok(E.geometry("actionButtonForwardNext", 100, 100).extras.some((x) => x.tone === "dark"), "its sign drawn darker");
+});

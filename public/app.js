@@ -11,6 +11,7 @@ import { createShell } from "./editor/window.mjs?v=__APP_VERSION__";
 import { createComments } from "./editor/comments.mjs?v=__APP_VERSION__";
 import { userName } from "./editor/people.mjs?v=__APP_VERSION__";
 import { createCoedit } from "./editor/coedit.mjs?v=__APP_VERSION__";
+import { newSid, uniqueSids } from "./editor/coedit-merge.mjs?v=__APP_VERSION__";
 import { inkObject } from "./editor/ink.mjs?v=__APP_VERSION__";
 import { createShowTools, customShowsOf, keptInk, playerOptions, showOf, showSlides } from "./editor/show.mjs?v=__APP_VERSION__";
 import { createA11y } from "./editor/a11y.mjs?v=__APP_VERSION__";
@@ -1184,7 +1185,7 @@ function insertSlides(raw) {
   const renamed = new Map();
   for (const slide of slides) {
     if (!slide.sid) continue;
-    if (used.has(slide.sid)) { const sid = `s${Date.now().toString(36).slice(-6)}${Math.random().toString(36).slice(2, 6)}`; renamed.set(slide.sid, sid); slide.sid = sid; }
+    if (used.has(slide.sid)) { const sid = newSid(used); renamed.set(slide.sid, sid); slide.sid = sid; }
     used.add(slide.sid);
   }
   if (renamed.size) {
@@ -1400,7 +1401,7 @@ function deleteHistory(id) {
 async function saveVersion(label) {
   if (!state.deck) return;
   // Slides carry their ids into the version, so 比較 can match them later.
-  state.deck.slides.forEach((_, i) => ensureSid(i));
+  uniqueSids(state.deck.slides);
   const record = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, deck: chatKey(), at: Date.now(), label, title: state.deck.title, count: state.deck.slides.length, data: JSON.stringify(state.deck) };
   state.lastVersionAt = Date.now();
   state.lastVersionJson = record.data;
@@ -1478,7 +1479,7 @@ async function saveToLibrary({ asNew = false } = {}) {
   button.disabled = true;
   newButton.disabled = true;
   try {
-    state.deck.slides.forEach((_, i) => ensureSid(i));
+    uniqueSids(state.deck.slides);
     const deck = JSON.parse(JSON.stringify(state.deck));
     await assertLibraryMedia(deck);
     const existing = !asNew && state.savedDeckId ? await getSavedDeck(state.savedDeckId) : null;
@@ -2463,7 +2464,7 @@ const editorApp = {
   setMediaUrl: (src, url) => { mediaUrls[src] = url; },
   openViewer: (deck, options) => openViewer(deck, options),
   openViewerMessage: (text) => openViewerMessage(text),
-  ensureAllSids: () => state.deck?.slides.forEach((_, i) => ensureSid(i)),
+  ensureAllSids: () => { if (state.deck) uniqueSids(state.deck.slides); },
   mediaBlob: (src) => mediaBlob(src),
   refreshRibbon: () => editorUi.renderRibbon(),
   player: () => state.player,
@@ -2529,7 +2530,7 @@ const comments = createComments({
 coedit = createCoedit({
   h, E, toast, ask: askDialog, confirm: (message) => Promise.resolve(window.confirm(message)),
   deck: () => state.deck, index: () => state.selected, select: (i) => select(i), selection: () => editor.selection,
-  ensureAllSids: () => state.deck?.slides.forEach((_, i) => ensureSid(i)),
+  ensureAllSids: () => { if (state.deck) uniqueSids(state.deck.slides); },
   loadShared: (deck) => loadDeck(deck, { source: "共同編集", selected: 0 }),
   applyRemote: (next, info) => applyRemote(next, info),
   busy: () => Boolean(editor.typing || state.inline || document.querySelector(".sa-pane input:focus, .cm-input:focus")),
@@ -2701,7 +2702,7 @@ function openFormatPanel(focus = null) {
 function ensureSid(index) {
   const slide = state.deck?.slides[index];
   if (!slide) return null;
-  if (!slide.sid) slide.sid = `s${Date.now().toString(36).slice(-6)}${Math.random().toString(36).slice(2, 5)}`;
+  if (!slide.sid) slide.sid = newSid(new Set(state.deck.slides.map((s) => s.sid).filter(Boolean)));
   return slide.sid;
 }
 

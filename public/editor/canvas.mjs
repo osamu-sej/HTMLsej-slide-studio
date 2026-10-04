@@ -711,7 +711,9 @@ export function createCanvas(app) {
       return ops.makeObject("line", box, extra);
     }
     if (tool.kind === "text") return ops.makeObject("text", box, { text: "<p><br></p>", ...(tool.vertical ? { vertical: true, autofit: "none" } : {}) });
-    return ops.makeObject("shape", box, { shape: tool.shape || "rect" });
+    // 動作設定ボタン come with their click (次へ・前へ・最初へ…) set, as in PowerPoint.
+    const preset = E.SHAPES[tool.shape]?.action;
+    return ops.makeObject("shape", box, { shape: tool.shape || "rect", ...(preset ? { action: { ...preset } } : {}) });
   }
 
   function setTool(tool) {

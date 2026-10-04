@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { mergeOrder, mergeSlide } from "../public/editor/coedit.mjs";
+import { newSid, uniqueSids } from "../public/editor/coedit-merge.mjs";
 
 const slide = (elements, extra = {}) => ({ type: "blank", sid: "s1", title: "本文", elements, ...extra });
 const box = (id, x, text = "") => ({ id, kind: "shape", x, y: 0, w: 100, h: 50, text });
@@ -35,4 +36,20 @@ test("slide order: their move with my new slide; my deletion wins over their old
   assert.deepEqual(mergeOrder(base, base, ["s1", "s3", "s2", "s4"]), ["s1", "s3", "s2", "s4"]);
   assert.deepEqual(mergeOrder(base, ["s1", "s2", "n1", "s3", "s4"], ["s1", "s3", "s2", "s4"]), ["s1", "s3", "s2", "n1", "s4"], "my new slide after s2");
   assert.deepEqual(mergeOrder(base, ["s1", "s3", "s4"], ["s1", "s3", "s2", "s4", "t1"]), ["s1", "s3", "s4", "t1"], "s2 deleted here, their new t1 kept");
+});
+
+test("slide ids: many made in the same millisecond never repeat, and a repeated or missing one is replaced", () => {
+  const taken = new Set();
+  for (let i = 0; i < 5000; i += 1) {
+    const sid = newSid(taken);
+    assert.match(sid, /^[A-Za-z0-9_-]{1,32}$/, "what the rooms accept");
+    assert.ok(!taken.has(sid), `repeated ${sid}`);
+    taken.add(sid);
+  }
+  const slides = [{ sid: "a" }, {}, { sid: "a" }, { sid: "b" }, {}];
+  uniqueSids(slides);
+  assert.equal(slides[0].sid, "a", "the first keeps its id");
+  assert.equal(slides[3].sid, "b");
+  assert.equal(new Set(slides.map((s) => s.sid)).size, 5, "all different");
+  assert.ok(slides.every((s) => /^[A-Za-z0-9_-]{1,32}$/.test(s.sid)));
 });
