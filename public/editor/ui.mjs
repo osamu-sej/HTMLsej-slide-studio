@@ -17,6 +17,9 @@ import { createExtras } from "./extras.mjs";
 import { ART_EFFECTS, RECOLORS, createPictureTools } from "./picture.mjs";
 import { createModels } from "./model3d.mjs";
 import { createPolls } from "./poll.mjs";
+import { createQuick } from "./quick.mjs";
+import { pickColor } from "./eyedropper.mjs";
+import { createReadAloud } from "./readaloud.mjs";
 
 const SIZES_PT = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const LINE_WIDTHS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 8, 12];
@@ -56,6 +59,7 @@ export function createEditorUi(editor, app) {
   let built = "";
   let updaters = [];
   let pop = null;
+  let quick = null; // 検索 (⌥Q) and the クイック アクセス ツール バー (quick.mjs)
 
   // ---------------------------------------------------------------- small building blocks
 
@@ -152,6 +156,15 @@ export function createEditorUi(editor, app) {
         const input = h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(current) ? current : "#1f3864", onchange: (event) => { close(); pick(event.target.value); } });
         wrap.append(h("label", { class: "rb-custom" }, input, h("span", {}, "その他の色…"), h("small", {}, "SEJの色以外はチェックで知らせます")));
       }
+      // スポイト: a colour from the slide (or anywhere on the screen); where only SEJ colours are used, the nearest.
+      wrap.append(h("button", { type: "button", class: "rb-eyedrop", onmousedown: (e) => e.preventDefault(), onclick: async () => {
+        close();
+        const got = await pickColor({ root: document.getElementById("stageBody") || document.body, toast: app.toast });
+        if (!got) return;
+        const color = custom ? got : ops.nearestColor(got, list.map(([c]) => c.toLowerCase()));
+        if (color !== got) app.toast(`スポイト：${got.toUpperCase()} にいちばん近いSEJの色（${color.toUpperCase()}）にしました`);
+        pick(color);
+      } }, ico("eyedrop", 16), h("span", {}, "スポイト")));
       if (note) wrap.append(h("p", { class: "rb-note" }, note));
       return wrap;
     };
@@ -379,8 +392,8 @@ export function createEditorUi(editor, app) {
   function closeFloating() { if (!floating) return; floating = false; closePop(true); renderRibbon(true); }
   function floatingOutside(event) { if (floating && !ribbon.contains(event.target) && !pop?.el.contains(event.target)) closeFloating(); }
   function floatingKey(event) { if (floating && !pop && event.key === "Escape") { event.stopPropagation(); closeFloating(); } }
-  function fileMenu() {
-    return menu([
+  function fileItems() {
+    return [
       { head: "ファイル" },
       { label: "新規（作成画面へ）", icon: "plus", run: () => app.goCreate() },
       { label: "開く（保存庫）…", icon: "pane", run: () => app.openLibrary() },
@@ -401,12 +414,14 @@ export function createEditorUi(editor, app) {
       "-", { head: "オプション" },
       { label: `ユーザー名：${app.userName() || "未設定"}…`, icon: "people", run: () => app.changeUserName() },
       { label: "使い方とショートカット", icon: "tip", keys: "?", run: () => app.openHelp() },
-    ]);
+    ];
   }
+  const fileMenu = () => menu(fileItems());
   function ribbonOptions(anchor) {
     openPop(anchor, menu([
       { head: "リボンの表示オプション" },
       ...Object.entries(RIBBON_MODES).map(([mode, label]) => ({ label, icon: mode === "full" ? "ribbon" : mode === "tabs" ? "chevron" : "zoomFit", on: ribbonMode === mode, keys: mode === "tabs" ? "⌘F1" : "", run: () => setRibbonMode(mode) })),
+      ...(quick?.optionItems() || []),
     ]));
   }
 
@@ -430,7 +445,8 @@ export function createEditorUi(editor, app) {
     if (floating) { document.addEventListener("pointerdown", floatingOutside, true); document.addEventListener("keydown", floatingKey, true); }
     // PowerPoint's ファイル: new, open, save, save as, export, history (a menu at the start of the tabs).
     const fileBtn = h("button", { type: "button", class: "rb-file", title: "ファイル：新規・開く・保存・書き出し・履歴", "aria-haspopup": "true", onclick: (event) => openPop(event.currentTarget, fileMenu()) }, "ファイル");
-    const head = h("div", { class: "rb-tabs", role: "tablist" }, fileBtn,
+    const qatBar = quick?.toolbar();
+    const head = h("div", { class: "rb-tabs", role: "tablist" }, quick?.where() === "above" ? qatBar : null, fileBtn,
       // Switching tabs keeps the caret (and the cells picked in a table), as in PowerPoint.
       tabs.map((t) => h("button", { type: "button", role: "tab", class: t.contextual ? "contextual" : "", "aria-selected": String(t.id === tab && (ribbonMode === "full" || floating)), "data-tab": t.id, "data-keeps-text": "", onmousedown: (event) => event.preventDefault(),
         onclick: () => {
@@ -441,6 +457,7 @@ export function createEditorUi(editor, app) {
         ondblclick: () => toggleRibbon() }, t.label)),
       h("span", { class: "rb-spacer" }),
       h("span", { class: "rb-hint" }, ""),
+      quick?.searchBox,
       h("button", { type: "button", class: "rb-options", title: "リボンの表示オプション（常に表示・タブのみ・自動的に非表示）", "aria-haspopup": "true", onclick: (event) => ribbonOptions(event.currentTarget) }, ico("ribbon", 15), h("span", {}, "表示オプション"), h("b", { class: "rb-caret" }, "▾")));
     const showBody = ribbonMode === "full" || floating;
     const pin = h("div", { class: "rb-end" }, floating
@@ -458,8 +475,9 @@ export function createEditorUi(editor, app) {
     }
     if (pop && !pop.anchor.isConnected) closePop(true);
     const reveal = h("button", { type: "button", class: "rb-reveal", title: "リボンを表示する（自動的に非表示）", "aria-label": "リボンを表示する", onclick: () => (floating ? closeFloating() : openFloating()) }, "•••");
-    if (ribbonMode === "auto") ribbon.replaceChildren(reveal, floating ? h("div", { class: "rb-float" }, head, body) : "");
-    else ribbon.replaceChildren(head, body || "");
+    const below = quick?.where() === "below" ? h("div", { class: "rb-qat-row" }, qatBar) : "";
+    if (ribbonMode === "auto") ribbon.replaceChildren(reveal, floating ? h("div", { class: "rb-float" }, head, body, below) : "");
+    else ribbon.replaceChildren(head, body || "", below);
     if (pop && !pop.anchor.isConnected) closePop(true);
     refresh();
     fitRibbon();
@@ -693,6 +711,8 @@ export function createEditorUi(editor, app) {
       group("文章校正",
         btn("spell", "スペル|チェック", "入力中の文字のスペルを確かめる（ブラウザの辞書。間違いに赤い波線）", () => app.setSpellcheck(!app.spellcheck()), { big: true, pressed: () => app.spellcheck() }),
         btn("textCase", "表記ゆれ|チェック", "全角・半角（ＡＩ／AI）、長音（ユーザ／ユーザー）、送り仮名（行う／行なう）のゆれを見つけて統一する", () => app.openProofing(), { big: true })),
+      group("音声",
+        btn("readAloud", "音声|読み上げ", "選んだ文字・部品、またはスライドの文字を順に読み上げる（読んでいる所に色。もう一度押すと止まる）", () => readAloud.toggle(), { big: true, pressed: () => readAloud.active })),
       group("言語",
         drop("textCase", "翻訳", "スライドの文字をほかの言語に訳す（AI。部品・ノートも。数値と固有名詞はそのまま）", () => menu([
           { head: "このスライドを翻訳" },
@@ -1027,6 +1047,104 @@ export function createEditorUi(editor, app) {
     ];
   }
 
+  // ---------------------------------------------------------------- the ribbon's commands (検索・クイック アクセス)
+
+  /**
+   * Every command on the ribbon's tabs that are there now (each tab built off screen, as it would be shown), and the
+   * ファイル menu's: { ref: "tab|group|title", tab, tabLabel, group, label, title, disabled, icon }.
+   */
+  function ribbonCommands() {
+    const saved = updaters;
+    const out = [];
+    const seen = new Set();
+    try {
+      for (const t of TABS.filter((x) => !x.contextual || x.contextual())) {
+        updaters = [];
+        let nodes;
+        try { nodes = buildTab(t.id); } catch { continue; }
+        const box = h("div", {}, ...nodes);
+        for (const fn of updaters) { try { fn(); } catch { /* a control without a target */ } }
+        for (const g of box.querySelectorAll(".rb-group")) {
+          const group = g.querySelector(":scope > .rb-label")?.textContent || "";
+          const off = !onSlide() && !OFF_SLIDE_TABS.has(t.id) && !OFF_SLIDE_GROUPS.has(group);
+          for (const b of g.querySelectorAll("button.rb-btn")) {
+            const title = b.getAttribute("title") || "";
+            const ref = `${t.id}|${group}|${title}`;
+            if (!title || seen.has(ref)) continue;
+            seen.add(ref);
+            // The name as the search shows it: the button's words, or its tooltip's head when that says more
+            // (「ウィンドウ」 → 「アニメーション ウィンドウ」; an icon-only 「太字（⌘B）」 → 「太字」).
+            const words = (b.querySelector(":scope > span")?.textContent || "").trim();
+            const head = title.split(/[：（(]/)[0].trim();
+            const label = !words ? head || title : head && head.length <= 24 && head.includes(words) ? head : words;
+            out.push({ ref, tab: t.id, tabLabel: t.label, group, label, title, disabled: b.disabled || off, icon: b.querySelector("svg")?.getAttribute("data-ico") || "" });
+          }
+        }
+      }
+    } finally { updaters = saved; }
+    for (const item of fileItems()) {
+      if (!item.run) continue;
+      out.push({ ref: `file||${item.label}`, tab: "file", tabLabel: "ファイル", group: "", label: item.label.replace(/…$/, ""), title: item.label, disabled: false, icon: item.icon || "" });
+    }
+    return out;
+  }
+
+  /**
+   * Runs a command of the ribbon as a click on its button would. From the 検索 box its tab is shown (a folded group
+   * opened) and the button lit for a moment, so the place is learnt; from the クイック アクセス ツール バー (`from`, the
+   * toolbar's button) the tab stays as it is: the command's button is built off screen, and a menu it opens comes
+   * under the toolbar's button.
+   */
+  function runRibbonCommand(ref, { from = null } = {}) {
+    const [id, group, ...rest] = String(ref || "").split("|");
+    const title = rest.join("|");
+    if (id === "file") {
+      const item = fileItems().find((x) => x.run && x.label === title);
+      if (item) item.run();
+      return Boolean(item);
+    }
+    const t = TABS.find((x) => x.id === id);
+    if (!t || (t.contextual && !t.contextual())) { app.toast("このコマンドは今は使えません（対象を選ぶと出るタブのコマンドです）"); return false; }
+    closePop(true);
+    if (from) {
+      const saved = updaters;
+      let found = null;
+      try {
+        updaters = [];
+        const box = h("div", {}, ...buildTab(id));
+        for (const fn of updaters) { try { fn(); } catch { /* a control without a target */ } }
+        const g = [...box.querySelectorAll(".rb-group")].find((x) => (x.querySelector(":scope > .rb-label")?.textContent || "") === group);
+        found = g && [...g.querySelectorAll("button.rb-btn")].find((b) => b.getAttribute("title") === title);
+        if (found && !onSlide() && !OFF_SLIDE_TABS.has(id) && !OFF_SLIDE_GROUPS.has(group)) { app.toast("1枚表示（標準）で使えるコマンドです"); return false; }
+      } finally { updaters = saved; }
+      if (!found) { app.toast("コマンドが見つかりませんでした"); return false; }
+      if (found.disabled) { app.toast("このコマンドは今は使えません"); return false; }
+      found.click();
+      if (pop && !pop.anchor.isConnected) {
+        const r = from.getBoundingClientRect();
+        const pr = pop.el.getBoundingClientRect();
+        pop.el.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pr.width - 8))}px`;
+        pop.el.style.top = `${Math.min(r.bottom + 4, innerHeight - pr.height - 8)}px`;
+        pop.anchor = from;
+      }
+      return true;
+    }
+    tab = id;
+    if (ribbonMode === "full") renderRibbon(true); else openFloating(id);
+    editor.draw();
+    const g = [...ribbon.querySelectorAll(".rb-body > .rb-group")].find((x) => (x.querySelector(":scope > .rb-label")?.textContent || "") === group);
+    const find = (root) => (root ? [...root.querySelectorAll("button.rb-btn")].find((b) => b.getAttribute("title") === title && !b.classList.contains("rb-folded")) : null);
+    const b = g ? find(g.foldedItems) || find(g) : null;
+    if (!b) { app.toast("コマンドが見つかりませんでした"); return false; }
+    if (b.disabled || g.inert) { app.toast(g.inert ? "1枚表示（標準）で使えるコマンドです" : "このコマンドは今は使えません"); return false; }
+    if (g.foldedItems?.contains(b)) g.querySelector(".rb-folded")?.click();
+    b.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    b.classList.add("rb-found");
+    setTimeout(() => b.classList.remove("rb-found"), 1600);
+    b.click();
+    return true;
+  }
+
   function buildTab(id) {
     return { home: homeTab, insert: insertTab, design: designTab, transition: anim.transitionTab, animation: anim.animationTab, interact: ix.tab, slideshow: slideshowTab, review: reviewTab, shape: shapeTab, picture: pictureTab, view: viewTab, developer: developerTab, tableDesign: tables.designTab, tableLayout: tables.layoutTab, chartDesign: tables.chartTab, playback: media.playbackTab, smartartDesign: smart.designTab, draw: ink.drawTab, zoomTool: extras.zoomTab, model3d: models3d.tab }[id]();
   }
@@ -1101,6 +1219,8 @@ export function createEditorUi(editor, app) {
   const choice = (options, value, onSet) => h("select", { onchange: (event) => onSet(event.target.value) }, options.map(([v, label]) => h("option", { value: v, selected: String(v) === String(value) || null }, label)));
   const toggle = (label, on, onSet) => h("label", { class: "fp-check" }, h("input", { type: "checkbox", checked: on || null, onchange: (event) => onSet(event.target.checked) }), label);
   const tool = (icon, title, run, pressed = false) => h("button", { type: "button", class: "fp-tool", title, "aria-label": title, "aria-pressed": String(Boolean(pressed)), onclick: run }, ico(icon));
+  /** スポイト in the pane (as in the ribbon's colour menus): a colour taken from the slide. */
+  const eyedrop = (pick) => tool("eyedrop", "スポイト：スライドの上の色をクリックして取る", async () => { const c = await pickColor({ root: document.getElementById("stageBody") || document.body, toast: app.toast }); if (c) pick(c); });
 
   function paneSections(chosen, list) {
     const o = E.withDefaults(chosen[0]);
@@ -1111,14 +1231,14 @@ export function createEditorUi(editor, app) {
       const fill = o.fill;
       out.push(section("fill", "塗りつぶし", true,
         swatchRow(E.PALETTE.fill, fill, setFill, { none: "塗りつぶしなし" }),
-        line("その他の色", h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(fill) ? fill : "#dce4f2", onchange: (event) => setFill(event.target.value) }), h("small", { class: "hint" }, "SEJの面の色以外はチェックで知らせます")),
+        line("その他の色", h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(fill) ? fill : "#dce4f2", onchange: (event) => setFill(event.target.value) }), eyedrop(setFill), h("small", { class: "hint" }, "SEJの面の色以外はチェックで知らせます")),
         line("透明度", slider((1 - (o.fillOpacity ?? 1)) * 100, (v) => editor.apply((x) => (["shape", "text"].includes(x.kind) ? { fillOpacity: v ? Math.round((1 - v / 100) * 100) / 100 : undefined } : null))))));
     }
     if (chosen.some((x) => ["shape", "text", "image", "line"].includes(x.kind))) {
       const isLine = chosen.every((x) => x.kind === "line");
       out.push(section("line", isLine ? "線" : "枠線", true,
         swatchRow(E.PALETTE.line, o.stroke, setStroke, { none: isLine ? null : "枠線なし" }),
-        line("その他の色", h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(o.stroke) ? o.stroke : "#1f3864", onchange: (event) => setStroke(event.target.value) })),
+        line("その他の色", h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(o.stroke) ? o.stroke : "#1f3864", onchange: (event) => setStroke(event.target.value) }), eyedrop(setStroke)),
         line("幅", numberInput(ops.toPt(o.strokeW || 2), (v) => setStrokeWidth(Math.max(0.25, v)), { step: 0.25, min: 0.25, unit: "pt" })),
         line("実線/点線", choice(Object.entries(E.DASHES).map(([k, [label]]) => [k, label]), o.dash || "solid", setDash)),
         chosen.some((x) => x.kind === "line") ? [
@@ -1307,6 +1427,14 @@ export function createEditorUi(editor, app) {
   // 挿入 → アンケート (poll.mjs).
   const polls = createPolls(editor, app);
 
+  // 校閲 → 音声読み上げ (readaloud.mjs).
+  const readAloud = createReadAloud({ h, toast: (message) => app.toast(message), refreshRibbon: () => refresh(), selectedIds: () => selected().map((o) => o.id), index: () => app.index() });
+  // 検索 (⌥Q) and the クイック アクセス ツール バー (quick.mjs).
+  quick = createQuick({ h, ico, app, openPop, closePop, menu, commands: ribbonCommands, run: runRibbonCommand, render: () => renderRibbon(true), tab: () => tab, watch: (fn) => updaters.push(fn) });
+  // A right-click on a ribbon button (in a folded group too) offers to add it to the toolbar.
+  ribbon?.addEventListener("contextmenu", (event) => quick.contextMenu(event, tab));
+  document.addEventListener("contextmenu", (event) => { if (event.target.closest?.(".rb-pop .rb-fold")) quick.contextMenu(event, tab); });
+
   editor.subscribe(() => { renderRibbon(); renderPane(); });
 
   return {
@@ -1316,6 +1444,8 @@ export function createEditorUi(editor, app) {
     popMenu: (anchor, items) => openPop(anchor, menu(items)),
     editEquation: (id) => { const o = editor.objects().find((x) => x.id === id); if (o?.kind === "equation") extras.equationDialog(o); },
     editPoll: (id) => polls.edit(id),
+    readAloud: () => readAloud.toggle(), stopReading: () => readAloud.stop(),
+    ribbonCommands, runRibbonCommand, focusSearch: () => { if (ribbonMode === "auto" && !floating) openFloating(); quick.focusSearch(); }, customizeQat: () => quick.customize(),
     stopInk: () => ink.stop(), get inkTool() { return ink.tool; },
     get tab() { return tab; }, get ribbonMode() { return ribbonMode; }, get floating() { return floating; },
   };

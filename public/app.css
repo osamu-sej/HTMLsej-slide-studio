@@ -827,6 +827,49 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .ribbon { position: relative; z-index: 35; }
 .rb-options { display: inline-flex; align-items: center; gap: 4px; align-self: center; height: 24px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; }
 .rb-options:hover { background: var(--canvas); color: var(--ink); }
+/* 検索 (⌥Q): PowerPoint's search box, at the right of the tabs; it gives way first when the window narrows. */
+.rb-search-box { align-self: center; flex: 0 1 220px; min-width: 32px; display: flex; align-items: center; gap: 6px; height: 26px; margin: 0 6px 3px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--canvas); color: var(--muted); overflow: hidden; }
+.rb-search-box:focus-within { border-color: var(--accent); background: var(--surface); color: var(--accent); }
+.rb-search-box .ed-ico { flex: none; }
+.rb-search-input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; font-size: 12px; color: var(--ink); }
+.rb-search-results { display: flex; flex-direction: column; gap: 1px; width: min(440px, 90vw); max-height: min(460px, 70vh); overflow-y: auto; }
+.rb-search-item { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 32px; padding: 4px 10px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 12.5px; cursor: pointer; }
+.rb-search-item.on, .rb-search-item:hover { background: var(--accent-soft); }
+.rb-search-item.off { opacity: .5; }
+.rb-search-item small { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.rb-search-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rb-search-empty { margin: 6px 8px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+/* A command found by the search, shown where it lives for a moment. */
+.rb-btn.rb-found { outline: 2px solid var(--accent); outline-offset: 1px; background: var(--accent-soft); }
+/* クイック アクセス ツール バー: above the ribbon (at the start of the tabs) or below it. */
+.rb-qat { align-self: center; flex: none; display: flex; align-items: center; gap: 1px; margin: 0 8px 3px 0; padding-right: 8px; border-right: 1px solid var(--line); }
+.rb-qat.below { margin: 0; padding: 0; border: 0; }
+.rb-qat-row { display: flex; align-items: center; padding: 2px 10px; border-top: 1px solid var(--line); }
+.rb-qat-btn, .rb-qat-more { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-2); cursor: pointer; }
+.rb-qat-btn:hover:not(:disabled), .rb-qat-more:hover { background: var(--canvas); color: var(--ink); }
+.rb-qat-btn:disabled { opacity: .35; cursor: default; }
+.rb-qat-more { width: 18px; font-size: 10px; color: var(--muted); }
+.qat-dialog { width: min(760px, 94vw); }
+.qat-cols { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: center; }
+.qat-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.qat-col select { width: 100%; min-height: 280px; border: 1px solid var(--line-2); border-radius: 6px; font-size: 12.5px; }
+.qat-filter { height: 28px; border: 1px solid var(--line-2); border-radius: 6px; padding: 0 8px; }
+.qat-mid { display: flex; flex-direction: column; gap: 8px; }
+.qat-order { display: flex; gap: 6px; flex-wrap: wrap; }
+/* スポイト: everything on the slide answers the pointer while a colour is picked; the colour under it follows. */
+.ed-eyedropping, .ed-eyedropping .slide-wrap * { cursor: crosshair !important; }
+.ed-eyedropping .slide-wrap .hs-slide, .ed-eyedropping .slide-wrap .hs-slide * { pointer-events: auto !important; }
+.ed-eyedrop-swatch { position: fixed; z-index: 9999; padding: 2px 8px 2px 28px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--ink); font: 600 11px/20px ui-monospace, Menlo, monospace; pointer-events: none; }
+.ed-eyedrop-swatch::before { content: ""; position: absolute; left: 5px; top: 4px; width: 16px; height: 16px; border-radius: 3px; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .18); }
+.rb-eyedrop { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 6px; padding: 5px 6px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; cursor: pointer; }
+.rb-eyedrop:hover { background: var(--canvas); }
+/* 音声読み上げ: PowerPoint's small bar over the slide, and the block being read lit (only here, never on the slide). */
+.ra-bar { position: absolute; top: 10px; left: 50%; z-index: 30; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 4px 6px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); box-shadow: 0 8px 24px rgba(20, 22, 28, .14); }
+.ra-btn { width: 30px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font-size: 14px; cursor: pointer; }
+.ra-btn:hover { background: var(--canvas); }
+.ra-where { min-width: 44px; color: var(--muted); font-size: 11.5px; text-align: center; font-variant-numeric: tabular-nums; }
+.ra-bar select { height: 28px; max-width: 160px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 12px; line-height: 26px; }
+.slide-wrap .ra-reading { outline: 6px solid rgba(31, 56, 100, .35); outline-offset: 6px; border-radius: 4px; }
 .rb-end { position: sticky; right: 0; flex: none; display: flex; align-items: flex-end; margin-left: auto; padding: 0 2px 2px 6px; background: linear-gradient(90deg, transparent, var(--surface) 8px); }
 .rb-pin { width: 24px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; }
 .rb-pin:hover { background: var(--canvas); color: var(--ink); }

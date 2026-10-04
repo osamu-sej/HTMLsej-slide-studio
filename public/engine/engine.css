@@ -1211,6 +1211,12 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 .hs-player-stage > .hs-scaler { position: absolute; inset: 0; width: 100%; height: 100%; }
 .hs-player.idle { cursor: none; }
 .hs-player.idle .hs-player-stage { cursor: none; }
+/* 拡大: the magnifier's cursor, the slide moved smoothly (not while dragged), the hand when zoomed in. */
+.hs-player-stage { transition: transform .28s cubic-bezier(.22, .61, .36, 1); }
+.hs-player.zoom-drag .hs-player-stage { transition: none; }
+.hs-player.zoom-pick .hs-player-stage { cursor: zoom-in; }
+.hs-player.zoomed .hs-player-stage { cursor: grab; }
+.hs-player.zoomed.zoom-drag .hs-player-stage { cursor: grabbing; }
 .hs-player-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; z-index: 5; background: rgba(255, 255, 255, .06); pointer-events: none; }
 .hs-player-progress i { display: block; height: 100%; background: rgba(255, 255, 255, .55); transition: width .5s cubic-bezier(.16, 1, .3, 1); }
 .hs-player-bar { position: absolute; left: 50%; bottom: 18px; z-index: 8; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 14px; background: rgba(12, 14, 20, .78); backdrop-filter: blur(12px); box-shadow: 0 10px 40px rgba(0, 0, 0, .4); transition: opacity .35s, transform .35s; }

@@ -190,6 +190,12 @@ const P = {
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
   spell: '<path d="M3 15 7 4h1l4 11M4.4 11.5h6.2"/><path d="m12 17 3 3 6-7"/>',
   record: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
+  eyedrop: '<path d="m14.5 5.5 4 4M16.5 3.5a2.1 2.1 0 0 1 3 3l-2 2-3-3z"/><path d="m15 7-9 9-1 3 3-1 9-9"/>',
+  readAloud: '<path d="M4 9.5h3l4-3.5v12l-4-3.5H4z"/><path d="M15 9a4 4 0 0 1 0 6M17.5 6.5a7.5 7.5 0 0 1 0 11"/>',
+  magnify: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5.5 5.5M10.5 8v5M8 10.5h5"/>',
+  save: '<path d="M5 4h11l3 3v12.5a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/>',
+  undo: '<path d="M9 7 4.5 11.5 9 16"/><path d="M5 11.5h9.5a5 5 0 0 1 0 10H12"/>',
+  redo: '<path d="m15 7 4.5 4.5L15 16"/><path d="M19 11.5H9.5a5 5 0 0 0 0 10H12"/>',
   poll: '<path d="M4 20h16"/><rect x="5" y="11" width="3.5" height="7"/><rect x="10.25" y="6" width="3.5" height="12"/><rect x="15.5" y="9" width="3.5" height="9"/>',
   model3d: '<path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/>',
   rotate3d: '<ellipse cx="12" cy="12" rx="9" ry="4"/><path d="M12 3v18M18.5 9.5 21 12l-2.5 2.5"/>',
@@ -203,6 +209,7 @@ export function ico(name, size = 18) {
   svg.setAttribute("height", String(size));
   svg.setAttribute("class", "ed-ico");
   svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("data-ico", P[name] ? name : "shapes");
   svg.innerHTML = P[name] || P.shapes;
   return svg;
 }

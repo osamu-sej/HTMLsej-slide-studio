@@ -940,6 +940,7 @@
       btn("一覧", "スライド一覧（O・G）", () => toggleGrid()),
       btn("自動デモ", "自動デモ：矢印が各ページを操作して見せます（D）", () => demo(), "demo"),
       btn("ペン", "ペンとレーザー ポインター（Ctrl+P ペン・Ctrl+I 蛍光ペン・Ctrl+L レーザー・Ctrl+E 消しゴム・E すべて消去・Ctrl+A 矢印）", () => togglePenMenu(), "pen"),
+      btn("拡大", "スライドを拡大（＋ / −）：クリックした所を大きく表示し、ドラッグで見回す。Esc・右クリックで全体に戻る", () => toggleMagnifier(), "zoom"),
       btn("字幕", "話した言葉を字幕で表示（J）：マイクを使います（Chrome・Edge）", () => toggleCaptions(), "captions"),
       btn("ノート", "ノートを表示（N）", () => toggleNotes()),
       btn("発表者ビュー", "別ウィンドウにノート・次のスライド・経過時間（P）", () => openPresenterView()),
@@ -1206,6 +1207,7 @@
     async function show(i, { dir = 1, fullStep = false, atStep = null, via = null, at = null } = {}) {
       if (busy) await busy;
       clearTimeout(autoTimer);
+      resetZoom();
       const prevScaler = current;
       const prevSlide = prevScaler?.firstElementChild;
       if (prevSlide) { interaction?.destroy(); carrySounds(prevSlide, index); stopMedia(prevSlide); }
@@ -1620,6 +1622,10 @@
       const key = event.key;
       if (kiosk && key !== "Escape") return;
       if (penMode && key === "Escape") { event.preventDefault(); setPen(penMode); return; }
+      // 拡大: ＋ / − zoom where the pointer is; Esc shows the whole slide first.
+      if (key === "+" || key === "=") { event.preventDefault(); zoomStep(1); return; }
+      if (key === "-") { event.preventDefault(); zoomStep(-1); return; }
+      if (key === "Escape" && resetZoom()) { event.preventDefault(); return; }
       if (key === "e" || key === "E") { eraseAll(); return; }
       if (key === "j" || key === "J") { toggleCaptions(); return; }
       gesture = true;
@@ -1667,11 +1673,79 @@
       } else if (action.type === "url") win.open(action.href, "_blank", "noopener");
       return true;
     }
+    // 拡大 (PowerPoint's zoom in a slide show): the magnifier on the bar (or ＋) and a click where to look closer;
+    // a drag looks around, − / Esc / a right-click shows the whole slide again; another slide starts whole.
+    const zoom = { level: 1, tx: 0, ty: 0, picking: false, drag: null, moved: false };
+    const ZOOM_STEPS = [1, 1.5, 2, 3, 4];
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    function applyZoom() {
+      stage.style.transformOrigin = "0 0";
+      stage.style.transform = zoom.level > 1 ? `translate(${zoom.tx}px, ${zoom.ty}px) scale(${zoom.level})` : "";
+      player.classList.toggle("zoomed", zoom.level > 1);
+      player.classList.toggle("zoom-pick", zoom.picking);
+      requestAnimationFrame(placeInk);
+    }
+    /** Zooms to `level` keeping the point (cx, cy) on the screen where it is (the middle when none). */
+    function magnify(level, cx = null, cy = null) {
+      const w = stage.offsetWidth;
+      const ht = stage.offsetHeight;
+      const base = player.getBoundingClientRect();
+      const lx = cx == null ? w / 2 : cx - base.left - stage.offsetLeft;
+      const ly = cy == null ? ht / 2 : cy - base.top - stage.offsetTop;
+      const px = (lx - zoom.tx) / zoom.level;
+      const py = (ly - zoom.ty) / zoom.level;
+      zoom.level = clamp(level, 1, 4);
+      zoom.tx = zoom.level > 1 ? clamp(lx - px * zoom.level, w - w * zoom.level, 0) : 0;
+      zoom.ty = zoom.level > 1 ? clamp(ly - py * zoom.level, ht - ht * zoom.level, 0) : 0;
+      zoom.picking = false;
+      applyZoom();
+    }
+    function zoomStep(d) {
+      const k = ZOOM_STEPS.findIndex((z) => z >= zoom.level - 1e-6);
+      magnify(ZOOM_STEPS[clamp((k < 0 ? ZOOM_STEPS.length - 1 : k) + d, 0, ZOOM_STEPS.length - 1)], zoom.pointer?.x ?? null, zoom.pointer?.y ?? null);
+    }
+    function resetZoom() {
+      if (zoom.level === 1 && !zoom.picking) return false;
+      Object.assign(zoom, { level: 1, tx: 0, ty: 0, picking: false, drag: null });
+      applyZoom();
+      return true;
+    }
+    function toggleMagnifier() {
+      if (resetZoom()) return;
+      zoom.picking = true;
+      applyZoom();
+      flash("拡大する場所をクリックしてください（Esc・右クリックで戻る）");
+    }
+    stage.addEventListener("pointerdown", (event) => {
+      if (zoom.level <= 1 || event.button !== 0 || (penMode && penMode !== "laser")) return;
+      zoom.drag = { x: event.clientX, y: event.clientY, tx: zoom.tx, ty: zoom.ty };
+      zoom.moved = false;
+      player.classList.add("zoom-drag");
+    });
+    player.addEventListener("pointermove", (event) => {
+      zoom.pointer = { x: event.clientX, y: event.clientY };
+      if (!zoom.drag) return;
+      const dx = event.clientX - zoom.drag.x;
+      const dy = event.clientY - zoom.drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3) zoom.moved = true;
+      zoom.tx = clamp(zoom.drag.tx + dx, stage.offsetWidth * (1 - zoom.level), 0);
+      zoom.ty = clamp(zoom.drag.ty + dy, stage.offsetHeight * (1 - zoom.level), 0);
+      applyZoom();
+    });
+    const endDrag = () => { if (zoom.drag) { zoom.drag = null; player.classList.remove("zoom-drag"); } };
+    player.addEventListener("pointerup", endDrag);
+    player.addEventListener("pointercancel", endDrag);
+    stage.addEventListener("contextmenu", (event) => { if (resetZoom()) event.preventDefault(); });
+    stage.addEventListener("transitionend", () => placeInk());
+
     const onStageClick = (event) => {
       if (event.target.closest(".hs-player-bar, .hs-player-grid, .hs-player-notes, .hs-control, a[href], .hs-pen-menu, .hs-join")) return;
       // アンケート: a click on a choice answers (it does not move the show on).
       const choice = event.target.closest(".hs-poll-opt");
       if (choice) { answer(choice); return; }
+      // 拡大: the click says where to look closer; zoomed in, a click (or a drag) looks around and does not move on.
+      if (zoom.picking && !viewer) { magnify(2, event.clientX, event.clientY); return; }
+      if (zoom.level > 1) return;
       // With a pen in hand, a click writes instead of moving on (the laser pointer still clicks through).
       if (penMode && penMode !== "laser") return;
       if (viewer) return;
@@ -1732,7 +1806,7 @@
     if (opts.captions) toggleCaptions();
 
     return {
-      el: player, next, prev, go, follow, destroy, close, react, caption, setVotes, toggleJoin, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill, demo, stopDemo, setPen, toggleCaptions,
+      el: player, next, prev, go, follow, destroy, close, react, caption, setVotes, toggleJoin, magnify, resetZoom, toggleMagnifier, get zoom() { return zoom.level; }, toggleNotes, toggleGrid, toggleFullscreen, openPresenterView, openDrill, closeDrill, demo, stopDemo, setPen, toggleCaptions,
       get pen() { return penMode; }, get captioning() { return Boolean(captions); }, get order() { return [...order]; },
       get index() { return index; }, get step() { return step; }, get startedAt() { return started; }, get inDrill() { return Boolean(back); },
     };
