@@ -1393,6 +1393,109 @@ await step("グラフの数値の書式（表示単位 万・小数1桁・後ろ
   assert((await texts(".hs-val")).includes("24,000"), "numbers as before");
 });
 
+await step("グラフの書式設定（折れ線の滑らかさ・マーカー・近似曲線・目盛間隔・項目の逆順、円の角度・穴・切り出し、棒の間隔と重なり）", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="line"]');
+  await page.waitForTimeout(400);
+  if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
+  const id = (await slide()).elements.at(-1).id;
+  const setData = async (type, series) => {
+    await page.evaluate(({ id, type, series }) => {
+      const o = window.__hsej.slide().elements.find((x) => x.id === id);
+      o.chart.type = type;
+      o.chart.labels = ["4月", "5月", "6月", "7月"];
+      o.chart.series = series;
+    }, { id, type, series });
+    await redraw();
+    await pickInPane([id]);
+  };
+  const chartOf = async () => (await slide()).elements.find((o) => o.id === id).chart;
+  const q = (sel) => `#stageBody .slide-wrap .hs-obj[data-el="${id}"] ${sel}`;
+  const openFormat = async () => {
+    await tab("グラフのデザイン");
+    await byTitle("データ ラベル・凡例・目盛線");
+    await page.locator('.rb-pop .rb-menu button:has-text("グラフの書式設定")').click();
+    await page.waitForSelector(".cf-dialog[open]");
+  };
+  const cf = ".cf-dialog[open]";
+  // A line: smooth, square marks, an exponential trendline with its equation, a scale every 5,000, the months turned round.
+  await setData("line", [{ name: "売上", values: [12000, 15000, 24000, 41000] }]);
+  await openFormat();
+  assert((await page.$$(`${cf} fieldset.cf-section`)).length === 3, "a line shows 折れ線・軸・近似曲線 (no bars, no pie)");
+  assert(!(await page.$(`${cf} input[name="gap"]`)) && !(await page.$(`${cf} input[name="angle"]`)), "the other kinds' fields are not offered");
+  await page.check(`${cf} input[name="smooth"]`);
+  await page.selectOption(`${cf} select[name="marker"]`, "square");
+  await page.fill(`${cf} input[name="step"]`, "5000");
+  await page.selectOption(`${cf} select[name="trend"]`, "exp");
+  await page.check(`${cf} input[name="eq"]`);
+  await page.check(`${cf} input[name="r2"]`);
+  await page.check(`${cf} input[name="reverse"]`);
+  await page.click(".cf-dialog .cf-ok");
+  await page.waitForTimeout(500);
+  let opts = (await chartOf()).opts;
+  assert(opts?.smooth === true && opts.marker === "square" && opts.axisStep === 5000 && opts.trend === "exp" && opts.trendEq === true && opts.trendR2 === true && opts.reverse === true, `kept: ${JSON.stringify(opts)}`);
+  assert(/ C/.test((await page.getAttribute(q("path.hs-draw"), "d")) || ""), "the line is a curve");
+  assert((await page.$$(q("polygon.hs-marker"))).length === 4, "a square on each point");
+  assert((await page.$$(q(".hs-trend"))).length === 1, "the trendline");
+  const eq = await page.textContent(q(".hs-trend-eq"));
+  assert(/^y = .*e\^.*x/.test(eq) && eq.includes("R² = "), `the equation: ${eq}`);
+  const ticks = (await page.$$eval(q(".hs-tick"), (els) => els.map((t) => Number(t.textContent.replace(/,/g, ""))))).filter(Number.isFinite);
+  assert(ticks.length >= 3 && ticks.every((v, i) => i === 0 || Math.abs(v - ticks[i - 1] - 5000) < 1e-6), `a scale every 5,000: ${ticks}`);
+  const months = await page.$$eval(q("svg text:not(.hs-tick):not(.hs-val):not(.hs-trend-eq)"), (els) => els.map((t) => t.textContent));
+  assert(months.join() === "7月,6月,5月,4月", `the months turned round: ${months}`);
+  await shot("chart-format-line");
+  // The menu names the kind now; one undo takes the whole dialog back.
+  await tab("グラフのデザイン");
+  await byTitle("データ ラベル・凡例・目盛線");
+  assert(await page.locator('.rb-pop .rb-menu button:has-text("近似曲線（指数）…")').count() === 1, "the menu names the trendline's kind");
+  await page.keyboard.press("Escape");
+  await undo();
+  opts = (await chartOf()).opts;
+  assert(!opts?.smooth && !opts?.trend && !opts?.reverse && !opts?.axisStep, `one undo undoes the dialog: ${JSON.stringify(opts)}`);
+
+  // A donut: the first slice turned 90°, a thicker ring, the slices pulled out.
+  await setData("donut", [{ name: "構成比", values: [50, 30, 12, 8] }]);
+  const ring = async () => Number(await page.getAttribute(q(".hs-arc"), "stroke-width"));
+  const before = await ring();
+  await openFormat();
+  assert((await page.$$(`${cf} fieldset.cf-section`)).length === 2 && await page.$(`${cf} input[name="hole"]`), "a donut shows ドーナツ・軸 (the hole too)");
+  await page.fill(`${cf} input[name="angle"]`, "90");
+  await page.fill(`${cf} input[name="explode"]`, "10");
+  await page.fill(`${cf} input[name="hole"]`, "40");
+  await page.click(".cf-dialog .cf-ok");
+  await page.waitForTimeout(500);
+  opts = (await chartOf()).opts;
+  assert(opts?.angle === 90 && opts.explode === 10 && opts.hole === 40, `kept: ${JSON.stringify(opts)}`);
+  const turns = await page.$$eval(q(".hs-arc"), (els) => els.map((a) => a.getAttribute("transform")));
+  assert(turns.length === 4 && turns.every((t) => t.startsWith("translate(")) && turns[0].includes("rotate(0 "), `pulled out and turned: ${turns[0]}`);
+  assert((await ring()) > before, "a smaller hole: a thicker ring");
+  await shot("chart-format-donut");
+
+  // Clustered bars: nearly no gap, the series overlapping by half.
+  await setData("clustered-bar", [{ name: "今期", values: [3, 5, 4, 6] }, { name: "前期", values: [2, 4, 3, 5] }]);
+  const xs = async () => page.$$eval(q(".hs-bar"), (els) => els.map((b) => Number(b.getAttribute("d").match(/^M([-\d.]+),/)[1])));
+  const widthBefore = (await xs())[1] - (await xs())[0];
+  await openFormat();
+  assert(await page.$(`${cf} input[name="gap"]`) && await page.$(`${cf} input[name="overlap"]`), "bars offer the gap and the overlap");
+  await page.fill(`${cf} input[name="gap"]`, "20");
+  await page.fill(`${cf} input[name="overlap"]`, "50");
+  await page.click(".cf-dialog .cf-ok");
+  await page.waitForTimeout(500);
+  opts = (await chartOf()).opts;
+  assert(opts?.gap === 20 && opts.overlap === 50, `kept: ${JSON.stringify(opts)}`);
+  const after = await xs();
+  assert(after[1] - after[0] > 0 && after[1] - after[0] < widthBefore, `the series closer together: ${widthBefore} → ${after[1] - after[0]}`);
+  await shot("chart-format-bars");
+  // A chart with nothing to format keeps the menu entry off.
+  await setData("waterfall", [{ name: "利益", values: [100, 25, -10, 115] }]);
+  await tab("グラフのデザイン");
+  await byTitle("データ ラベル・凡例・目盛線");
+  assert(await page.locator('.rb-pop .rb-menu button:has-text("グラフの書式設定")').isDisabled(), "disabled for a waterfall");
+  await page.keyboard.press("Escape");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {
