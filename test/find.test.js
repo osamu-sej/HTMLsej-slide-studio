@@ -52,3 +52,14 @@ test("foldText maps each folded letter back to its original span; snippet shows 
   assert.equal(snippet("短い", [0, 1], 10), "短い");
   assert.equal(snippet("a\n\n b", null), "a b");
 });
+
+test("matcher: characters outside the BMP, a lone voiced mark and an empty replacement do not trip it", () => {
+  const m = matcher({ needle: "a" });
+  assert.deepEqual(m.ranges("😀A"), [[2, 3]], "an emoji is two units of the text; the match after it starts in the right place");
+  assert.equal(m.replace("😀A😀a", "b"), "😀b😀b");
+  assert.equal(matcher({ needle: "😀" }).count("😀😀"), 2);
+  assert.equal(matcher({ needle: "x" }).replace("axb", ""), "ab", "replacing with nothing deletes the match");
+  assert.equal(matcher({ needle: "ﾞ" }).count("ｶﾞ ﾞ"), 1, "a voiced mark with no kana before it stays a letter of its own");
+  assert.equal(matcher({ needle: "  " }).count("a  b"), 1, "spaces are searched for as they are");
+  assert.equal(matcher({ needle: "ｱ", width: false }).count("アｱ"), 1);
+});
