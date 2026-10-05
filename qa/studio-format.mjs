@@ -1624,6 +1624,53 @@ await step("検索・置換（大文字小文字・全角半角・単語・こ�
   assert(await page.evaluate((n) => window.__hsej.slide() === window.__hsej.deck().slides[n], here), "and the slide with the words is on the stage");
 });
 
+await step("繰り返し（F4・やり直す操作がないときの ⌘Y）: 直前の書式を次に選んだ部品へ、1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  const place = async (x, y) => {
+    await tab("挿入");
+    await ribbonBtn("図形");
+    await page.locator('.rb-pop .rb-gallery button[data-shape="rect"]').last().click();
+    await page.mouse.click(...(await stageAt(x, y)));
+    await page.waitForTimeout(300);
+    return (await slide()).elements.at(-1).id;
+  };
+  const a = await place(500, 500);
+  const b = await place(1500, 500);
+  assert(a !== b, "two rectangles");
+  const look = async (id, key) => (await slide()).elements.find((o) => o.id === id)[key];
+  const before = await look(b, "fill");
+  // A's fill; then B takes it with F4.
+  await pickInPane([a]);
+  await tab("図形の書式");
+  await byTitle("図形の塗りつぶし");
+  await page.locator(".rb-pop .rb-sw").nth(3).click();
+  await page.waitForTimeout(300);
+  const picked = await look(a, "fill");
+  assert(picked && picked !== before, `A's new fill: ${picked} (B ${before})`);
+  await pickInPane([b]);
+  await page.keyboard.press("F4");
+  await page.waitForTimeout(300);
+  assert((await look(b, "fill")) === picked, `F4 gave B the same fill: ${await look(b, "fill")}`);
+  // A's outline colour; B again, this time with ⌘Y (nothing to redo).
+  await pickInPane([a]);
+  await tab("図形の書式");
+  await byTitle("図形の枠線");
+  await page.locator(".rb-pop .rb-sw").nth(2).click();
+  await page.waitForTimeout(300);
+  const line = await look(a, "stroke");
+  await pickInPane([b]);
+  await page.keyboard.press("Control+y");
+  await page.waitForTimeout(300);
+  assert((await look(b, "stroke")) === line, `⌘Y gave B the same outline: ${await look(b, "stroke")} / ${line}`);
+  assert((await look(b, "fill")) === picked, "and kept the fill");
+  await undo();
+  assert((await look(b, "stroke")) !== line && (await look(b, "fill")) === picked, "one ⌘Z takes back only the repeat");
+  // With something to redo, ⌘Y redoes.
+  await page.keyboard.press("Control+y");
+  await page.waitForTimeout(300);
+  assert((await look(b, "stroke")) === line, "⌘Y redoes what was undone");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

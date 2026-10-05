@@ -5523,6 +5523,7 @@ function commandList() {
       cmd("資料", "⎙", "PDFとして保存・印刷", () => printPdf()),
       cmd("資料", "✓", "チェック結果を見る", () => openCheckDialog(false)),
       cmd("資料", "⌕", "検索・置換", () => openReplace()),
+      cmd("編集", "↻", "直前の操作を繰り返す", () => editor.repeat(), "F4 / ⌘Y（やり直す操作がないとき）"),
       cmd("資料", "▣", "資料を保存庫に保存", () => saveToLibrary()),
       cmd("資料", "⌕", "保存庫から資料・スライドを探す", () => openLibrary()),
       cmd("資料", "🗒", "スピーカーノートを作る", () => openNotesDialog()),
@@ -6772,10 +6773,10 @@ function bind() {
       undoRedo(event.shiftKey ? "redo" : "undo");
       return;
     }
-    // ⌘Y / Ctrl+Y: やり直し, as in PowerPoint.
+    // ⌘Y / Ctrl+Y: やり直し, or 繰り返し when there is nothing to redo, as in PowerPoint.
     if (meta && !event.shiftKey && event.key.toLowerCase() === "y" && state.mode === "edit" && !typing) {
       event.preventDefault();
-      undoRedo("redo");
+      if (state.redo.length) undoRedo("redo"); else if (state.view === "single") editor.repeat();
       return;
     }
     if (!typing && event.key === "?") { event.preventDefault(); $("helpDialog").showModal(); return; }

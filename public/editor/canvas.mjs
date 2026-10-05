@@ -1148,6 +1148,8 @@ export function createCanvas(app) {
     if (!app.canEdit()) return false;
     const meta = event.ctrlKey || event.metaKey;
     const key = event.key;
+    // F4: 繰り返し (also while typing: the format goes to the words selected now).
+    if (key === "F4" && !meta && !event.altKey && !event.shiftKey) { event.preventDefault(); repeat(); return true; }
     if (ed.typing) return false;
     const active = document.activeElement;
     if (active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable) && !active.closest?.(".ed-wrap")) return false;
@@ -1451,13 +1453,27 @@ export function createCanvas(app) {
   function moveInOrder(id, index) { commit(ops.moveTo(objects(), id, index)); }
 
   /** Change settings of the selected objects (fill, line, size…). A function gets each object. */
-  function apply(patch, { ids = ed.sel, undo = true } = {}) {
-    if (!ids.length) return;
-    commit(ops.update(objects(), ids, patch), { undo });
+  function apply(patch, { ids, undo = true } = {}) {
+    const target = ids ?? ed.sel;
+    if (!target.length) return;
+    commit(ops.update(objects(), target, patch), { undo });
+    // 繰り返し (F4): the last change made to the selection is what comes next.
+    if (ids === undefined && undo && !repeating) lastAction = { run: () => apply(patch) };
+  }
+  // 繰り返し: do the last format again to what is selected now (PowerPoint's F4, and ⌘Y when there is nothing to redo).
+  let lastAction = null;
+  let repeating = false;
+  function repeat() {
+    if (!lastAction) { app.toast("繰り返す操作がありません"); return false; }
+    if (!ed.sel.length && !ed.typing) { app.toast("繰り返す部品（か文字）を選んでください"); return false; }
+    repeating = true;
+    try { lastAction.run(); } finally { repeating = false; }
+    return true;
   }
 
   // -- text: inside the text being typed (the selected words) or the whole of each selected object
   function textFormat(kind, value) {
+    if (!repeating) lastAction = { run: () => textFormat(kind, value) };
     const t = ed.typing;
     // A table: a block of cells, the cell's own settings (vertical alignment), or the whole table when it is
     // selected without typing.
@@ -1801,7 +1817,7 @@ export function createCanvas(app) {
     setTool, get tool() { return ed.tool; },
     startTyping, stopTyping, restoreRange,
     keydown, onCopy, onPaste, consumeClick,
-    insert, pasteObjects, pasteFromMemory, commit, apply, textFormat, textState,
+    insert, pasteObjects, pasteFromMemory, commit, apply, textFormat, textState, repeat, canRepeat: () => Boolean(lastAction),
     removeSelection, duplicateSelection, groupSelection, ungroupSelection, order, alignSelection, distributeSelection, rotateSelection, flipSelection,
     setLocked, setHidden, rename, moveInOrder, copyFormat, pasteFormat,
     get painter() { return ed.painter; },
