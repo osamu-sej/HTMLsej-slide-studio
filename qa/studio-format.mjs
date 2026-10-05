@@ -1423,7 +1423,7 @@ await step("グラフの書式設定（折れ線の滑らかさ・マーカー�
   // A line: smooth, square marks, an exponential trendline with its equation, a scale every 5,000, the months turned round.
   await setData("line", [{ name: "売上", values: [12000, 15000, 24000, 41000] }]);
   await openFormat();
-  assert((await page.$$(`${cf} fieldset.cf-section`)).length === 3, "a line shows 折れ線・軸・近似曲線 (no bars, no pie)");
+  assert((await page.$$(`${cf} fieldset.cf-section`)).length === 4, "a line shows データ ラベル・折れ線・軸・近似曲線 (no bars, no pie)");
   assert(!(await page.$(`${cf} input[name="gap"]`)) && !(await page.$(`${cf} input[name="angle"]`)), "the other kinds' fields are not offered");
   await page.check(`${cf} input[name="smooth"]`);
   await page.selectOption(`${cf} select[name="marker"]`, "square");
