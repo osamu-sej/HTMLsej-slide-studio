@@ -115,7 +115,7 @@ test("chart elements: no data labels, the legend below / at the right / none, no
   assert.ok(el.querySelector(".hs-chart line.hs-axisline"), "the axis stays");
 });
 
-const plain = (v) => JSON.parse(JSON.stringify(v));
+const plain = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
 test("histogram bins, box statistics, treemap layout and 親/子 labels", async () => {
   const E = await loadEngine();
@@ -293,4 +293,53 @@ test("第2軸: a combination chart's line reads on a scale of its own, with tick
   assert.ok(Number(ticks.at(-1)) >= 108 && Number(ticks.at(-1)) < 200, `the line's scale: ${ticks}`);
   assert.ok(second.querySelectorAll(".hs-chart .hs-tick:not(.hs-tick2)").length >= 5, "the bars' scale down the left");
   assert.equal(shared.querySelectorAll(".hs-chart .hs-tick2").length, 0);
+});
+
+test("数値の書式: decimals, a display unit and signs reach the labels, the tips and the data table; an axis takes the unit only", async () => {
+  const E = await loadEngine();
+  const base = { type: "line", labels: ["4月", "5月", "6月"], series: [{ name: "売上", values: [12000, 15000, 24000] }] };
+  const norm = (numFmt) => E.normalizeObject({ id: "n", kind: "chart", x: 0, y: 0, w: 900, h: 500, chart: { ...base, opts: { numFmt } } }).chart.opts?.numFmt;
+  assert.deepEqual(plain(norm({ decimals: "1", scale: "10000", prefix: "¥<b>", suffix: " 円 " })), { decimals: 1, scale: 10000, prefix: "¥b", suffix: "円" }, "numbers and clean text only");
+  assert.deepEqual(plain(norm({ decimals: 9, scale: 7, prefix: "", suffix: "   " })), undefined, "unknown values are dropped");
+  assert.equal(norm({}), undefined);
+  const { el } = draw(E, { ...base, opts: { numFmt: { decimals: 1, scale: 10000, prefix: "¥", suffix: "円" } } });
+  const tips = [...el.querySelectorAll(".hs-chart circle.hs-mark")].map((c) => c.getAttribute("data-tip"));
+  assert.ok(tips[0].endsWith("¥1.2万円"), `a tip: ${tips[0]}`);
+  assert.ok(tips[2].endsWith("¥2.4万円"), tips[2]);
+  const labels = [...el.querySelectorAll(".hs-chart .hs-val")].map((t) => t.textContent);
+  assert.ok(labels.includes("¥2.4万円"), `a label: ${labels}`);
+  const ticks = [...el.querySelectorAll(".hs-chart .hs-tick")].map((t) => t.textContent).filter((t) => /\d/.test(t));
+  assert.ok(ticks.length >= 4 && ticks.every((t) => !/[¥円]/.test(t) && /万$|^0/.test(t)), `ticks carry the unit, not the signs: ${ticks}`);
+  // The data table follows it too; without a format everything stays as it was.
+  const { el: withTable } = draw(E, { ...base, type: "bar", opts: { table: true, numFmt: { scale: 1000, suffix: "円" } } });
+  assert.ok([...withTable.querySelectorAll(".hs-chart-table td")].some((td) => td.textContent === "12千円"), "the table");
+  const { el: plainChart } = draw(E, base);
+  assert.ok([...plainChart.querySelectorAll(".hs-chart .hs-val")].some((t) => t.textContent === "24,000"), "as before");
+});
+
+test("誤差範囲: a bar and two caps on each mark, a fixed amount or a share of the value", async () => {
+  const E = await loadEngine();
+  const data = { labels: ["A", "B", "C"], series: [{ name: "値", values: [100, 200, 300] }] };
+  const kept = (type, opts) => E.normalizeObject({ id: "e", kind: "chart", x: 0, y: 0, w: 900, h: 500, chart: { ...data, type, opts } }).chart.opts;
+  assert.deepEqual(plain(kept("bar", { errorBars: { type: "fixed", amount: "20" } }).errorBars), { type: "fixed", amount: 20 });
+  assert.equal(kept("pie", { errorBars: { type: "fixed", amount: 20 } }), undefined, "only bars and lines");
+  assert.equal(kept("bar", { errorBars: { type: "percent", amount: 150 } }), undefined, "a share of at most 100");
+  assert.equal(kept("bar", { errorBars: { type: "fixed", amount: 0 } }), undefined);
+  assert.equal(kept("bar", { errorBars: { type: "other", amount: 5 } }), undefined);
+  const lines = (type, opts, series = data.series) => draw(E, { ...data, type, series, opts }).el.querySelectorAll(".hs-chart line.hs-err");
+  assert.equal(lines("bar", { errorBars: { type: "fixed", amount: 20 } }).length, 9, "3 marks × (bar + 2 caps)");
+  assert.equal(lines("bar").length, 0);
+  assert.equal(lines("line", { errorBars: { type: "percent", amount: 10 } }).length, 9);
+  const two = [...data.series, { name: "別", values: [90, 180, 270] }];
+  assert.equal(lines("clustered-bar", { errorBars: { type: "fixed", amount: 10 } }, two).length, 18, "a bar for each of two series");
+  assert.equal(lines("multi-line", { errorBars: { type: "fixed", amount: 10 } }, two).length, 18);
+  // The value label sits above the error bar, not on it.
+  const labelY = (opts) => Number(draw(E, { ...data, type: "bar", opts }).el.querySelector(".hs-chart .hs-val").getAttribute("y"));
+  assert.ok(labelY({ errorBars: { type: "fixed", amount: 40 } }) < labelY(undefined), "the label rides above the error bar");
+  // The bar's length follows the amount: ±20 on a 100 scale is longer than ±10.
+  const span = (amount) => { const bar = lines("bar", { errorBars: { type: "fixed", amount } })[0]; return Math.abs(Number(bar.getAttribute("y2")) - Number(bar.getAttribute("y1"))); };
+  assert.ok(span(40) > span(20) * 1.9 && span(40) < span(20) * 2.1, "double the amount, double the bar");
+  // A share: 10% of 300 is longer than 10% of 100.
+  const bars = [...lines("bar", { errorBars: { type: "percent", amount: 10 } })].filter((_, i) => i % 3 === 0).map((l) => Math.abs(Number(l.getAttribute("y2")) - Number(l.getAttribute("y1"))));
+  assert.ok(bars[2] > bars[0] * 2.9 && bars[2] < bars[0] * 3.1, `a share of each value: ${bars}`);
 });

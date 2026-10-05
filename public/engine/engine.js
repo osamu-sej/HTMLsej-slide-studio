@@ -337,11 +337,39 @@
     return 10 * exp;
   }
 
-  const fmt = (value) => {
+  // 数値の書式 (グラフ要素): the chart being drawn may show its numbers with a set number of decimals, in a display
+  // unit (千・万・百万・億) and with signs before and after (¥・%・円…). Set while a chart is drawn, then put back.
+  let numFmt = null;
+  const UNIT_NAMES = { 1000: "千", 10000: "万", 1000000: "百万", 100000000: "億" };
+  /** A number as the chart shows it: `marks` puts the signs on (data labels and tips); an axis takes the unit only. */
+  function formatNumber(value, nf, marks) {
     const n = Number(value);
     if (!Number.isFinite(n)) return str(value);
-    return Math.abs(n) >= 1000 ? n.toLocaleString("ja-JP") : String(Math.round(n * 100) / 100);
-  };
+    if (!nf) return Math.abs(n) >= 1000 ? n.toLocaleString("ja-JP") : String(Math.round(n * 100) / 100);
+    const v = n / (nf.scale || 1);
+    const digits = Number.isInteger(nf.decimals) ? nf.decimals : 2;
+    const rounded = Math.round(v * 10 ** digits) / 10 ** digits;
+    const words = Math.abs(rounded) >= 1000
+      ? rounded.toLocaleString("ja-JP", { minimumFractionDigits: Number.isInteger(nf.decimals) ? digits : 0, maximumFractionDigits: digits })
+      : Number.isInteger(nf.decimals) ? rounded.toFixed(digits) : String(rounded);
+    return `${marks ? nf.prefix || "" : ""}${words}${nf.scale > 1 ? UNIT_NAMES[nf.scale] || "" : ""}${marks ? nf.suffix || "" : ""}`;
+  }
+  const fmt = (value) => formatNumber(value, numFmt, true);
+  const fmtTick = (value) => formatNumber(value, numFmt, false);
+  // 誤差範囲: a bar through a mark as long as the error (a fixed amount or a share of the value), with a cap at each end.
+  function errorBar(svg, x, value, yOf, opts) {
+    const eb = opts?.errorBars;
+    const v = Number(value);
+    if (!eb || !Number.isFinite(v)) return null;
+    const d = eb.type === "percent" ? (Math.abs(v) * eb.amount) / 100 : eb.amount;
+    if (!(d > 0)) return null;
+    const [top, bottom] = [yOf(v + d), yOf(v - d)];
+    svg.append(s("line", { class: "hs-err", x1: x, x2: x, y1: top, y2: bottom }));
+    for (const y of [top, bottom]) svg.append(s("line", { class: "hs-err", x1: x - 9, x2: x + 9, y1: y, y2: y }));
+    return top;
+  }
+  /** Where a mark's value label goes: its usual place, or above the error bar when there is one. */
+  const labelAbove = (usual, errTop) => (errTop == null ? usual : Math.min(usual, errTop - 12));
 
   function pathLength(points) {
     let len = 0;
@@ -403,7 +431,9 @@
     const padL = axisY ? 54 : 0;
     const padB = axisX ? 50 : 0;
     const plot = padL || padB ? s("g", { transform: `translate(${padL},0)` }) : svg;
-    draw(plot, model, w - padL, ht - padB, opts);
+    const outerFmt = numFmt;
+    numFmt = opts.numFmt || null;
+    try { draw(plot, model, w - padL, ht - padB, opts); } finally { numFmt = outerFmt; }
     if (plot !== svg) svg.append(plot);
     if (axisY) svg.append(s("text", { class: "hs-axis-title", x: 0, y: 0, transform: `translate(22,${(ht - padB) / 2}) rotate(-90)`, "text-anchor": "middle" }, axisY.slice(0, 40)));
     if (axisX) svg.append(s("text", { class: "hs-axis-title", x: padL + (w - padL) / 2, y: ht - 10, "text-anchor": "middle" }, axisX.slice(0, 40)));
@@ -446,7 +476,8 @@
         const bh = (Math.min(max, Math.max(0, value)) / max) * plotH;
         const x = x0 + si * bw;
         svg.append(markTip(s("path", { class: "hs-bar", d: roundTop(x + 2, y0 - bh, Math.max(2, bw - 4), bh, Math.min(8, bw / 4)), fill: SERIES[si % SERIES.length] }), `${label}・${serie.name}：${fmt(value)}`, i * k + si));
-        if (showValues) svg.append(s("text", { class: "hs-val", x: x + bw / 2, y: y0 - bh - 12, "text-anchor": "middle", style: { "font-size": "22px" } }, fmt(value)));
+        const errTop = errorBar(svg, x + bw / 2, value, (v) => y0 - (Math.min(max, Math.max(0, v)) / max) * plotH, opts);
+        if (showValues) svg.append(s("text", { class: "hs-val", x: x + bw / 2, y: labelAbove(y0 - bh - 12, errTop), "text-anchor": "middle", style: { "font-size": "22px" } }, fmt(value)));
       });
       svg.append(s("text", { x: slot * i + slot / 2, y: y0 + 40, "text-anchor": "middle" }, label.length > 10 ? `${label.slice(0, 9)}…` : label));
     });
@@ -495,7 +526,8 @@
       const bh = (Math.min(max, Math.max(0, value)) / max) * plotH;
       const isHot = i === hot && !combo;
       svg.append(markTip(s("path", { class: `hs-bar${isHot ? " is-hot" : ""}`, d: roundTop(x, y0 - bh, bw, bh, 10), fill: combo ? "var(--c-muted)" : isHot ? "var(--accent)" : "var(--c-muted)" }), `${labels[i]}：${fmt(value)}`, i));
-      if (!combo) svg.append(s("text", { class: `hs-val${isHot ? " hot" : ""}`, x: x + bw / 2, y: y0 - bh - 16, "text-anchor": "middle" }, fmt(value)));
+      const errTop = errorBar(svg, x + bw / 2, value, (v) => y0 - (Math.min(max, Math.max(0, v)) / max) * plotH, opts);
+      if (!combo) svg.append(s("text", { class: `hs-val${isHot ? " hot" : ""}`, x: x + bw / 2, y: labelAbove(y0 - bh - 16, errTop), "text-anchor": "middle" }, fmt(value)));
       svg.append(s("text", { x: x + bw / 2, y: y0 + 40, "text-anchor": "middle" }, labels[i]));
     });
     if (opts.trend === "linear" && !combo) trendLine(svg, values.map((v, i) => [slot * i + slot / 2, y0 - (Math.min(max, Math.max(0, v)) / max) * plotH]));
@@ -504,7 +536,7 @@
       const lo2 = second ? Math.min(0, ...line) : 0;
       const hi2 = second ? lo2 + niceMax((Math.max(...line, 0) - lo2) * 1.05 || 1) : max;
       const yLine = (value) => y0 - ((Math.min(hi2, Math.max(lo2, value)) - lo2) / (hi2 - lo2 || 1)) * plotH;
-      if (second) for (let k = 0; k <= 4; k += 1) { const v = lo2 + ((hi2 - lo2) * k) / 4; svg.append(s("text", { class: "hs-tick hs-tick2", x: w - padR + 12, y: yLine(v) + 8, "text-anchor": "start" }, fmt(Math.round(v * 100) / 100))); }
+      if (second) for (let k = 0; k <= 4; k += 1) { const v = lo2 + ((hi2 - lo2) * k) / 4; svg.append(s("text", { class: "hs-tick hs-tick2", x: w - padR + 12, y: yLine(v) + 8, "text-anchor": "start" }, fmtTick(Math.round(v * 100) / 100))); }
       const pts = line.map((value, i) => [padL + slot * i + slot / 2, yLine(value)]);
       const len = pathLength(pts);
       svg.append(s("polyline", { class: "hs-draw", points: pts.map((p) => p.join(",")).join(" "), fill: "none", stroke: "var(--accent)", "stroke-width": 5, "stroke-linejoin": "round", "stroke-linecap": "round", style: { "--len": len } }));
@@ -549,7 +581,7 @@
       const v = lo + ((hi - lo) * k) / 4;
       const y = yOf(v);
       svg.append(s("line", { class: k === 0 ? "hs-axisline" : "hs-grid", x1: left, x2: left + plotW, y1: y, y2: y }));
-      svg.append(s("text", { class: "hs-tick", x: left - 14, y: y + 7, "text-anchor": "end" }, fmt(v)));
+      svg.append(s("text", { class: "hs-tick", x: left - 14, y: y + 7, "text-anchor": "end" }, fmtTick(v)));
     }
     const step = Math.ceil(n / 8);
     labels.forEach((label, i) => { if (i % step === 0 || i === n - 1) svg.append(s("text", { x: xOf(i), y: top + plotH + 42, "text-anchor": "middle" }, label.length > 8 ? `${label.slice(0, 7)}…` : label)); });
@@ -565,8 +597,9 @@
       const hotIndex = serie.values.length - 1;
       pts.forEach(([x, y], i) => {
         const end = i === hotIndex;
+        const errTop = errorBar(svg, x, serie.values[i], yOf, opts);
         svg.append(markTip(s("circle", { cx: x, cy: y, r: end ? 11 : 7, fill: color, stroke: "var(--bg)", "stroke-width": 4 }), `${many ? `${serie.name} ` : ""}${labels[i] ?? ""}：${fmt(serie.values[i])}`, i));
-        if (!many && (end || serie.values[i] === Math.max(...serie.values))) svg.append(s("text", { class: `hs-val${end ? " hot" : ""}`, x, y: y - 24, "text-anchor": "middle" }, fmt(serie.values[i])));
+        if (!many && (end || serie.values[i] === Math.max(...serie.values))) svg.append(s("text", { class: `hs-val${end ? " hot" : ""}`, x, y: labelAbove(y - 24, errTop), "text-anchor": "middle" }, fmt(serie.values[i])));
       });
       if (direct) {
         const [x, y] = pts.at(-1);
@@ -632,7 +665,7 @@
       const v = lo + ((hi - lo) * k) / ticks;
       const y = yOf(v);
       svg.append(s("line", { class: k === 0 ? "hs-axisline" : "hs-grid", x1: left, x2: right, y1: y, y2: y }));
-      svg.append(s("text", { class: "hs-tick", x: left - 12, y: y + 8, "text-anchor": "end" }, fmt(Math.round(v * 100) / 100)));
+      svg.append(s("text", { class: "hs-tick", x: left - 12, y: y + 8, "text-anchor": "end" }, fmtTick(Math.round(v * 100) / 100)));
     }
     return yOf;
   }
@@ -677,7 +710,7 @@
     const xOf = (v) => left + ((v - xlo) / (xhi - xlo || 1)) * (right - left);
     for (let k = 0; k <= 4; k += 1) {
       const v = xlo + ((xhi - xlo) * k) / 4;
-      svg.append(s("text", { class: "hs-tick", x: xOf(v), y: bottom + 42, "text-anchor": k === 4 ? "end" : "middle" }, fmt(Math.round(v * 100) / 100)));
+      svg.append(s("text", { class: "hs-tick", x: xOf(v), y: bottom + 42, "text-anchor": k === 4 ? "end" : "middle" }, fmtTick(Math.round(v * 100) / 100)));
     }
     model.series.forEach((serie, si) => {
       serie.values.forEach((v, i) => svg.append(markTip(s("circle", { class: "hs-dot", cx: xOf(xs[i]), cy: yOf(v), r: 11, fill: SERIES[si % SERIES.length], "fill-opacity": 0.85 }), `${model.series.length > 1 ? `${serie.name}・` : ""}X ${fmt(xs[i])}／Y ${fmt(v)}`, i)));
@@ -867,7 +900,7 @@
     const xOf = (v) => left + ((v - xlo) / (xhi - xlo || 1)) * (right - left);
     for (let k = 0; k <= 4; k += 1) {
       const v = xlo + ((xhi - xlo) * k) / 4;
-      svg.append(s("text", { class: "hs-tick", x: xOf(v), y: bottom + 42, "text-anchor": k === 4 ? "end" : "middle" }, fmt(Math.round(v * 100) / 100)));
+      svg.append(s("text", { class: "hs-tick", x: xOf(v), y: bottom + 42, "text-anchor": k === 4 ? "end" : "middle" }, fmtTick(Math.round(v * 100) / 100)));
     }
     // The big ones behind the small ones.
     ys.map((y, i) => i).sort((a, b) => sizes[b] - sizes[a]).forEach((i) => {
@@ -2779,7 +2812,7 @@
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },
     setSejArt(art) { SEJ_ART = art || {}; },
-    render, mount, fit, brandCheck, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, mediaEl, resolveSrc, chart, chartModel, histogramBins, boxStats, squarify, hierarchy, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
+    render, mount, fit, brandCheck, formatNumber, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, mediaEl, resolveSrc, chart, chartModel, histogramBins, boxStats, squarify, hierarchy, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
     evalFormula, formulaTokens, rankShow, simUpdate, gapUpdate, fmtNum,
   });
   root.SlideEngine = Engine;

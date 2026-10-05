@@ -1338,6 +1338,61 @@ await step("図のスタイル（クイック スタイル）: 角丸・二重�
   await page.keyboard.press("Escape");
 });
 
+await step("グラフの数値の書式（表示単位 万・小数1桁・後ろに円）と誤差範囲（固定値）", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="line"]');
+  await page.waitForTimeout(400);
+  if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
+  const id = (await slide()).elements.at(-1).id;
+  await page.evaluate((id) => {
+    const o = window.__hsej.slide().elements.find((x) => x.id === id);
+    o.chart.labels = ["4月", "5月", "6月"];
+    o.chart.series = [{ name: "売上", values: [12000, 15000, 24000] }];
+  }, id);
+  await redraw();
+  await pickInPane([id]);
+  await tab("グラフのデザイン");
+  const texts = (sel) => page.$$eval(`#stageBody .slide-wrap .hs-obj[data-el="${id}"] ${sel}`, (els) => els.map((t) => t.textContent));
+  await byTitle("データ ラベル・凡例・目盛線");
+  await page.locator('.rb-pop .rb-menu button:has-text("数値の書式（桁数・表示単位・記号）")').click();
+  await page.waitForSelector(".nf-dialog[open]");
+  await page.selectOption('.nf-dialog select[name="表示単位"]', "10000");
+  await page.selectOption('.nf-dialog select[name="小数点以下の桁数"]', "1");
+  await page.fill('.nf-dialog input[name="数値の後ろの記号"]', "円");
+  await page.click(".nf-dialog .nf-ok");
+  await page.waitForTimeout(400);
+  const nf = (await slide()).elements.find((o) => o.id === id).chart.opts?.numFmt;
+  assert(nf?.scale === 10000 && nf.decimals === 1 && nf.suffix === "円", `kept: ${JSON.stringify(nf)}`);
+  const labels = await texts(".hs-val");
+  assert(labels.includes("2.4万円"), `the data label: ${labels}`);
+  const ticks = (await texts(".hs-tick")).filter((t) => /\d/.test(t));
+  assert(ticks.length >= 4 && ticks.every((t) => !t.includes("円") && /万$|^0/.test(t)), `the axis: ${ticks}`);
+  await shot("number-format");
+  // 誤差範囲: ±2000.
+  await byTitle("データ ラベル・凡例・目盛線");
+  await page.locator('.rb-pop .rb-menu button:has-text("誤差範囲を付ける")').click();
+  await page.fill("#askInput", "1");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(250);
+  await page.fill("#askInput", "2000");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(400);
+  assert(JSON.stringify((await slide()).elements.find((o) => o.id === id).chart.opts?.errorBars) === JSON.stringify({ type: "fixed", amount: 2000 }), "errorBars kept");
+  const count = await page.$$eval(`#stageBody .slide-wrap .hs-obj[data-el="${id}"] line.hs-err`, (els) => els.length);
+  assert(count === 9, `a bar and two caps on each of three marks: ${count}`);
+  await shot("error-bars");
+  await byTitle("データ ラベル・凡例・目盛線");
+  await page.locator('.rb-pop .rb-menu button:has-text("誤差範囲をなくす")').click();
+  await byTitle("データ ラベル・凡例・目盛線");
+  await page.locator('.rb-pop .rb-menu button:has-text("数値の書式をもとに戻す")').click();
+  await page.waitForTimeout(300);
+  const back = (await slide()).elements.find((o) => o.id === id).chart;
+  assert(!back.opts?.errorBars && !back.opts?.numFmt, `both off again: ${JSON.stringify(back.opts)}`);
+  assert((await texts(".hs-val")).includes("24,000"), "numbers as before");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

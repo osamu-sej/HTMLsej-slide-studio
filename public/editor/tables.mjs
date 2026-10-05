@@ -314,6 +314,12 @@ export function createTableUi(editor, app, kit) {
       "-", { head: "データ テーブル（グラフの下に値の表）" },
       { label: "表示する", on: opts.table === true, disabled: !E.TABLE_CHARTS.has(chart()?.chart.type), title: "縦棒・横軸に項目のあるグラフで使えます", run: () => setOpts({ table: true }) },
       { label: "なし", on: !opts.table, run: () => setOpts({ table: undefined }) },
+      "-", { head: "誤差範囲（縦棒・折れ線）" },
+      { label: opts.errorBars ? `誤差範囲（${opts.errorBars.type === "percent" ? `±${opts.errorBars.amount}%` : `±${opts.errorBars.amount}`}）を変える…` : "誤差範囲を付ける…", disabled: !ERROR_CHARTS.has(chart()?.chart.type), title: "縦棒・集合縦棒・折れ線・複合で使えます。固定値かパーセンテージ", run: () => errorBars() },
+      { label: "誤差範囲をなくす", disabled: !opts.errorBars, run: () => setOpts({ errorBars: undefined }) },
+      "-", { head: "数値の書式" },
+      { label: opts.numFmt ? `数値の書式（${numFmtWords(opts.numFmt)}）…` : "数値の書式（桁数・表示単位・記号）…", run: () => numberFormat() },
+      { label: "数値の書式をもとに戻す", disabled: !opts.numFmt, run: () => setOpts({ numFmt: undefined }) },
       "-", { head: "第2軸（複合グラフ）" },
       { label: "折れ線を第2軸にする（右側に別の目盛り）", on: opts.axis2 === true, disabled: chart()?.chart.type !== "combo" || (chart()?.chart.series.length || 0) < 2, title: "複合（棒と折れ線）で系列が2つあるときに使えます", run: () => setOpts({ axis2: opts.axis2 === true ? undefined : true }) },
       "-", { head: "軸ラベル・近似曲線" },
@@ -345,6 +351,7 @@ export function createTableUi(editor, app, kit) {
   }
   const TREND_CHARTS = new Set(["bar", "line", "multi-line", "scatter"]);
   // 軸の書式: the charts whose value axis takes its own minimum and maximum (bars keep their zero line).
+  const ERROR_CHARTS = new Set(["bar", "combo", "clustered-bar", "line", "multi-line"]);
   const BOUND_CHARTS = new Set(["bar", "combo", "clustered-bar", "line", "multi-line", "area", "scatter"]);
   async function axisFormat() {
     const o = chart();
@@ -367,6 +374,42 @@ export function createTableUi(editor, app, kit) {
     setOpts({ axisMin: min, axisMax: max });
   }
   /** 軸ラベル: the titles of the value axis (縦) and the category axis (横). */
+  /** 誤差範囲: ± a fixed amount, or ± a share of each value. */
+  async function errorBars() {
+    const eb = chart()?.chart.opts?.errorBars;
+    const kind = await app.ask("誤差範囲の種類", "1＝固定値（例：±5）、2＝パーセンテージ（例：±10%）", eb?.type === "percent" ? "2" : "1");
+    if (kind == null) return;
+    const percent = kind.trim() === "2";
+    const answer = await app.ask(percent ? "誤差範囲（パーセンテージ）" : "誤差範囲（固定値）", percent ? "値の何％を上下に出すか（1〜100）" : "上下に出す大きさ（0より大きい数）", eb?.type === (percent ? "percent" : "fixed") ? eb.amount : "");
+    if (answer == null) return;
+    const amount = Number(String(answer).replace(/[,，%％\s]/g, ""));
+    if (!Number.isFinite(amount) || amount <= 0 || (percent && amount > 100)) { app.toast(percent ? "1〜100の数で入れてください" : "0より大きい数で入れてください"); return; }
+    setOpts({ errorBars: { type: percent ? "percent" : "fixed", amount } });
+  }
+  const UNIT_CHOICES = [[1, "なし"], [1000, "千"], [10000, "万"], [1000000, "百万"], [100000000, "億"]];
+  const numFmtWords = (nf) => [Number.isInteger(nf.decimals) ? `小数${nf.decimals}桁` : "", nf.scale ? `${(UNIT_CHOICES.find(([v]) => v === nf.scale) || [])[1] || ""}単位` : "", nf.prefix ? `先頭「${nf.prefix}」` : "", nf.suffix ? `末尾「${nf.suffix}」` : ""].filter(Boolean).join("・");
+  /** 数値の書式: decimals, a display unit and signs for the data labels and tips (the axis takes the unit and decimals). */
+  function numberFormat() {
+    const cur = chart()?.chart.opts?.numFmt || {};
+    const select = (label, choices, value) => h("label", { class: "field" }, h("span", {}, label), h("select", { name: label, "aria-label": label }, choices.map(([v, l]) => h("option", { value: String(v), selected: String(v) === String(value) || null }, l))));
+    const text = (label, value, max, placeholder) => h("label", { class: "field" }, h("span", {}, label), h("input", { type: "text", name: label, "aria-label": label, value: value || "", maxlength: String(max), placeholder }));
+    const decimals = select("小数点以下の桁数", [["", "自動"], [0, "0桁"], [1, "1桁"], [2, "2桁"], [3, "3桁"], [4, "4桁"]], cur.decimals ?? "");
+    const scale = select("表示単位", UNIT_CHOICES, cur.scale || 1);
+    const prefix = text("数値の前の記号", cur.prefix, 4, "例：¥");
+    const suffix = text("数値の後ろの記号", cur.suffix, 6, "例：円、%、件");
+    const dialog = h("dialog", { class: "nf-dialog", "aria-label": "数値の書式" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "数値の書式"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body sh-form-col" }, decimals, scale, prefix, suffix, h("p", { class: "hint" }, "データ ラベル・ポイントの説明・データ テーブルには全部が、軸の目盛りには桁数と表示単位が付きます。例：表示単位「万」、後ろの記号「円」で 12,000 → 1.2万円。")),
+      h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"),
+        h("button", { type: "button", class: "btn btn-primary nf-ok", onclick: () => {
+          const v = (label) => dialog.querySelector(`[name="${label}"]`).value;
+          dialog.close();
+          setOpts({ numFmt: { decimals: v("小数点以下の桁数") === "" ? undefined : Number(v("小数点以下の桁数")), scale: Number(v("表示単位")) > 1 ? Number(v("表示単位")) : undefined, prefix: v("数値の前の記号").trim() || undefined, suffix: v("数値の後ろの記号").trim() || undefined } });
+        } }, "OK")));
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => dialog.remove());
+    dialog.showModal();
+  }
   async function axisTitles() {
     const opts = chart()?.chart.opts || {};
     const x = await app.ask("軸ラベル（横軸）", "横軸の名前（空にすると表示しません）", opts.axisX || "");
