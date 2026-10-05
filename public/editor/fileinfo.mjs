@@ -48,6 +48,33 @@ export function deckStats(deck, E) {
   };
 }
 
+/** The paragraphs of words a slide carries: its fields, its lists, its objects' text (tables by cell, charts by title and
+ *  labels) and, if asked, the speaker notes. */
+export function slideParagraphs(slide, E, { notes = false } = {}) {
+  const plain = (text) => String(text ?? "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n").replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+  const out = [];
+  const add = (text) => { for (const line of plain(text).split(/\n/)) if (line.trim()) out.push(line.trim()); };
+  for (const key of ["title", "subtitle", "subhead", "takeaway", "message", "text"]) add(slide?.[key]);
+  for (const key of ["points", "steps", "leftItems", "rightItems", "items"]) for (const item of Array.isArray(slide?.[key]) ? slide[key] : []) add(typeof item === "string" ? item : [item?.title || item?.label, item?.desc].filter(Boolean).join(" "));
+  for (const o of slide?.elements || []) { if (!o.hidden) add(E?.objectText ? E.objectText(o) : o.text); }
+  if (notes) add(slide?.notes);
+  return out;
+}
+
+/** 文字カウント: pages, paragraphs, characters (with and without spaces) and Latin words. */
+export function wordCount(deck, E, { notes = false, hidden = true } = {}) {
+  const slides = (deck?.slides || []).filter((s) => hidden || !s.hidden);
+  const paragraphs = slides.flatMap((s) => slideParagraphs(s, E, { notes }));
+  const text = paragraphs.join("\n");
+  return {
+    pages: slides.length,
+    paragraphs: paragraphs.length,
+    chars: text.replace(/\n/g, "").length,
+    charsNoSpace: text.replace(/\s+/g, "").length,
+    words: (text.match(/[A-Za-z0-9][A-Za-z0-9'’._%-]*/g) || []).length,
+  };
+}
+
 /** ドキュメント検査: what may be left in a deck that should not travel with it. */
 export function inspect(deck, W = 1920, H = 1080) {
   const slides = deck?.slides || [];
@@ -96,6 +123,28 @@ const INSPECT_LABELS = { comments: ["コメント", "件"], notes: ["スピー�
 
 export function createFileInfo(app) {
   const { h, E } = app;
+  /** 校閲 → 文字カウント: the counts of the whole deck, with or without the speaker notes and the hidden slides. */
+  function openWordCount() {
+    const deck = app.deck();
+    if (!deck) return;
+    const list = h("dl", { class: "fi-stats wc-list" });
+    const box = (label, on) => h("label", { class: "sh-choice" }, h("input", { type: "checkbox", checked: on || null, onchange: () => show() }), h("span", {}, label));
+    const notes = box("スピーカー ノートを含める", false);
+    const hidden = box("非表示スライドを含める", true);
+    function show() {
+      const c = wordCount(app.deck(), E, { notes: notes.querySelector("input").checked, hidden: hidden.querySelector("input").checked });
+      list.replaceChildren(...[["スライド", c.pages], ["段落", c.paragraphs], ["文字数（スペースを含めない）", c.charsNoSpace], ["文字数（スペースを含める）", c.chars], ["英数字の単語", c.words]]
+        .flatMap(([k, v]) => [h("dt", {}, k), h("dd", { "data-count": k }, String(v.toLocaleString("ja-JP")))]));
+    }
+    const dialog = h("dialog", { class: "wc-dialog", "aria-label": "文字カウント" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "文字カウント"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body" }, list, notes, hidden, h("p", { class: "hint" }, "タイトル・本文・箇条書き・表・図形やテキスト ボックスの文字を数えます（非表示の部品は除く）。")),
+      h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-primary", onclick: () => dialog.close() }, "閉じる")));
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => dialog.remove());
+    dialog.showModal();
+    show();
+  }
   function open() {
     const deck = app.deck();
     if (!deck) return;
@@ -145,5 +194,5 @@ export function createFileInfo(app) {
     dialog.addEventListener("close", () => dialog.remove());
     dialog.showModal();
   }
-  return { open };
+  return { open, openWordCount };
 }

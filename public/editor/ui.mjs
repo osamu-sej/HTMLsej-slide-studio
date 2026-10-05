@@ -345,7 +345,25 @@ export function createEditorUi(editor, app) {
   const strokeOf = () => { const o = selected()[0]; return o ? E.withDefaults(o).stroke : null; };
   const textColorOf = () => editor.textState()?.color ?? "#1a1a1a";
   // A colour replaces a picture fill (図で塗りつぶし), as in PowerPoint.
-  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color, fillImg: undefined, fillTile: undefined } : null));
+  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color, fillImg: undefined, fillTile: undefined, gradient: undefined } : null));
+  /** 塗りつぶし → グラデーション: a gradient of the SEJ's light fills (kept with its first colour as the fill). */
+  const setGradient = (setKey, directionKey) => editor.apply((o) => {
+    if (!["shape", "text"].includes(o.kind)) return null;
+    const g = ops.makeGradient(setKey, directionKey);
+    return { gradient: g, fill: g.stops[0].color, fillImg: undefined, fillTile: undefined };
+  });
+  const gradientOf = () => editor.selectedObjects().find((o) => o.gradient)?.gradient || null;
+  function gradientDialog() {
+    const current = ops.gradientChoice(gradientOf()) || { set: ops.GRADIENT_SETS[0][0], direction: "down" };
+    const sets = select("色の組み合わせ", ops.GRADIENT_SETS.map(([key, label]) => [key, label]), current.set);
+    const dirs = select("方向", ops.GRADIENT_DIRECTIONS.map(([key, label]) => [key, label]), current.direction);
+    const bar = h("div", { class: "gr-preview", "aria-hidden": "true" });
+    const paint = () => { const g = ops.makeGradient(sets.value, dirs.value); bar.style.background = `linear-gradient(${g.angle + 90}deg, ${g.stops[0].color}, ${g.stops[1].color})`; };
+    sets.addEventListener("change", paint);
+    dirs.addEventListener("change", paint);
+    paint();
+    settingsDialog("gradient-dialog", "グラデーションの塗りつぶし", h("div", {}, labeled("色の組み合わせ", sets), labeled("方向", dirs), bar, h("p", { class: "hint" }, "SEJの淡い面の色だけを使います（文字が読める明るさ）。")), () => setGradient(sets.value, dirs.value));
+  }
   /** 図形の塗りつぶし → 図: a picture from this device fills the selected shapes (cut to their outline). */
   async function pictureFill() {
     const [file] = await app.pickFiles("image/png,image/jpeg,image/webp,image/gif");
@@ -360,6 +378,8 @@ export function createEditorUi(editor, app) {
   const fillExtras = () => [
     { key: "picture", label: "図…", icon: "image", run: () => pictureFill() },
     { key: "tile", label: "図を並べて表示", icon: "grid", on: editor.selectedObjects().some((o) => o.fillTile), disabled: !pictureFilled(), run: () => { const on = !editor.selectedObjects().some((o) => o.fillTile); editor.apply((o) => (o.fillImg ? { fillTile: on || undefined } : null)); } },
+    { key: "gradient", label: "グラデーション…", icon: "gradient", run: () => gradientDialog() },
+    { key: "nogradient", label: "グラデーションを外す", icon: "trash", disabled: !gradientOf(), run: () => editor.apply((o) => (o.gradient ? { gradient: undefined } : null)) },
     { key: "nopicture", label: "図を外す", icon: "trash", disabled: !pictureFilled(), run: () => editor.apply((o) => (o.fillImg ? { fillImg: undefined, fillTile: undefined } : null)) },
   ];
   const setStroke = (color) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { stroke: color, ...(color !== "none" && o.kind !== "line" && E.withDefaults(o).stroke === "none" ? { strokeW: E.withDefaults(o).strokeW || 2 } : {}) } : o.kind === "icon" ? { color } : null));
@@ -1058,6 +1078,7 @@ export function createEditorUi(editor, app) {
         btn("magic", "あふれを|AIで直す", "文字が収まらないスライドをAIで順番に直す", () => app.fixOverflow(), { big: true, enabled: () => app.canFixOverflow() })),
       group("文章校正",
         btn("spell", "スペル|チェック", "入力中の文字のスペルを確かめる（ブラウザの辞書。間違いに赤い波線）", () => app.setSpellcheck(!app.spellcheck()), { big: true, pressed: () => app.spellcheck() }),
+        btn("count", "文字|カウント", "資料全体のスライド数・段落・文字数（スペースあり・なし）・英数字の単語を数える（スピーカー ノートや非表示スライドを含めるかも選べます）", () => app.openWordCount(), { big: true }),
         btn("textCase", "表記ゆれ|チェック", "全角・半角（ＡＩ／AI）、長音（ユーザ／ユーザー）、送り仮名（行う／行なう）のゆれを見つけて統一する", () => app.openProofing(), { big: true }),
         btn("check", "オートコレクトの|オプション", "入力中に (c) を © に、「・ 」「1. 」で始めると箇条書き・段落番号に。種類ごとにオン・オフ", () => app.openAutoCorrect(), { big: true })),
       group("音声",
@@ -1176,9 +1197,17 @@ export function createEditorUi(editor, app) {
   }
   function styleMenu() {
     return (close) => h("div", { class: "rb-styles" }, QUICK_STYLES.map(([label, style]) => {
-      const sample = h("button", { type: "button", title: label, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); editor.apply((o) => (["shape", "text"].includes(o.kind) ? style : null)); } },
+      const sample = h("button", { type: "button", title: label, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); editor.apply((o) => (["shape", "text"].includes(o.kind) ? { ...style, gradient: undefined } : null)); } },
         h("span", { class: "rb-style", style: { background: style.fill === "none" ? "transparent" : style.fill, border: style.stroke !== "none" ? `2px solid ${style.stroke}` : "1px solid transparent", color: style.color } }, "Aa"), h("small", {}, label));
       return sample;
+    }));
+  }
+  /** 図のスタイル: each a little picture frame drawn as it would look; one ⌘Z takes it back. */
+  function pictureStyleMenu() {
+    return (close) => h("div", { class: "rb-styles rb-pic-styles" }, ops.PICTURE_STYLES.map(([label, look]) => {
+      const radius = look.mask === "ellipse" ? "50%" : look.mask === "roundRect" ? "18%" : "0";
+      const frame = h("span", { class: "rb-pic-style", style: { "border-radius": radius, border: look.stroke ? `${Math.max(2, Math.min(7, look.strokeW / 4))}px ${look.cmpd ? "double" : "solid"} ${look.stroke}` : "1px solid #d9d9d9", ...(look.mask === "snip2DiagRect" ? { "clip-path": "polygon(0 0, 85% 0, 100% 15%, 100% 100%, 15% 100%, 0 85%)" } : {}) } });
+      return h("button", { type: "button", title: label, "data-picture-style": label, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? look : null)); } }, frame, h("small", {}, label));
     }));
   }
   function outlineMenu() {
@@ -1352,6 +1381,7 @@ export function createEditorUi(editor, app) {
           ]), { enabled: hasImage })))),
       group("アクセシビリティ", btn("textbox", "代替|テキスト", "画面読み上げが読む図の説明（装飾用にもできます）", () => { const o = one(); if (o) app.editAlt(o.id); }, { big: true, enabled: () => Boolean(one()) })),
       group("図のスタイル",
+        drop("style", "クイック|スタイル", "図のスタイル：枠線・角丸・楕円・二重線などの組み合わせ（SEJの色だけ。図の大きさと修整はそのまま）", () => pictureStyleMenu(), { big: true, enabled: hasImage }),
         drop("outline", "図の枠線", "枠線の色・太さ", () => outlineMenu(), { enabled: hasImage, swatch: strokeOf }),
         drop("mask", "図形に合わせて|切り抜き", "画像を図形の形に切り抜く", () => (close) => h("div", { class: "rb-gallery" }, h("div", { class: "rb-gallery-grid" }, MASKS.map((key) => h("button", { type: "button", title: E.SHAPES[key].label, onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? { mask: key === "rect" ? undefined : key, adj: undefined } : null)); } }, shapeThumb(key))))), { big: true, enabled: hasImage }),
         drop("smartart", "図の|レイアウト", "図のレイアウト：選んだ図をキャプション付きで並べる（横に並べる・2列のグリッド・図と説明）。図とキャプションはグループになります", () => menu(Object.entries(ops.PICTURE_LAYOUTS).map(([kind, label]) => ({ label, run: () => {

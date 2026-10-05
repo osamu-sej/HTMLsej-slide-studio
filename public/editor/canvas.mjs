@@ -12,7 +12,7 @@ const NUDGE = { plain: 5, fine: 1, big: 25 };
 const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96, 120, 150, 200];
 // グリッドとガイド → 間隔 (cm).
 export const GRID_STEPS = [0.1, 0.2, 0.25, 0.5, 1, 2];
-const STYLE_KEYS = ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity", "head", "tail", "headSize", "tailSize", "route", "vertical"];
+const STYLE_KEYS = ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity", "head", "tail", "headSize", "tailSize", "route", "vertical"];
 
 const stored = (key, fallback) => { try { const v = localStorage.getItem(`hsej-editor-${key}`); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } };
 const store = (key, value) => { try { localStorage.setItem(`hsej-editor-${key}`, JSON.stringify(value)); } catch { /* private window */ } };
@@ -1635,7 +1635,10 @@ export function createCanvas(app) {
     const style = ed.painter;
     commit(ops.update(objects(), ids, (o) => {
       const keys = o.kind === "line" ? ["stroke", "strokeW", "dash", "head", "tail", "headSize", "tailSize", "opacity"] : o.kind === "image" ? ["stroke", "strokeW", "dash", "opacity"] : STYLE_KEYS.filter((key) => !["head", "tail", "headSize", "tailSize", "route"].includes(key));
-      return Object.fromEntries(keys.filter((key) => style[key] !== undefined && (style.kind !== "line" || ["stroke", "strokeW", "dash", "opacity"].includes(key) || o.kind === "line")).map((key) => [key, style[key]]));
+      const patch = Object.fromEntries(keys.filter((key) => style[key] !== undefined && (style.kind !== "line" || ["stroke", "strokeW", "dash", "opacity"].includes(key) || o.kind === "line")).map((key) => [key, style[key]]));
+      // A plain fill painted over a gradient takes the gradient off; a gradient brings its first colour as the fill.
+      if (keys.includes("gradient") && style.kind !== "line" && style.fill !== undefined && style.gradient === undefined) patch.gradient = undefined;
+      return patch;
     }), { select: ids });
     if (!style.sticky) ed.painter = null;
     emit();

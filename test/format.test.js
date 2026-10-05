@@ -9,7 +9,7 @@ import test from "node:test";
 import { parseHTML } from "linkedom";
 
 import { cropFill, cropFit, cropToAspect } from "../public/editor/crop.mjs";
-import { FINAL_STATUS, isFinal } from "../public/editor/fileinfo.mjs";
+import { FINAL_STATUS, isFinal, slideParagraphs, wordCount } from "../public/editor/fileinfo.mjs";
 import * as ops from "../public/editor/ops.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -394,4 +394,52 @@ test("再グループ化 and the slide number's first number", async () => {
   assert.equal(page(1, 5).field, "6");
   assert.match(page(1, 5).label, /^2枚目/, "the screen reader says where it really is");
   assert.equal(page(1, 99999).field, "2", "out of range: as before");
+});
+
+test("グラデーション塗りつぶし and 図のスタイル use the SEJ's colours only; 文字カウント counts the words", async () => {
+  const { E } = await loadEngine();
+  const fills = new Set(E.PALETTE.fill.map(([c]) => c));
+  for (const [key] of ops.GRADIENT_SETS) for (const [dir] of ops.GRADIENT_DIRECTIONS) {
+    const g = ops.makeGradient(key, dir);
+    assert.ok(g.stops.every((stop) => fills.has(stop.color)), `${key}: light fills of the palette`);
+    assert.deepEqual(ops.gradientChoice(g), { set: key, direction: dir }, "which one it is");
+  }
+  assert.equal(ops.gradientChoice({ angle: 33, stops: [{ at: 0, color: "#ff0000" }, { at: 1, color: "#00ff00" }] }), null, "one brought over from PowerPoint is none of them");
+  assert.deepEqual(ops.makeGradient("nope", "nope"), ops.makeGradient("blue-white", "down"), "unknown names: the first");
+  const shape = E.normalizeObject({ id: "g", kind: "shape", shape: "rect", x: 0, y: 0, w: 300, h: 200, fill: "#dce4f2", gradient: ops.makeGradient("blue-white", "right") });
+  assert.equal(shape.gradient.stops.length, 2);
+  const slide = { type: "blank", title: "検証", elements: [shape] };
+  const el = E.render(slide, { mode: "present", index: 1, deck: { slides: [{ type: "title", title: "表紙" }, slide], theme: "sej" } });
+  const grad = el.querySelector(`.hs-obj[data-el="g"] linearGradient`);
+  assert.ok(grad, "drawn as a gradient");
+  assert.equal(grad.getAttribute("x1"), "0%", "running to the right");
+  // The painter and the defaults keep a gradient; a plain fill takes it off.
+  assert.ok(ops.DEFAULT_STYLE_KEYS.shape.includes("gradient") && ops.DEFAULT_STYLE_KEYS.text.includes("gradient"));
+  assert.equal(ops.update([{ id: "g", gradient: ops.makeGradient("gray") }], ["g"], { fill: "#fff", gradient: undefined })[0].gradient, undefined);
+  // 図のスタイル: a frame and an outline that normalize as they are, and a plain style puts the picture back to none.
+  for (const [label, look] of ops.PICTURE_STYLES) {
+    const o = E.normalizeObject({ id: "p", kind: "image", src: "asset:storeOperations", x: 0, y: 0, w: 400, h: 300, ...Object.fromEntries(Object.entries(look).filter(([, v]) => v !== undefined)) });
+    if (look.mask) assert.equal(o.mask, look.mask, label);
+    if (look.stroke) { assert.ok(E.BRAND_LINES.has(look.stroke.slice(1)), `${label}: an SEJ line colour`); assert.equal(o.stroke, look.stroke); }
+    if (look.cmpd) assert.equal(o.cmpd, look.cmpd, label);
+  }
+  const framed = { id: "p", kind: "image", mask: "ellipse", stroke: "#1f3864", strokeW: 18, cmpd: "dbl", cap: "round", x: 0, y: 0, w: 10, h: 10 };
+  const plain = ops.update([framed], ["p"], ops.PICTURE_STYLES[0][1])[0];
+  assert.deepEqual(Object.keys(plain).sort(), ["h", "id", "kind", "w", "x", "y"], "the first style takes every frame and outline off");
+  // 文字カウント: titles, lists, text boxes, table cells and (when asked) notes; hidden slides optional.
+  const deck = { slides: [
+    { type: "content", title: "売上の報告", points: ["A店は 120% です", { title: "B店" }], notes: "ここで説明" },
+    { type: "blank", title: "表", elements: [{ id: "t", kind: "text", x: 0, y: 0, w: 100, h: 50, text: "<p>一行目</p><p>二行目 ok</p>" }, { id: "h", kind: "text", hidden: true, x: 0, y: 0, w: 1, h: 1, text: "<p>隠れた文字</p>" }] },
+    { type: "blank", title: "非表示", hidden: true },
+  ] };
+  assert.deepEqual(slideParagraphs(deck.slides[0], E).slice(0, 2), ["売上の報告", "A店は 120% です"]);
+  assert.ok(!slideParagraphs(deck.slides[1], E).includes("隠れた文字"), "a hidden object is not counted");
+  const all = wordCount(deck, E);
+  assert.equal(all.pages, 3);
+  assert.equal(all.paragraphs, 7, "売上の報告・A店・B店・表・一行目・二行目 ok・非表示");
+  assert.ok(all.chars > all.charsNoSpace, "the spaces are counted in one");
+  assert.ok(all.words >= 4, "Latin and number words: A, 120, B, ok");
+  assert.equal(wordCount(deck, E, { hidden: false }).pages, 2);
+  assert.equal(wordCount(deck, E, { notes: true }).paragraphs, 8);
+  assert.deepEqual(wordCount({ slides: [] }, E), { pages: 0, paragraphs: 0, chars: 0, charsNoSpace: 0, words: 0 });
 });

@@ -1263,6 +1263,81 @@ print(json.dumps({"runs": runs, "navy": sum(navy(p) for p in row)}))`, strip]).t
   assert(!(await slide()).elements.find((x) => x.id === id).join, "⌘Z takes the last change back");
 });
 
+await step("塗りつぶし → グラデーション: 淡茶 → 茶・右方向で左が薄く右が濃い（SEJの色だけ）、単色を選ぶと外れる", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.locator('.rb-pop .rb-gallery button[data-shape="rect"]').last().click();
+  await page.mouse.click(...(await stageAt(900, 500)));
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((o) => o.id === id), { w: 800, h: 300, x: 500, y: 400 }), id);
+  await redraw();
+  await pickInPane([id]);
+  await tab("図形の書式");
+  await byTitle("図形の塗りつぶし");
+  await page.locator('.rb-pop [data-fill="gradient"]').click();
+  await page.waitForSelector(".gradient-dialog[open]");
+  await page.selectOption('.gradient-dialog select[aria-label="色の組み合わせ"]', "brown");
+  await page.selectOption('.gradient-dialog select[aria-label="方向"]', "right");
+  await page.click(".gradient-dialog .fmt-ok");
+  await page.waitForTimeout(400);
+  const o = (await slide()).elements.find((x) => x.id === id);
+  assert(o.gradient?.angle === 0 && o.gradient.stops[0].color === "#f5f0ea" && o.gradient.stops[1].color === "#d6c9b8" && o.fill === "#f5f0ea", `the gradient: ${JSON.stringify([o.gradient, o.fill])}`);
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  const r = await page.locator(`#stageBody .slide-wrap .hs-obj[data-el="${id}"]`).first().boundingBox();
+  const strip = join(outDir, "format-gradient-strip.png");
+  await page.screenshot({ path: strip, clip: { x: r.x + 4, y: r.y + r.height / 2, width: r.width - 8, height: 4 } });
+  const lum = JSON.parse(execFileSync("python3", ["-c", `
+from PIL import Image; import json, sys
+im = Image.open(sys.argv[1]).convert("RGB"); w, h = im.size
+print(json.dumps({"left": sum(im.getpixel((6, 1))) / 3, "right": sum(im.getpixel((w - 7, 1))) / 3}))`, strip]).toString());
+  assert(lum.left > lum.right + 15, `light on the left, deeper on the right: ${JSON.stringify(lum)}`);
+  await shot("gradient");
+  await pickInPane([id]);
+  await byTitle("図形の塗りつぶし");
+  await page.locator('.rb-pop .rb-sw').nth(2).click();
+  await page.waitForTimeout(300);
+  assert(!(await slide()).elements.find((x) => x.id === id).gradient, "a plain colour takes the gradient off");
+  await undo();
+  assert((await slide()).elements.find((x) => x.id === id).gradient, "⌘Z brings it back");
+});
+
+await step("図のスタイル（クイック スタイル）: 角丸・二重線の枠（濃紺）、標準で戻る; 文字カウント", async () => {
+  await freshSlide();
+  const pic = await insertPicture(logo);
+  await pickInPane([pic.id]);
+  await tab("図の形式");
+  await byTitle("図のスタイル：枠線・角丸");
+  await page.locator('.rb-pop [data-picture-style="角丸・二重線の枠（濃紺）"]').click();
+  await page.waitForTimeout(300);
+  let o = (await slide()).elements.find((x) => x.id === pic.id);
+  assert(o.mask === "roundRect" && o.stroke === "#1f3864" && o.cmpd === "dbl" && o.strokeW === 18, `the style: ${JSON.stringify([o.mask, o.stroke, o.cmpd, o.strokeW])}`);
+  assert(await page.evaluate((id) => Boolean(document.querySelector(`#stageBody .slide-wrap .hs-obj[data-el="${id}"] mask`)), pic.id), "the double line is drawn");
+  await shot("picture-style");
+  await byTitle("図のスタイル：枠線・角丸");
+  await page.locator('.rb-pop [data-picture-style="標準（枠なし）"]').click();
+  await page.waitForTimeout(300);
+  o = (await slide()).elements.find((x) => x.id === pic.id);
+  assert(!o.mask && !o.stroke && !o.cmpd, `back to plain: ${JSON.stringify([o.mask, o.stroke, o.cmpd])}`);
+  assert(o.w === pic.w && o.src === pic.src, "the size and the picture stay");
+  // 文字カウント.
+  await page.keyboard.press("Escape");
+  await tab("校閲");
+  await ribbonBtn("文字");
+  await page.waitForSelector(".wc-dialog[open]");
+  const count = (name) => page.textContent(`.wc-dialog [data-count="${name}"]`).then((t) => Number(t.replace(/,/g, "")));
+  const total = (await deck()).slides.length;
+  assert((await count("スライド")) === total, `slides: ${await count("スライド")} of ${total}`);
+  const withoutNotes = await count("段落");
+  await page.check('.wc-dialog label:has-text("スピーカー ノートを含める") input');
+  await page.waitForTimeout(200);
+  assert((await count("段落")) >= withoutNotes, "the notes add paragraphs");
+  assert((await count("文字数（スペースを含める）")) >= (await count("文字数（スペースを含めない）")) && (await count("文字数（スペースを含めない）")) > 100, "characters counted");
+  await shot("word-count");
+  await page.keyboard.press("Escape");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

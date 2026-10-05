@@ -34,8 +34,8 @@ export function newId() {
 // 既定の図形に設定・既定のテキスト ボックスに設定・既定の線に設定 (kept on the deck as deck.objectDefaults): which
 // parts of an object's look a new shape, text box or line starts with — never its words, place or size.
 export const DEFAULT_STYLE_KEYS = {
-  shape: ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
-  text: ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
+  shape: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
+  text: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
   line: ["stroke", "strokeW", "dash", "head", "tail", "headSize", "tailSize", "route", "opacity"],
 };
 
@@ -814,6 +814,52 @@ const toShares = (values) => { const sum = values.reduce((a, b) => a + b, 0) || 
 export function makeTable(rows, cols, box) {
   return { kind: "table", ...box, cells: Array.from({ length: rows }, () => Array.from({ length: cols }, () => ({}))), cols: Array.from({ length: cols }, () => 1 / cols), rows: Array.from({ length: rows }, () => 1 / rows) };
 }
+// ---------------------------------------------------------------- 塗りつぶし → グラデーション, 図のスタイル
+
+// Gradients of the SEJ's own light fills (text sits on them, so nothing dark): [key, label, from, to].
+export const GRADIENT_SETS = [
+  ["blue-white", "淡青 → 白", "#dce4f2", "#ffffff"],
+  ["white-blue", "白 → 淡青", "#ffffff", "#dce4f2"],
+  ["blue", "ごく淡い青 → 青灰", "#f1f5fb", "#b7c3da"],
+  ["brown", "淡茶 → 茶", "#f5f0ea", "#d6c9b8"],
+  ["gray", "薄いグレー → グレー", "#f2f2f2", "#d9d9d9"],
+  ["blue-brown", "淡青 → 淡茶", "#dce4f2", "#f5f0ea"],
+];
+// Where the first colour is: angle 0 = left, 90 = top (the colour runs towards the opposite side).
+export const GRADIENT_DIRECTIONS = [["down", "下方向", 90], ["up", "上方向", -90], ["right", "右方向", 0], ["left", "左方向", 180], ["diagDown", "右下方向", 45], ["diagUp", "右上方向", -45]];
+
+/** A linear gradient of one of the sets, running in one of the directions (the object's `gradient`). */
+export function makeGradient(setKey, directionKey = "down") {
+  const set = GRADIENT_SETS.find(([key]) => key === setKey) || GRADIENT_SETS[0];
+  const dir = GRADIENT_DIRECTIONS.find(([key]) => key === directionKey) || GRADIENT_DIRECTIONS[0];
+  return { angle: dir[2], stops: [{ at: 0, color: set[2], opacity: 1 }, { at: 1, color: set[3], opacity: 1 }] };
+}
+
+/** Which set and direction a gradient is (null when it is none of them, as one brought over from PowerPoint). */
+export function gradientChoice(g) {
+  if (!g?.stops || g.stops.length !== 2) return null;
+  const set = GRADIENT_SETS.find(([, , from, to]) => from === g.stops[0].color && to === g.stops[1].color);
+  const dir = GRADIENT_DIRECTIONS.find(([, , angle]) => angle === g.angle);
+  return set && dir ? { set: set[0], direction: dir[0] } : null;
+}
+
+// 図のスタイル (the quick styles of a picture): a frame (a mask) and an outline from the SEJ's colours — [label, change].
+const NO_LOOK = { mask: undefined, adj: undefined, stroke: undefined, strokeW: undefined, dash: undefined, cmpd: undefined, cap: undefined, join: undefined };
+export const PICTURE_STYLES = [
+  ["標準（枠なし）", { ...NO_LOOK }],
+  ["細い枠線（濃紺）", { ...NO_LOOK, stroke: "#1f3864", strokeW: 3 }],
+  ["太い枠線（グレー）", { ...NO_LOOK, stroke: "#808080", strokeW: 12 }],
+  ["太い枠線（青灰）", { ...NO_LOOK, stroke: "#b7c3da", strokeW: 24 }],
+  ["二重線の枠（濃紺）", { ...NO_LOOK, stroke: "#1f3864", strokeW: 18, cmpd: "dbl" }],
+  ["角丸", { ...NO_LOOK, mask: "roundRect" }],
+  ["角丸・細い枠線（濃紺）", { ...NO_LOOK, mask: "roundRect", stroke: "#1f3864", strokeW: 3 }],
+  ["角丸・二重線の枠（濃紺）", { ...NO_LOOK, mask: "roundRect", stroke: "#1f3864", strokeW: 18, cmpd: "dbl" }],
+  ["楕円", { ...NO_LOOK, mask: "ellipse" }],
+  ["楕円・太い枠線（グレー）", { ...NO_LOOK, mask: "ellipse", stroke: "#808080", strokeW: 12 }],
+  ["斜めカット", { ...NO_LOOK, mask: "snip2DiagRect" }],
+  ["斜めカット・細い枠線（濃紺）", { ...NO_LOOK, mask: "snip2DiagRect", stroke: "#1f3864", strokeW: 3 }],
+];
+
 // ---------------------------------------------------------------- tables pasted from Excel or a web page
 
 /** Tab-separated text as rows of strings (Excel's own quoting: "…" around a cell with a tab, a newline or a quote;

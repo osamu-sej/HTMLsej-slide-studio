@@ -2501,6 +2501,7 @@ const editorApp = {
   allTexts: () => { const out = []; if (state.deck) { eachText(state.deck.slides, (t) => { out.push(t); return t; }); eachObjectText(state.deck.slides, (t) => { out.push(t); return t; }); } return out; },
   transformAllText: (fn) => transformAllText(fn),
   openFileInfo: () => fileInfo.open(),
+  openWordCount: () => fileInfo.openWordCount(),
   // スライドの再利用・アウトラインからスライド・フォト アルバム.
   translate: (to, scope) => translateDeck(to, scope),
   // 図の形式 → 背景の削除・透明色・図の圧縮 (public/editor/picture.mjs).
