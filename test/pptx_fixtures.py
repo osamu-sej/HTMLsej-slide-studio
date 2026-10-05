@@ -185,6 +185,13 @@ def sej_deck() -> bytes:
     back = points.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(9.5), Inches(5.6), Inches(2.6), Inches(0.6))
     back.text_frame.text = "全体像へ戻る"
     back.click_action.target_slide = body
+    # 線の書式設定: a thick double line with round ends and bevelled corners.
+    back.line.width = Pt(6)
+    back.line.color.rgb = RGBColor(0x1F, 0x38, 0x64)
+    ln = back._element.spPr.find(f"{A}ln")
+    ln.set("cap", "rnd")
+    ln.set("cmpd", "dbl")
+    ln.append(ln.makeelement(f"{A}bevel", {}))
     # マウスの通過: moving the pointer onto it goes on to the next slide.
     bcnv = back._element.nvSpPr.cNvPr
     bcnv.append(bcnv.makeelement(f"{A}hlinkHover", {"{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id": "", "action": "ppaction://hlinkshowjump?jump=nextslide"}))

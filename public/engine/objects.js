@@ -1266,6 +1266,12 @@
     solid: ["実線", null], roundDot: ["丸点線", [0, 2]], squareDot: ["角点線", [1, 1]], dash: ["破線", [4, 3]], dashDot: ["一点鎖線", [4, 3, 1, 3]],
     longDash: ["長破線", [8, 3]], longDashDot: ["長鎖線", [8, 3, 1, 3]], longDashDotDot: ["長二点鎖線", [8, 3, 1, 3, 1, 3]],
   };
+  // 線の書式設定: how a line ends (線端), how its corners join (結合点) and a compound line (複合線: the stroke cut
+  // down its middle by one see-through band, or two).
+  const LINE_CAPS = { flat: "フラット", round: "丸", square: "四角" };
+  const LINE_JOINS = { round: "丸", bevel: "面取り", miter: "とがった" };
+  const COMPOUNDS = { dbl: "二重線", tri: "三重線" };
+  const SVG_CAPS = { flat: "butt", round: "round", square: "square" };
   const ARROWHEADS = { none: "なし", triangle: "矢印", arrow: "開いた矢印", stealth: "鋭い矢印", diamond: "ひし形", oval: "円" };
   const ROUTES = { straight: "直線", elbow: "カギ線", curve: "曲線" };
   const AUTOFIT = { none: "自動調整なし", shrink: "はみ出す場合だけ自動調整する", grow: "テキストに合わせて図形のサイズを調整する" };
@@ -1387,7 +1393,9 @@
     const now = new Date();
     for (const f of fields) {
       const kind = f.getAttribute("data-field");
-      f.textContent = kind === "slideno" ? String(story.no[ctx.index] ?? (ctx.index ?? 0) + 1)
+      // スライド番号の開始番号 (deck.firstNumber) shifts the number the field shows.
+      const first = Number.isInteger(ctx.deck?.firstNumber) && ctx.deck.firstNumber >= 0 && ctx.deck.firstNumber <= 9999 ? ctx.deck.firstNumber : 1;
+      f.textContent = kind === "slideno" ? String((story.no[ctx.index] ?? (ctx.index ?? 0) + 1) + first - 1)
         : kind === "total" ? String(story.order.length || (ctx.deck?.slides || []).length || 1)
           : `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
     }
@@ -1582,6 +1590,9 @@
     const strokeW = num(raw.strokeW, 0.5, 200);
     if (strokeW != null) o.strokeW = strokeW;
     if (DASHES[raw.dash] && raw.dash !== "solid") o.dash = raw.dash;
+    if (LINE_CAPS[raw.cap] && raw.cap !== "flat") o.cap = raw.cap;
+    if (LINE_JOINS[raw.join]) o.join = raw.join;
+    if (COMPOUNDS[raw.cmpd]) o.cmpd = raw.cmpd;
     if (["shape", "text"].includes(o.kind)) {
       o.shape = SHAPES[raw.shape] ? raw.shape : "rect";
       // A shape drawn by hand keeps its points (fractions of its box).
@@ -1905,6 +1916,8 @@
     // 軸ラベル and 近似曲線 (グラフ要素).
     for (const key of ["axisX", "axisY"]) if (typeof raw.opts?.[key] === "string" && raw.opts[key].trim()) opts[key] = raw.opts[key].trim().slice(0, 40);
     if (raw.opts?.trend === "linear") opts.trend = "linear";
+    // 第2軸: a combination chart's line on a scale of its own (drawn down the right side).
+    if (raw.opts?.axis2 === true && out.type === "combo" && series.length >= 2) opts.axis2 = true;
     // 軸の書式: the value axis's own minimum and maximum (a maximum above the minimum).
     const axisMin = raw.opts?.axisMin != null && raw.opts.axisMin !== "" ? Number(raw.opts.axisMin) : NaN;
     const axisMax = raw.opts?.axisMax != null && raw.opts.axisMax !== "" ? Number(raw.opts.axisMax) : NaN;
@@ -2671,6 +2684,17 @@
 
   // ---------------------------------------------------------------- rendering
 
+  /** 複合線 (二重線・三重線): a mask that cuts see-through bands down the middle of a stroke `sw` wide (two bands
+   *  of a third for a double line; two fifths and a fifth between them for a triple one). Returns its `url(#…)`. */
+  function compoundMask(svg, cmpd, sw, paths, cap, join) {
+    const id = `cm${newId().slice(1)}`;
+    const mask = s("mask", { id, maskUnits: "userSpaceOnUse", x: -4000, y: -4000, width: 12000, height: 12000 });
+    mask.append(s("rect", { x: -4000, y: -4000, width: 12000, height: 12000, fill: "#ffffff" }));
+    const bands = cmpd === "tri" ? [[(sw * 3) / 5, "#000000"], [sw / 5, "#ffffff"]] : [[sw / 3, "#000000"]];
+    for (const [width, color] of bands) for (const d of paths) mask.append(s("path", { d, fill: "none", stroke: color, "stroke-width": r2(width), "stroke-linecap": cap || "butt", "stroke-linejoin": join || "miter", "stroke-miterlimit": 8 }));
+    svg.append(s("defs", {}, mask));
+    return `url(#${id})`;
+  }
   const dashArray = (dash, sw) => {
     const pattern = DASHES[dash]?.[1];
     return pattern ? pattern.map((v) => r2(Math.max(v * sw, v === 0 ? 0.01 : 1))).join(" ") : null;
@@ -2729,12 +2753,17 @@
         s("image", { href: picture, x: 0, y: 0, width: pw, height: ph, preserveAspectRatio: "xMidYMid slice" }))));
       paint = `url(#${id})`;
     }
+    const cap = o.cap ? SVG_CAPS[o.cap] : o.dash === "roundDot" ? "round" : null;
+    const join = o.join || "miter";
+    // 複合線: the fill is drawn alone and the outline over it, cut by a mask.
+    const compound = sw && o.cmpd ? compoundMask(svg, o.cmpd, sw, g.paths, cap, join) : null;
     for (const d of g.paths) {
       svg.append(s("path", {
         d, fill: paint === "none" ? "none" : paint, "fill-opacity": fill !== "none" && o.fillOpacity != null ? o.fillOpacity : null, "fill-rule": g.rule,
-        stroke: sw ? o.stroke : "none", "stroke-width": sw || null, "stroke-dasharray": sw ? dashArray(o.dash, sw) : null,
-        "stroke-linecap": o.dash === "roundDot" ? "round" : null, "stroke-linejoin": "miter", "stroke-miterlimit": 8,
+        stroke: sw && !compound ? o.stroke : "none", "stroke-width": sw && !compound ? sw : null, "stroke-dasharray": sw && !compound ? dashArray(o.dash, sw) : null,
+        "stroke-linecap": cap, "stroke-linejoin": join, "stroke-miterlimit": 8,
       }));
+      if (compound) svg.append(s("path", { d, fill: "none", stroke: o.stroke, "stroke-width": sw, "stroke-dasharray": dashArray(o.dash, sw), "stroke-linecap": cap, "stroke-linejoin": join, "stroke-miterlimit": 8, mask: compound }));
     }
     for (const extra of g.extras) {
       if (extra.tone === "line") svg.append(s("path", { d: extra.d, fill: "none", stroke: sw ? o.stroke : "rgba(0,0,0,.45)", "stroke-width": sw || 1.5 }));
@@ -3443,7 +3472,9 @@
     if (o.stroke !== "none") {
       const g = geometry(o.mask || "rect", o.w, o.h, o.adj);
       const svg = s("svg", { class: "hs-obj-geom", width: r2(o.w), height: r2(o.h), viewBox: `0 0 ${r2(Math.max(1, o.w))} ${r2(Math.max(1, o.h))}`, overflow: "visible", "aria-hidden": "true" });
-      for (const d of g.paths) svg.append(s("path", { d, fill: "none", stroke: o.stroke, "stroke-width": o.strokeW, "stroke-dasharray": dashArray(o.dash, o.strokeW) }));
+      const cap = o.cap ? SVG_CAPS[o.cap] : null;
+      const compound = o.cmpd ? compoundMask(svg, o.cmpd, o.strokeW, g.paths, cap, o.join || "miter") : null;
+      for (const d of g.paths) svg.append(s("path", { d, fill: "none", stroke: o.stroke, "stroke-width": o.strokeW, "stroke-dasharray": dashArray(o.dash, o.strokeW), "stroke-linecap": cap, "stroke-linejoin": o.join || null, ...(compound ? { mask: compound } : {}) }));
       rotEl.append(svg);
     }
   }
@@ -3477,7 +3508,10 @@
       else { const pts = [a, ...route.pts.slice(1, -1), b]; d = `M${pts.map((p) => P(...p)).join(" L")}`; }
     }
     if (sw) {
-      svg.append(s("path", { d, fill: "none", stroke: o.stroke, "stroke-width": sw, "stroke-dasharray": dashArray(o.dash, sw), "stroke-linecap": o.dash === "roundDot" ? "round" : "butt", "stroke-linejoin": "round" }));
+      const cap = o.cap ? SVG_CAPS[o.cap] : o.dash === "roundDot" ? "round" : "butt";
+      const join = o.join || "round";
+      const compound = o.cmpd ? compoundMask(svg, o.cmpd, sw, [d], cap, join) : null;
+      svg.append(s("path", { d, fill: "none", stroke: o.stroke, "stroke-width": sw, "stroke-dasharray": dashArray(o.dash, sw), "stroke-linecap": cap, "stroke-linejoin": join, ...(compound ? { mask: compound } : {}) }));
       for (const head of heads) svg.append(s("path", { d: head.d, fill: head.fill ? o.stroke : "none", stroke: o.stroke, "stroke-width": head.fill ? Math.max(1, sw * 0.4) : sw, "stroke-linejoin": "miter", "stroke-linecap": "round" }));
     }
     const fx = h("div", { class: "hs-obj-fx" });
@@ -3700,7 +3734,7 @@
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
-    LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
+    LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,

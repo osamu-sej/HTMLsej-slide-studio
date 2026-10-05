@@ -655,6 +655,8 @@ function normalizeDeck(value, base = null) {
     motion: normalizeMotion(meta.motion ?? base?.motion ?? DEFAULT_MOTION),
     memo: String(meta.memo ?? base?.memo ?? "").slice(0, 2000),
     ...(guidesOf(meta.guides ?? base?.guides) ? { guides: guidesOf(meta.guides ?? base?.guides) } : {}),
+    // スライド番号の開始番号.
+    ...(firstNumberOf(meta.firstNumber ?? base?.firstNumber) !== 1 ? { firstNumber: firstNumberOf(meta.firstNumber ?? base?.firstNumber) } : {}),
     // 既定の図形・テキスト ボックス・線.
     ...(objectDefaultsIn(meta.objectDefaults ?? base?.objectDefaults) ? { objectDefaults: objectDefaultsIn(meta.objectDefaults ?? base?.objectDefaults) } : {}),
     // スライド ショーの設定・目的別スライド ショー.
@@ -671,6 +673,12 @@ function guidesOf(value) {
   const list = (axis, max) => (Array.isArray(value?.[axis]) ? value[axis] : []).map(Number).filter((v) => Number.isFinite(v) && v >= 0 && v <= max).slice(0, 20).map((v) => Math.round(v * 2) / 2);
   const guides = { x: list("x", E.W), y: list("y", E.H) };
   return guides.x.length || guides.y.length ? guides : null;
+}
+
+/** スライド番号の開始番号 (deck.firstNumber): a whole number from 0 to 9999; 1 unless set. */
+function firstNumberOf(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 && n <= 9999 ? n : 1;
 }
 
 /** 既定の図形・テキスト ボックス・線 (deck.objectDefaults): each look checked as an object's would be, in SEJ colours. */
@@ -2411,6 +2419,9 @@ const editorApp = {
   // デザイン: the deck's motion; スライド ショー; 校閲 (the ribbon's tabs around the slide).
   deckMotion: () => (state.deck ? { transition: state.deck.transition || "fade", ...normalizeMotion(state.deck.motion || DEFAULT_MOTION) } : null),
   setDeckDesign: (patch) => setDeckDesign(patch),
+  // スライドのサイズ → スライド番号の開始番号 (deck.firstNumber).
+  firstNumber: () => firstNumberOf(state.deck?.firstNumber),
+  setFirstNumber: (value) => { if (!state.deck || isFinal(state.deck)) return; const n = firstNumberOf(value); if (n === firstNumberOf(state.deck.firstNumber)) return; pushUndo(); if (n === 1) delete state.deck.firstNumber; else state.deck.firstNumber = n; markChanged({ structural: true }); toast(`スライド番号は ${n} から始まります`); },
   openDesign: () => openDesignDialog(),
   presentFrom: (index) => openPresenter(index),
   presentCustom: (id) => openPresenter(0, { custom: id }),
@@ -2490,6 +2501,7 @@ const editorApp = {
   allTexts: () => { const out = []; if (state.deck) { eachText(state.deck.slides, (t) => { out.push(t); return t; }); eachObjectText(state.deck.slides, (t) => { out.push(t); return t; }); } return out; },
   transformAllText: (fn) => transformAllText(fn),
   openFileInfo: () => fileInfo.open(),
+  openWordCount: () => fileInfo.openWordCount(),
   // スライドの再利用・アウトラインからスライド・フォト アルバム.
   translate: (to, scope) => translateDeck(to, scope),
   // 図の形式 → 背景の削除・透明色・図の圧縮 (public/editor/picture.mjs).

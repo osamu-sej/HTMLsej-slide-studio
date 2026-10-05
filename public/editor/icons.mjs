@@ -39,6 +39,8 @@ const P = {
   indentMore: '<path d="M4 6h16M10 10h10M10 14h10M4 18h16M4 9.5l3 2.5-3 2.5"/>',
   indentLess: '<path d="M4 6h16M10 10h10M10 14h10M4 18h16M7 9.5 4 12l3 2.5"/>',
   lineSpacing: '<path d="M10 6h10M10 12h10M10 18h10M5 4v16M3 6l2-2 2 2M3 18l2 2 2-2"/>',
+  count: '<path d="M5 18V6l5 12V6M14 6h5M14 12h5M14 18h5"/>',
+  gradient: '<defs><linearGradient id="icg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="currentColor" stop-opacity=".08"/><stop offset="1" stop-color="currentColor" stop-opacity=".6"/></linearGradient></defs><rect x="3" y="5" width="18" height="14" rx="1.5" fill="url(#icg)"/>',
   textLeft: '<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',
   textCenter: '<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',
   textRight: '<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',

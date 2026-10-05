@@ -34,8 +34,8 @@ export function newId() {
 // 既定の図形に設定・既定のテキスト ボックスに設定・既定の線に設定 (kept on the deck as deck.objectDefaults): which
 // parts of an object's look a new shape, text box or line starts with — never its words, place or size.
 export const DEFAULT_STYLE_KEYS = {
-  shape: ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
-  text: ["fill", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
+  shape: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
+  text: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
   line: ["stroke", "strokeW", "dash", "head", "tail", "headSize", "tailSize", "route", "opacity"],
 };
 
@@ -814,6 +814,164 @@ const toShares = (values) => { const sum = values.reduce((a, b) => a + b, 0) || 
 export function makeTable(rows, cols, box) {
   return { kind: "table", ...box, cells: Array.from({ length: rows }, () => Array.from({ length: cols }, () => ({}))), cols: Array.from({ length: cols }, () => 1 / cols), rows: Array.from({ length: rows }, () => 1 / rows) };
 }
+// ---------------------------------------------------------------- 塗りつぶし → グラデーション, 図のスタイル
+
+// Gradients of the SEJ's own light fills (text sits on them, so nothing dark): [key, label, from, to].
+export const GRADIENT_SETS = [
+  ["blue-white", "淡青 → 白", "#dce4f2", "#ffffff"],
+  ["white-blue", "白 → 淡青", "#ffffff", "#dce4f2"],
+  ["blue", "ごく淡い青 → 青灰", "#f1f5fb", "#b7c3da"],
+  ["brown", "淡茶 → 茶", "#f5f0ea", "#d6c9b8"],
+  ["gray", "薄いグレー → グレー", "#f2f2f2", "#d9d9d9"],
+  ["blue-brown", "淡青 → 淡茶", "#dce4f2", "#f5f0ea"],
+];
+// Where the first colour is: angle 0 = left, 90 = top (the colour runs towards the opposite side).
+export const GRADIENT_DIRECTIONS = [["down", "下方向", 90], ["up", "上方向", -90], ["right", "右方向", 0], ["left", "左方向", 180], ["diagDown", "右下方向", 45], ["diagUp", "右上方向", -45]];
+
+/** A linear gradient of one of the sets, running in one of the directions (the object's `gradient`). */
+export function makeGradient(setKey, directionKey = "down") {
+  const set = GRADIENT_SETS.find(([key]) => key === setKey) || GRADIENT_SETS[0];
+  const dir = GRADIENT_DIRECTIONS.find(([key]) => key === directionKey) || GRADIENT_DIRECTIONS[0];
+  return { angle: dir[2], stops: [{ at: 0, color: set[2], opacity: 1 }, { at: 1, color: set[3], opacity: 1 }] };
+}
+
+/** Which set and direction a gradient is (null when it is none of them, as one brought over from PowerPoint). */
+export function gradientChoice(g) {
+  if (!g?.stops || g.stops.length !== 2) return null;
+  const set = GRADIENT_SETS.find(([, , from, to]) => from === g.stops[0].color && to === g.stops[1].color);
+  const dir = GRADIENT_DIRECTIONS.find(([, , angle]) => angle === g.angle);
+  return set && dir ? { set: set[0], direction: dir[0] } : null;
+}
+
+// 図のスタイル (the quick styles of a picture): a frame (a mask) and an outline from the SEJ's colours — [label, change].
+const NO_LOOK = { mask: undefined, adj: undefined, stroke: undefined, strokeW: undefined, dash: undefined, cmpd: undefined, cap: undefined, join: undefined };
+export const PICTURE_STYLES = [
+  ["標準（枠なし）", { ...NO_LOOK }],
+  ["細い枠線（濃紺）", { ...NO_LOOK, stroke: "#1f3864", strokeW: 3 }],
+  ["太い枠線（グレー）", { ...NO_LOOK, stroke: "#808080", strokeW: 12 }],
+  ["太い枠線（青灰）", { ...NO_LOOK, stroke: "#b7c3da", strokeW: 24 }],
+  ["二重線の枠（濃紺）", { ...NO_LOOK, stroke: "#1f3864", strokeW: 18, cmpd: "dbl" }],
+  ["角丸", { ...NO_LOOK, mask: "roundRect" }],
+  ["角丸・細い枠線（濃紺）", { ...NO_LOOK, mask: "roundRect", stroke: "#1f3864", strokeW: 3 }],
+  ["角丸・二重線の枠（濃紺）", { ...NO_LOOK, mask: "roundRect", stroke: "#1f3864", strokeW: 18, cmpd: "dbl" }],
+  ["楕円", { ...NO_LOOK, mask: "ellipse" }],
+  ["楕円・太い枠線（グレー）", { ...NO_LOOK, mask: "ellipse", stroke: "#808080", strokeW: 12 }],
+  ["斜めカット", { ...NO_LOOK, mask: "snip2DiagRect" }],
+  ["斜めカット・細い枠線（濃紺）", { ...NO_LOOK, mask: "snip2DiagRect", stroke: "#1f3864", strokeW: 3 }],
+];
+
+// ---------------------------------------------------------------- tables pasted from Excel or a web page
+
+/** Tab-separated text as rows of strings (Excel's own quoting: "…" around a cell with a tab, a newline or a quote;
+ *  a doubled quote inside). */
+export function parseTsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  const src = String(text ?? "").replace(/\r\n?/g, "\n");
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"' && src[i + 1] === '"') { cell += '"'; i += 1; } else if (ch === '"') quoted = false; else cell += ch;
+    } else if (ch === '"' && cell === "") quoted = true;
+    else if (ch === "\t") { row.push(cell); cell = ""; }
+    else if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+    else cell += ch;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+const escapeHtml = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const NUMERIC = /^[-+−▲△]?[¥￥$€£]?\s?[-+−]?\d[\d,，]*(\.\d+)?\s?[%％円万億千]*$/;
+/** A pasted cell: its words as paragraphs, numbers aligned right (as the Excel sheet shows them). */
+function pastedCell(raw, extra = {}) {
+  const lines = String(raw ?? "").replace(/\u00a0/g, " ").split(/\n/).map((line) => line.replace(/[ \t]+/g, " ").trim());
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  const words = lines.join("\n").trim();
+  if (!words) return { ...extra };
+  return { text: lines.map((line) => `<p>${escapeHtml(line) || "<br>"}</p>`).join(""), ...(lines.length === 1 && NUMERIC.test(words) ? { align: "right" } : {}), ...extra };
+}
+
+/** The first table of some HTML (Excel's and web pages' clipboard) as a grid of cells, merged spans kept; null
+ *  when there is none. `parse` turns HTML into a document (the browser's DOMParser by default). */
+export function tableGridFromHtml(html, parse = (source) => new DOMParser().parseFromString(source, "text/html")) {
+  if (!/<table[\s>]/i.test(String(html || ""))) return null;
+  const table = parse(String(html)).querySelector("table");
+  if (!table) return null;
+  const grid = [];
+  const trs = [...table.querySelectorAll("tr")].filter((tr) => tr.closest("table") === table);
+  trs.forEach((tr, r) => {
+    grid[r] = grid[r] || [];
+    let c = 0;
+    for (const td of [...tr.children].filter((el) => /^(td|th)$/i.test(el.tagName))) {
+      while (grid[r][c]) c += 1;
+      const cs = Math.min(30, Math.max(1, parseInt(td.getAttribute("colspan"), 10) || 1));
+      const rs = Math.min(100, Math.max(1, parseInt(td.getAttribute("rowspan"), 10) || 1));
+      for (const br of td.querySelectorAll("br")) br.replaceWith("\n");
+      const style = String(td.getAttribute("style") || "");
+      const bold = /^th$/i.test(td.tagName) ? false : /font-weight:\s*(bold|[6-9]00)/i.test(style) || (td.children.length === 1 && /^(b|strong)$/i.test(td.children[0].tagName) && td.children[0].textContent.trim() === td.textContent.trim());
+      const aligned = /text-align:\s*(left|center|right)/i.exec(style) || /^(left|center|right)$/i.exec(td.getAttribute("align") || "");
+      const cell = pastedCell(td.textContent, { ...(bold ? { bold: true } : {}), ...(aligned ? { align: aligned[1].toLowerCase() } : {}), ...(rs > 1 ? { rs } : {}), ...(cs > 1 ? { cs } : {}) });
+      for (let i = 0; i < rs; i += 1) for (let j = 0; j < cs; j += 1) {
+        grid[r + i] = grid[r + i] || [];
+        grid[r + i][c + j] = i === 0 && j === 0 ? cell : { merged: true };
+      }
+      c += cs;
+    }
+  });
+  const width = Math.max(0, ...grid.map((row) => row.length));
+  const rows = grid.filter(Boolean).map((row) => Array.from({ length: width }, (_, c) => row[c] || {}));
+  return rows.length && width ? rows : null;
+}
+
+/** Cells on the clipboard, if what is there is a sheet of them: a table in the HTML, or tab-separated text with more
+ *  than one cell. Null for plain words. */
+export function clipboardGrid({ text = "", html = "" } = {}, parse) {
+  let rows = null;
+  try { rows = tableGridFromHtml(html, parse); } catch { rows = null; }
+  if (!rows && /\t/.test(text || "")) {
+    const sheet = parseTsv(text).filter((row, i, all) => row.length > 1 || row[0]?.trim() || i < all.length - 1);
+    const width = Math.max(0, ...sheet.map((row) => row.length));
+    if (sheet.length && width > 1) rows = sheet.map((row) => Array.from({ length: width }, (_, c) => pastedCell(row[c])));
+  }
+  if (!rows || (rows.length === 1 && rows[0].length === 1)) return null;
+  return { rows: rows.slice(0, 100).map((row) => row.slice(0, 30)) };
+}
+
+/** A new table object from pasted cells, sized for the slide (smaller words for a big sheet). */
+export function tableFromGrid(grid) {
+  const rows = grid.rows.length;
+  const cols = grid.rows[0].length;
+  const w = Math.min(1640, Math.max(480, cols * 240));
+  const rowH = Math.max(36, Math.min(76, Math.floor(820 / rows)));
+  const o = makeTable(rows, cols, { x: Math.round((W - w) / 2), y: 200, w, h: rows * rowH });
+  o.cells = grid.rows.map((row) => row.map((cell) => ({ ...cell })));
+  if (rows > 10 || cols > 7) o.fs = 18; else if (rows > 7 || cols > 5) o.fs = 22; else if (rows > 5) o.fs = 24;
+  return o;
+}
+
+/** Paste a sheet into a table starting at row r0, column c0: the table grows by rows and columns as it needs, the
+ *  words go into the cells (a merged cell takes the words of its first position). */
+export function tableFill(o, r0, c0, grid) {
+  let t = o;
+  const needRows = r0 + grid.rows.length;
+  const needCols = c0 + Math.max(...grid.rows.map((row) => row.length));
+  while (t.cells.length < Math.min(500, needRows)) t = tableInsertRow(t, t.cells.length);
+  while (t.cells[0].length < Math.min(100, needCols)) t = tableInsertCol(t, t.cells[0].length);
+  const cells = t.cells.map((row) => row.map((cell) => ({ ...cell })));
+  grid.rows.forEach((row, i) => row.forEach((cell, j) => {
+    const target = cells[r0 + i]?.[c0 + j];
+    if (!target || target.merged) return;
+    const { text, align, bold } = cell;
+    if (text) target.text = text; else delete target.text;
+    if (align) target.align = align;
+    if (bold) target.bold = true;
+  }));
+  return { ...t, cells };
+}
+
 /** Insert a row before `at` (a merge crossing that line grows over the new row); the table grows by one row. */
 export function tableInsertRow(o, at) {
   const grid = expand(o.cells);

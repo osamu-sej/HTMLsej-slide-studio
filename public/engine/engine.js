@@ -479,14 +479,19 @@
     const bottom = 64;
     const plotH = h - top - bottom;
     const combo = model.type === "combo" && model.series[1];
-    const all = combo ? [...values, ...model.series[1].values] : values;
+    // 第2軸 (a combination chart): the line reads on a scale of its own, drawn down the right side, and the bars'
+    // scale down the left, so a line of rates sits over bars of amounts.
+    const second = Boolean(combo && opts.axis2);
+    const [padL, padR] = second ? [92, 92] : [0, 0];
+    const all = combo && !second ? [...values, ...model.series[1].values] : values;
     const max = axisBounds(opts, 0, niceMax(Math.max(...all, 0) * 1.05))[1];
-    const slot = w / n;
+    const slot = (w - padL - padR) / n;
     const bw = Math.min(110, slot * 0.54);
     const y0 = top + plotH;
-    svg.append(s("line", { class: "hs-axisline", x1: 0, x2: w, y1: y0, y2: y0 }));
+    if (second) valueAxis(svg, 0, max, { left: padL, right: w - padR, top, bottom: y0 });
+    else svg.append(s("line", { class: "hs-axisline", x1: 0, x2: w, y1: y0, y2: y0 }));
     values.forEach((value, i) => {
-      const x = slot * i + (slot - bw) / 2;
+      const x = padL + slot * i + (slot - bw) / 2;
       const bh = (Math.min(max, Math.max(0, value)) / max) * plotH;
       const isHot = i === hot && !combo;
       svg.append(markTip(s("path", { class: `hs-bar${isHot ? " is-hot" : ""}`, d: roundTop(x, y0 - bh, bw, bh, 10), fill: combo ? "var(--c-muted)" : isHot ? "var(--accent)" : "var(--c-muted)" }), `${labels[i]}：${fmt(value)}`, i));
@@ -496,12 +501,16 @@
     if (opts.trend === "linear" && !combo) trendLine(svg, values.map((v, i) => [slot * i + slot / 2, y0 - (Math.min(max, Math.max(0, v)) / max) * plotH]));
     if (combo) {
       const line = model.series[1].values;
-      const pts = line.map((value, i) => [slot * i + slot / 2, y0 - (Math.min(max, Math.max(0, value)) / max) * plotH]);
+      const lo2 = second ? Math.min(0, ...line) : 0;
+      const hi2 = second ? lo2 + niceMax((Math.max(...line, 0) - lo2) * 1.05 || 1) : max;
+      const yLine = (value) => y0 - ((Math.min(hi2, Math.max(lo2, value)) - lo2) / (hi2 - lo2 || 1)) * plotH;
+      if (second) for (let k = 0; k <= 4; k += 1) { const v = lo2 + ((hi2 - lo2) * k) / 4; svg.append(s("text", { class: "hs-tick hs-tick2", x: w - padR + 12, y: yLine(v) + 8, "text-anchor": "start" }, fmt(Math.round(v * 100) / 100))); }
+      const pts = line.map((value, i) => [padL + slot * i + slot / 2, yLine(value)]);
       const len = pathLength(pts);
       svg.append(s("polyline", { class: "hs-draw", points: pts.map((p) => p.join(",")).join(" "), fill: "none", stroke: "var(--accent)", "stroke-width": 5, "stroke-linejoin": "round", "stroke-linecap": "round", style: { "--len": len } }));
       pts.forEach(([x, y], i) => {
         svg.append(markTip(s("circle", { cx: x, cy: y, r: 9, fill: "var(--accent)", stroke: "var(--bg)", "stroke-width": 4 }), `${labels[i]}：${fmt(line[i])}`, i));
-        if (i === pts.length - 1) svg.append(s("text", { class: "hs-val hot", x, y: y - 22, "text-anchor": "middle" }, fmt(line[i])));
+        if (i === pts.length - 1 || (second && n <= 12)) svg.append(s("text", { class: "hs-val hot", x, y: y - 22, "text-anchor": "middle" }, fmt(line[i])));
       });
     }
   }
@@ -2313,7 +2322,10 @@
     // Numbers count the story only; a deep-dive page carries the number of the slide it belongs to.
     const total = story.order.length || 1;
     const drillParent = slide?.drillOf && index > 0 ? story.parent[index] ?? null : null;
-    const pageNo = story.no[index] ?? index + 1;
+    const place = story.no[index] ?? index + 1;
+    // スライド番号の開始番号 (デザイン → スライドのサイズ): the first page may be numbered 0, or 5…
+    const first = Number.isInteger(deck.firstNumber) && deck.firstNumber >= 0 && deck.firstNumber <= 9999 ? deck.firstNumber : 1;
+    const pageNo = place + first - 1;
     const theme = THEME_IDS.has(deck.theme) ? deck.theme : DEFAULT_THEME;
     const meta = THEMES.find((entry) => entry.id === theme);
     const sourcePage = slide?.master === "source";
@@ -2357,7 +2369,7 @@
       "data-draw": sourcePage || motion.draw === false ? "off" : "on",
       "data-kinetic": kinetic, "data-backdrop": backdropKind,
       "data-drill-of": drillParent != null ? String(drillParent) : null,
-      role: "img", "aria-label": `${pageNo}枚目${drillParent != null ? "の深掘り" : ""}：${strip(slide?.title || TYPE_LABELS[type] || "")}`,
+      role: "img", "aria-label": `${place}枚目${drillParent != null ? "の深掘り" : ""}：${strip(slide?.title || TYPE_LABELS[type] || "")}`,
     });
     // The SEJ template's colours are the brand's: a deck accent applies to the other themes only.
     if (deck.accent && !sej && /^#[0-9a-f]{6}$/i.test(deck.accent)) {

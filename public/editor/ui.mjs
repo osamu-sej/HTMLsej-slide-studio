@@ -345,7 +345,25 @@ export function createEditorUi(editor, app) {
   const strokeOf = () => { const o = selected()[0]; return o ? E.withDefaults(o).stroke : null; };
   const textColorOf = () => editor.textState()?.color ?? "#1a1a1a";
   // A colour replaces a picture fill (図で塗りつぶし), as in PowerPoint.
-  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color, fillImg: undefined, fillTile: undefined } : null));
+  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color, fillImg: undefined, fillTile: undefined, gradient: undefined } : null));
+  /** 塗りつぶし → グラデーション: a gradient of the SEJ's light fills (kept with its first colour as the fill). */
+  const setGradient = (setKey, directionKey) => editor.apply((o) => {
+    if (!["shape", "text"].includes(o.kind)) return null;
+    const g = ops.makeGradient(setKey, directionKey);
+    return { gradient: g, fill: g.stops[0].color, fillImg: undefined, fillTile: undefined };
+  });
+  const gradientOf = () => editor.selectedObjects().find((o) => o.gradient)?.gradient || null;
+  function gradientDialog() {
+    const current = ops.gradientChoice(gradientOf()) || { set: ops.GRADIENT_SETS[0][0], direction: "down" };
+    const sets = select("色の組み合わせ", ops.GRADIENT_SETS.map(([key, label]) => [key, label]), current.set);
+    const dirs = select("方向", ops.GRADIENT_DIRECTIONS.map(([key, label]) => [key, label]), current.direction);
+    const bar = h("div", { class: "gr-preview", "aria-hidden": "true" });
+    const paint = () => { const g = ops.makeGradient(sets.value, dirs.value); bar.style.background = `linear-gradient(${g.angle + 90}deg, ${g.stops[0].color}, ${g.stops[1].color})`; };
+    sets.addEventListener("change", paint);
+    dirs.addEventListener("change", paint);
+    paint();
+    settingsDialog("gradient-dialog", "グラデーションの塗りつぶし", h("div", {}, labeled("色の組み合わせ", sets), labeled("方向", dirs), bar, h("p", { class: "hint" }, "SEJの淡い面の色だけを使います（文字が読める明るさ）。")), () => setGradient(sets.value, dirs.value));
+  }
   /** 図形の塗りつぶし → 図: a picture from this device fills the selected shapes (cut to their outline). */
   async function pictureFill() {
     const [file] = await app.pickFiles("image/png,image/jpeg,image/webp,image/gif");
@@ -360,10 +378,14 @@ export function createEditorUi(editor, app) {
   const fillExtras = () => [
     { key: "picture", label: "図…", icon: "image", run: () => pictureFill() },
     { key: "tile", label: "図を並べて表示", icon: "grid", on: editor.selectedObjects().some((o) => o.fillTile), disabled: !pictureFilled(), run: () => { const on = !editor.selectedObjects().some((o) => o.fillTile); editor.apply((o) => (o.fillImg ? { fillTile: on || undefined } : null)); } },
+    { key: "gradient", label: "グラデーション…", icon: "gradient", run: () => gradientDialog() },
+    { key: "nogradient", label: "グラデーションを外す", icon: "trash", disabled: !gradientOf(), run: () => editor.apply((o) => (o.gradient ? { gradient: undefined } : null)) },
     { key: "nopicture", label: "図を外す", icon: "trash", disabled: !pictureFilled(), run: () => editor.apply((o) => (o.fillImg ? { fillImg: undefined, fillTile: undefined } : null)) },
   ];
   const setStroke = (color) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { stroke: color, ...(color !== "none" && o.kind !== "line" && E.withDefaults(o).stroke === "none" ? { strokeW: E.withDefaults(o).strokeW || 2 } : {}) } : o.kind === "icon" ? { color } : null));
   const setStrokeWidth = (pt) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { strokeW: ops.fromPt(pt), ...(E.withDefaults(o).stroke === "none" && o.kind !== "line" ? { stroke: "#1f3864" } : {}) } : o.kind === "icon" ? { strokeW: Math.max(0.5, pt) } : null));
+  /** 線の書式設定 (複合線・線端・結合点): a change to the outline of whatever has one. */
+  const setLineLook = (patch) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? patch : null));
   const setDash = (dash) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { dash: dash === "solid" ? undefined : dash } : null));
 
   async function insertImages() {
@@ -723,6 +745,15 @@ export function createEditorUi(editor, app) {
     });
   }
 
+  /** デザイン → スライドのサイズ: the slide's size (the template's wide screen) and the number the first slide carries. */
+  function slideSizeDialog() {
+    const first = number("firstNumber", app.firstNumber(), { step: 1, min: 0, max: 9999 });
+    const body = h("div", {},
+      fieldset("スライドのサイズ", h("p", { class: "hint" }, "ワイド画面（16:9・13.33×7.5インチ）です。SEJテンプレートの大きさなので変えられません。")),
+      fieldset("スライド番号", labeled("開始番号", first), h("p", { class: "hint" }, "最初のスライドにつける番号です（表紙を0にして、次を1から数える、など）。ページ番号に出ます。")));
+    settingsDialog("size-dialog", "スライドのサイズ", body, () => app.setFirstNumber(first.value));
+  }
+
   function ribbonOptions(anchor) {
     openPop(anchor, menu([
       { head: "リボンの表示オプション" },
@@ -970,7 +1001,7 @@ export function createEditorUi(editor, app) {
       group("デザイナー",
         btn("magic", "デザイン|アイデア", "このスライドの見せ方の違う3つの案をAIが作り、並べて選べます（Codexに接続しているとき。右の「AIと話す」に届きます）", () => app.designIdeas(), { big: true, enabled: () => app.canAi() })),
       group("ユーザー設定",
-        btn("slide", "スライドの|サイズ", "ワイド画面（16:9・13.33×7.5インチ）：SEJテンプレートの大きさです", () => app.toast("スライドのサイズはワイド画面（16:9・13.33×7.5インチ）です（SEJテンプレート）"), { big: true }),
+        btn("slide", "スライドの|サイズ", "スライドのサイズ（ワイド画面 16:9・SEJテンプレート）とスライド番号の開始番号", () => slideSizeDialog(), { big: true }),
         btn("background", "背景の|書式設定", "このスライドの背景（SEJの淡い色・図と透明度・並べて表示）。すべてに適用・背景のリセットも", () => app.formatBackground(), { big: true, enabled: () => Boolean(app.slide()) }),
         col(btn("chartBar", "数字を数え上げる", "数字のカウントアップとグラフが伸びる動き（資料全体）", () => app.setDeckDesign({ motion: { numbers: !motion().numbers } }), { pressed: () => motion().numbers }),
           btn("spot", "波紋を広げる", "SEJの波紋を発表中にゆっくり広げる", () => app.setDeckDesign({ motion: { ambient: !motion().ambient } }), { pressed: () => motion().ambient }),
@@ -1047,6 +1078,7 @@ export function createEditorUi(editor, app) {
         btn("magic", "あふれを|AIで直す", "文字が収まらないスライドをAIで順番に直す", () => app.fixOverflow(), { big: true, enabled: () => app.canFixOverflow() })),
       group("文章校正",
         btn("spell", "スペル|チェック", "入力中の文字のスペルを確かめる（ブラウザの辞書。間違いに赤い波線）", () => app.setSpellcheck(!app.spellcheck()), { big: true, pressed: () => app.spellcheck() }),
+        btn("count", "文字|カウント", "資料全体のスライド数・段落・文字数（スペースあり・なし）・英数字の単語を数える（スピーカー ノートや非表示スライドを含めるかも選べます）", () => app.openWordCount(), { big: true }),
         btn("textCase", "表記ゆれ|チェック", "全角・半角（ＡＩ／AI）、長音（ユーザ／ユーザー）、送り仮名（行う／行なう）のゆれを見つけて統一する", () => app.openProofing(), { big: true }),
         btn("check", "オートコレクトの|オプション", "入力中に (c) を © に、「・ 」「1. 」で始めると箇条書き・段落番号に。種類ごとにオン・オフ", () => app.openAutoCorrect(), { big: true })),
       group("音声",
@@ -1155,6 +1187,7 @@ export function createEditorUi(editor, app) {
       "-", { head: "グループ化" },
       { label: "グループ化", icon: "group", keys: "⌘G", run: () => editor.groupSelection(), disabled: editor.selection.length < 2 },
       { label: "グループ解除", icon: "ungroup", keys: "⇧⌘G", run: () => editor.ungroupSelection(), disabled: !selected().some((o) => o.group) },
+      { label: "再グループ化", icon: "group", title: "グループ解除したオブジェクトをもう一度グループにします（解除したオブジェクトを選んでから）", run: () => editor.regroupSelection(), disabled: !editor.canRegroup() },
       "-", { head: "回転" },
       { label: "右へ90°回転", icon: "rotate", run: () => editor.rotateSelection(90) },
       { label: "左へ90°回転", icon: "rotate", run: () => editor.rotateSelection(-90) },
@@ -1164,9 +1197,17 @@ export function createEditorUi(editor, app) {
   }
   function styleMenu() {
     return (close) => h("div", { class: "rb-styles" }, QUICK_STYLES.map(([label, style]) => {
-      const sample = h("button", { type: "button", title: label, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); editor.apply((o) => (["shape", "text"].includes(o.kind) ? style : null)); } },
+      const sample = h("button", { type: "button", title: label, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); editor.apply((o) => (["shape", "text"].includes(o.kind) ? { ...style, gradient: undefined } : null)); } },
         h("span", { class: "rb-style", style: { background: style.fill === "none" ? "transparent" : style.fill, border: style.stroke !== "none" ? `2px solid ${style.stroke}` : "1px solid transparent", color: style.color } }, "Aa"), h("small", {}, label));
       return sample;
+    }));
+  }
+  /** 図のスタイル: each a little picture frame drawn as it would look; one ⌘Z takes it back. */
+  function pictureStyleMenu() {
+    return (close) => h("div", { class: "rb-styles rb-pic-styles" }, ops.PICTURE_STYLES.map(([label, look]) => {
+      const radius = look.mask === "ellipse" ? "50%" : look.mask === "roundRect" ? "18%" : "0";
+      const frame = h("span", { class: "rb-pic-style", style: { "border-radius": radius, border: look.stroke ? `${Math.max(2, Math.min(7, look.strokeW / 4))}px ${look.cmpd ? "double" : "solid"} ${look.stroke}` : "1px solid #d9d9d9", ...(look.mask === "snip2DiagRect" ? { "clip-path": "polygon(0 0, 85% 0, 100% 15%, 100% 100%, 15% 100%, 0 85%)" } : {}) } });
+      return h("button", { type: "button", title: label, "data-picture-style": label, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? look : null)); } }, frame, h("small", {}, label));
     }));
   }
   function outlineMenu() {
@@ -1175,8 +1216,22 @@ export function createEditorUi(editor, app) {
       box.append(colors(E.PALETTE.line, strokeOf(), setStroke, { none: "枠線なし" })(close));
       box.append(h("div", { class: "rb-menu-head" }, "太さ"), h("div", { class: "rb-menu" }, LINE_WIDTHS.map((pt) => h("button", { type: "button", onclick: () => { close(); setStrokeWidth(pt); } }, h("span", { class: "rb-weight", style: { "border-top-width": `${Math.max(1, pt)}px` } }), h("span", {}, `${pt} pt`)))));
       box.append(h("div", { class: "rb-menu-head" }, "実線/点線"), h("div", { class: "rb-menu" }, Object.entries(E.DASHES).map(([key, [label]]) => h("button", { type: "button", onclick: () => { close(); setDash(key); } }, dashSample(key), h("span", {}, label)))));
+      box.append(h("div", { class: "rb-menu-head" }, "複合線"), h("div", { class: "rb-menu", "data-lines": "cmpd" }, [["", "一重線"], ...Object.entries(E.COMPOUNDS)].map(([key, label]) => h("button", { type: "button", "data-cmpd": key, onclick: () => { close(); setLineLook({ cmpd: key || undefined }); } }, lineLookSample("cmpd", key), h("span", {}, label)))));
+      box.append(h("div", { class: "rb-menu-head" }, "線端"), h("div", { class: "rb-menu", "data-lines": "cap" }, Object.entries(E.LINE_CAPS).map(([key, label]) => h("button", { type: "button", "data-cap": key, onclick: () => { close(); setLineLook({ cap: key === "flat" ? undefined : key }); } }, lineLookSample("cap", key), h("span", {}, label)))));
+      box.append(h("div", { class: "rb-menu-head" }, "結合点"), h("div", { class: "rb-menu", "data-lines": "join" }, Object.entries(E.LINE_JOINS).map(([key, label]) => h("button", { type: "button", "data-join": key, onclick: () => { close(); setLineLook({ join: key }); } }, lineLookSample("join", key), h("span", {}, label)))));
       return box;
     };
+  }
+  /** A small picture of a compound line, a line end or a join. */
+  function lineLookSample(kind, key) {
+    const svg = E.s("svg", { viewBox: "0 0 60 14", width: 60, height: 14, "aria-hidden": "true" });
+    const put = (attrs) => svg.append(E.s("path", { fill: "none", stroke: "currentColor", ...attrs }));
+    if (kind === "cmpd") {
+      const rows = key === "tri" ? [2.5, 7, 11.5] : key === "dbl" ? [4, 10] : [7];
+      for (const y of rows) put({ d: `M2 ${y}H58`, "stroke-width": key === "tri" ? 2 : key === "dbl" ? 3 : 2.5 });
+    } else if (kind === "cap") put({ d: "M12 7H48", "stroke-width": 8, "stroke-linecap": { flat: "butt", round: "round", square: "square" }[key] });
+    else put({ d: "M10 12L30 3L50 12", "stroke-width": 6, "stroke-linejoin": key });
+    return svg;
   }
   function dashSample(key) {
     const svg = E.s("svg", { viewBox: "0 0 60 8", width: 60, height: 8, "aria-hidden": "true" });
@@ -1326,6 +1381,7 @@ export function createEditorUi(editor, app) {
           ]), { enabled: hasImage })))),
       group("アクセシビリティ", btn("textbox", "代替|テキスト", "画面読み上げが読む図の説明（装飾用にもできます）", () => { const o = one(); if (o) app.editAlt(o.id); }, { big: true, enabled: () => Boolean(one()) })),
       group("図のスタイル",
+        drop("style", "クイック|スタイル", "図のスタイル：枠線・角丸・楕円・二重線などの組み合わせ（SEJの色だけ。図の大きさと修整はそのまま）", () => pictureStyleMenu(), { big: true, enabled: hasImage }),
         drop("outline", "図の枠線", "枠線の色・太さ", () => outlineMenu(), { enabled: hasImage, swatch: strokeOf }),
         drop("mask", "図形に合わせて|切り抜き", "画像を図形の形に切り抜く", () => (close) => h("div", { class: "rb-gallery" }, h("div", { class: "rb-gallery-grid" }, MASKS.map((key) => h("button", { type: "button", title: E.SHAPES[key].label, onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? { mask: key === "rect" ? undefined : key, adj: undefined } : null)); } }, shapeThumb(key))))), { big: true, enabled: hasImage }),
         drop("smartart", "図の|レイアウト", "図のレイアウト：選んだ図をキャプション付きで並べる（横に並べる・2列のグリッド・図と説明）。図とキャプションはグループになります", () => menu(Object.entries(ops.PICTURE_LAYOUTS).map(([kind, label]) => ({ label, run: () => {
@@ -1611,6 +1667,9 @@ export function createEditorUi(editor, app) {
         line("その他の色", h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(o.stroke) ? o.stroke : "#1f3864", onchange: (event) => setStroke(event.target.value) }), eyedrop(setStroke)),
         line("幅", numberInput(ops.toPt(o.strokeW || 2), (v) => setStrokeWidth(Math.max(0.25, v)), { step: 0.25, min: 0.25, unit: "pt" })),
         line("実線/点線", choice(Object.entries(E.DASHES).map(([k, [label]]) => [k, label]), o.dash || "solid", setDash)),
+        line("複合線", choice([["", "一重線"], ...Object.entries(E.COMPOUNDS)], o.cmpd || "", (v) => setLineLook({ cmpd: v || undefined }))),
+        line("線端", choice(Object.entries(E.LINE_CAPS), o.cap || "flat", (v) => setLineLook({ cap: v === "flat" ? undefined : v }))),
+        line("結合点", choice(Object.entries(E.LINE_JOINS), o.join || (o.kind === "line" ? "round" : "miter"), (v) => setLineLook({ join: v }))),
         chosen.some((x) => x.kind === "line") ? [
           line("線の種類", choice(Object.entries(E.ROUTES), o.route || "straight", (v) => editor.apply((x) => (x.kind === "line" ? { route: v === "straight" ? undefined : v } : null)))),
           line("始点の形", choice(Object.entries(E.ARROWHEADS), o.head || "none", (v) => editor.apply((x) => (x.kind === "line" ? { head: v === "none" ? undefined : v } : null)))),
