@@ -1729,3 +1729,7 @@ audio.trim-media { background: transparent; }
 .cf-section legend { font-weight: 700; font-size: 12px; color: var(--ink-2); padding: 0 6px; }
 .cf-section .field { margin-bottom: 8px; }
 .cf-section .cf-check { display: flex; flex-direction: row; align-items: center; gap: 8px; grid-column: 1 / -1; }
+.cf-section .cf-wide { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: center; margin-bottom: 8px; }
+.cf-section .cf-wide .cf-label, .cf-section .cf-wide .hint { flex: 0 0 100%; margin: 0; font-size: 12px; font-weight: 700; color: var(--ink-2); }
+.cf-section .cf-wide .hint { font-weight: 400; color: var(--muted); }
+.cf-section .cf-wide .cf-check { margin-bottom: 0; grid-column: auto; }

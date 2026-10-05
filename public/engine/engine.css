@@ -643,6 +643,8 @@
 .hs-chart .hs-axis-title { fill: var(--muted); font-size: 21px; font-weight: 700; }
 .hs-chart .hs-trend { fill: none; opacity: .85; }
 .hs-chart .hs-trend-eq { fill: var(--ink); font-size: 20px; font-weight: 600; }
+.hs-chart .hs-slice-label { fill: var(--ink); font-size: 22px; font-weight: 600; }
+.hs-chart .hs-leader { stroke: var(--muted); stroke-width: 2; stroke-linejoin: round; }
 .hs-chart .hs-err { stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
 .hs-chart .hs-tm-name, .hs-chart .hs-sb-name { font-weight: 700; }
 .hs-obj-media .hs-video-poster { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: cover; }

@@ -1895,6 +1895,9 @@
   const LINE_CHART_KINDS = new Set(["line", "multi-line"]);
   const STEP_CHARTS = new Set(["line", "multi-line", "area", "scatter"]);
   const MARKER_SHAPES = ["none", "circle", "square", "diamond", "triangle"];
+  const LABEL_ALL_CHARTS = new Set(["line", "multi-line", "area", "clustered-bar"]);
+  const LABEL_POS_CHARTS = new Set(["line", "multi-line", "area"]);
+  const SLICE_LABEL_PARTS = ["category", "value", "percent"];
   /** A chart's kind, category labels and series (numbers), title and unit. */
   function normalizeChart(raw) {
     if (!raw || typeof raw !== "object") return null;
@@ -1951,6 +1954,13 @@
       if (angle != null) opts.angle = angle;
       if (explode != null) opts.explode = explode;
       if (hole != null && out.type === "donut") opts.hole = hole;
+    }
+    // データ ラベル: every point labelled (すべての点), where a line's labels sit, and a pie's labels outside its slices.
+    if (raw.opts?.labelAll === true && LABEL_ALL_CHARTS.has(out.type)) opts.labelAll = true;
+    if (["below", "right"].includes(raw.opts?.labelPos) && LABEL_POS_CHARTS.has(out.type)) opts.labelPos = raw.opts.labelPos;
+    if ((out.type === "pie" || out.type === "donut") && Array.isArray(raw.opts?.sliceLabels)) {
+      const parts = SLICE_LABEL_PARTS.filter((part) => raw.opts.sliceLabels.includes(part));
+      if (parts.length) opts.sliceLabels = parts;
     }
     if (STEP_CHARTS.has(out.type)) {
       const step = Number(raw.opts?.axisStep);
@@ -3792,7 +3802,7 @@
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
-    LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
+    LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,

@@ -1496,6 +1496,76 @@ await step("グラフの書式設定（折れ線の滑らかさ・マーカー�
   await page.keyboard.press("Escape");
 });
 
+await step("グラフのデータ ラベル（すべての点・折れ線のラベル位置・円のスライスのラベル）", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="line"]');
+  await page.waitForTimeout(400);
+  if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
+  const id = (await slide()).elements.at(-1).id;
+  const setData = async (type, series) => {
+    await page.evaluate(({ id, type, series }) => {
+      const o = window.__hsej.slide().elements.find((x) => x.id === id);
+      o.chart.type = type;
+      o.chart.labels = ["4月", "5月", "6月", "7月"];
+      o.chart.series = series;
+    }, { id, type, series });
+    await redraw();
+    await pickInPane([id]);
+  };
+  const chartOf = async () => (await slide()).elements.find((o) => o.id === id).chart;
+  const q = (sel) => `#stageBody .slide-wrap .hs-obj[data-el="${id}"] ${sel}`;
+  const cf = ".cf-dialog[open]";
+  const openFormat = async () => {
+    await tab("グラフのデザイン");
+    await byTitle("データ ラベル・凡例・目盛線");
+    await page.locator('.rb-pop .rb-menu button:has-text("グラフの書式設定")').click();
+    await page.waitForSelector(cf);
+  };
+  // A line: only the last point and the highest are written; "すべての点" writes them all, here below the points.
+  await setData("line", [{ name: "売上", values: [12, 30, 22, 41] }]);
+  const written = async () => (await page.$$eval(q("text.hs-val"), (els) => els.map((t) => t.textContent)));
+  assert((await written()).length === 1, `the usual: ${await written()}`);
+  await openFormat();
+  await page.check(`${cf} input[name="labelAll"]`);
+  await page.selectOption(`${cf} select[name="labelPos"]`, "below");
+  await page.click(".cf-dialog .cf-ok");
+  await page.waitForTimeout(500);
+  let opts = (await chartOf()).opts;
+  assert(opts?.labelAll === true && opts.labelPos === "below", `kept: ${JSON.stringify(opts)}`);
+  assert((await written()).join() === "12,30,22,41", `every point: ${await written()}`);
+  const ys = await page.$$eval(q("text.hs-val"), (els) => els.map((t) => Number(t.getAttribute("y"))));
+  const dots = await page.$$eval(q("circle[fill]"), (els) => els.map((c) => Number(c.getAttribute("cy"))).filter(Boolean));
+  assert(ys.every((y, i) => y > dots[i]), `below the points: ${ys} vs ${dots}`);
+  await shot("chart-labels-line");
+
+  // A donut: names and shares on the slices, on leader lines; the list at the right gives way.
+  await setData("donut", [{ name: "構成比", values: [50, 30, 12, 8] }]);
+  assert((await page.$$(q("rect"))).length === 4, "the list at the right first");
+  await openFormat();
+  await page.check(`${cf} input[name="sl-category"]`);
+  await page.check(`${cf} input[name="sl-percent"]`);
+  await page.click(".cf-dialog .cf-ok");
+  await page.waitForTimeout(500);
+  opts = (await chartOf()).opts;
+  assert(JSON.stringify(opts?.sliceLabels) === JSON.stringify(["category", "percent"]), `kept: ${JSON.stringify(opts)}`);
+  const slices = await page.$$eval(q(".hs-slice-label"), (els) => els.map((t) => [...t.querySelectorAll("tspan")].map((s) => s.textContent).join("/")));
+  assert(slices.join() === "4月/50%,5月/30%,6月/12%,7月/8%", `a label each: ${slices}`);
+  assert((await page.$$(q(".hs-leader"))).length === 4 && (await page.$$(q("rect"))).length === 0, "leader lines, and no list");
+  await shot("chart-labels-donut");
+  // Values only: the names are not on the slices, so the list comes back.
+  await openFormat();
+  await page.uncheck(`${cf} input[name="sl-category"]`);
+  await page.uncheck(`${cf} input[name="sl-percent"]`);
+  await page.check(`${cf} input[name="sl-value"]`);
+  await page.click(".cf-dialog .cf-ok");
+  await page.waitForTimeout(500);
+  assert((await page.$$(q("rect"))).length === 4 && (await page.$$(q(".hs-slice-label"))).length === 4, "the list stays; the values on the slices");
+  await undo();
+  assert((await page.$$(q(".hs-slice-label"))).length === 4 && (await page.$$(q("rect"))).length === 0, "one undo goes back to the names");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

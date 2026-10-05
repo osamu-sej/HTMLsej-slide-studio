@@ -418,6 +418,7 @@ export function createTableUi(editor, app, kit) {
   function formatParts(c) {
     const parts = [];
     if (E.BAR_GAP_CHARTS.has(c.type)) parts.push("bars");
+    if (E.LABEL_ALL_CHARTS.has(c.type)) parts.push("labels");
     if (E.LINE_CHART_KINDS.has(c.type)) parts.push("line");
     if (c.type === "pie" || c.type === "donut") parts.push("pie");
     if (E.STEP_CHARTS.has(c.type) || E.REVERSE_CHARTS.has(c.type)) parts.push("axis");
@@ -439,8 +440,12 @@ export function createTableUi(editor, app, kit) {
     const section = (title, ...controls) => h("fieldset", { class: "cf-section" }, h("legend", {}, title), ...controls);
     const body = [];
     if (parts.includes("bars")) body.push(section("棒", num("gap", "棒の間隔の幅（%）", opts.gap, 0, 500), ...((c.type === "clustered-bar" || c.type === "hbar") && c.series.length > 1 ? [num("overlap", "系列の重なり（%）", opts.overlap, -100, 100)] : [])));
+    if (parts.includes("labels")) body.push(section("データ ラベル", check("labelAll", "すべての点に値を表示する", opts.labelAll), ...(E.LABEL_POS_CHARTS.has(c.type) ? [choose("labelPos", "ラベルの位置", [["", "上（標準）"], ["below", "下"], ["right", "右"]], opts.labelPos || "")] : [])));
     if (parts.includes("line")) body.push(section("折れ線", check("smooth", "滑らかな線にする", opts.smooth), choose("marker", "マーカーの形", MARKER_NAMES, opts.marker || "circle")));
-    if (parts.includes("pie")) body.push(section(c.type === "donut" ? "ドーナツ" : "円", num("angle", "最初のスライスの角度（度）", opts.angle, 0, 359, "0"), num("explode", "要素の切り出し（%）", opts.explode, 0, 40, "0"), ...(c.type === "donut" ? [num("hole", "ドーナツの穴の大きさ（%）", opts.hole, 10, 90, "65")] : [])));
+    if (parts.includes("pie")) body.push(section(c.type === "donut" ? "ドーナツ" : "円", num("angle", "最初のスライスの角度（度）", opts.angle, 0, 359, "0"), num("explode", "要素の切り出し（%）", opts.explode, 0, 40, "0"), ...(c.type === "donut" ? [num("hole", "ドーナツの穴の大きさ（%）", opts.hole, 10, 90, "65")] : []),
+      h("div", { class: "cf-wide" }, h("div", { class: "cf-label" }, "スライスのラベル（外側に引き出し線つき）"),
+        check("sl-category", "分類名", opts.sliceLabels?.includes("category")), check("sl-value", "値", opts.sliceLabels?.includes("value")), check("sl-percent", "パーセンテージ", opts.sliceLabels?.includes("percent")),
+        h("p", { class: "hint" }, "分類名を付けると、右側の一覧のかわりにスライスに名前が付きます。"))));
     if (parts.includes("axis")) body.push(section("軸", ...(E.STEP_CHARTS.has(c.type) ? [num("step", "目盛間隔（空にすると自動）", opts.axisStep, 0, 1e12)] : []), ...(E.REVERSE_CHARTS.has(c.type) ? [check("reverse", "項目を逆順にする", opts.reverse)] : [])));
     if (parts.includes("trend")) body.push(section("近似曲線", choose("trend", "種類", [["", "なし"], ...Object.entries(E.TREND_KINDS)], opts.trend || ""), num("period", "移動平均の区間（2〜12）", opts.trendPeriod, 2, 12, "2"), check("eq", "グラフに数式を表示する", opts.trendEq), check("r2", "グラフにR-2乗値を表示する", opts.trendR2)));
     const dialog = h("dialog", { class: "cf-dialog", "aria-label": "グラフの書式設定" },
@@ -454,8 +459,9 @@ export function createTableUi(editor, app, kit) {
           const on = (name) => (el(name)?.checked ? true : undefined);
           const patch = {};
           if (parts.includes("bars")) { patch.gap = whole("gap", 0, 500); if (el("overlap")) patch.overlap = whole("overlap", -100, 100); }
+          if (parts.includes("labels")) { patch.labelAll = on("labelAll"); if (el("labelPos")) patch.labelPos = el("labelPos").value || undefined; }
           if (parts.includes("line")) { patch.smooth = on("smooth"); patch.marker = el("marker").value === "circle" ? undefined : el("marker").value; }
-          if (parts.includes("pie")) { patch.angle = whole("angle", 0, 359) || undefined; patch.explode = whole("explode", 0, 40) || undefined; if (el("hole")) patch.hole = whole("hole", 10, 90); }
+          if (parts.includes("pie")) { patch.angle = whole("angle", 0, 359) || undefined; patch.explode = whole("explode", 0, 40) || undefined; if (el("hole")) patch.hole = whole("hole", 10, 90); const picked = [["category", "sl-category"], ["value", "sl-value"], ["percent", "sl-percent"]].filter(([, name]) => el(name)?.checked).map(([part]) => part); patch.sliceLabels = picked.length ? picked : undefined; }
           if (parts.includes("axis")) {
             if (el("step")) { const v = Number(el("step").value); patch.axisStep = el("step").value !== "" && Number.isFinite(v) && v > 0 ? v : undefined; }
             if (el("reverse")) patch.reverse = on("reverse");
