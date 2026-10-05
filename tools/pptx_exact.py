@@ -600,6 +600,7 @@ class SlideReader:
         color = None
         explicit_none = False
         dash = None
+        cap = cmpd = join = None
         for node in (ln, theme_ln):
             if node is None:
                 continue
@@ -616,12 +617,25 @@ class SlideReader:
                     color = next((s for s in stops if s), None)
             if dash is None and node.find(A + "prstDash") is not None:
                 dash = node.find(A + "prstDash").get("val")
+            # 線端・複合線・結合点 (the nearest that says).
+            if cap is None and node.get("cap"):
+                cap = node.get("cap")
+            if cmpd is None and node.get("cmpd"):
+                cmpd = node.get("cmpd")
+            if join is None:
+                join = next((tag for tag in ("round", "bevel", "miter") if node.find(A + tag) is not None), None)
         if explicit_none or (color is None and ref_color is None) or (ln is None and theme_ln is None and not ref_idx):
             return None
         color = color or ref_color
         out = {"color": color, "w": max(0.5, self.deck.px(width if width is not None else 9525))}
         if DASHES.get(dash):
             out["dash"] = DASHES[dash]
+        if {"rnd": "round", "sq": "square"}.get(cap):
+            out["cap"] = {"rnd": "round", "sq": "square"}[cap]
+        if cmpd in ("dbl", "tri"):
+            out["cmpd"] = cmpd
+        if join:
+            out["join"] = join
         for end, key in (("headEnd", "head"), ("tailEnd", "tail")):
             node = ln.find(A + end) if ln is not None else None
             if node is not None and ARROWS.get(node.get("type")):
@@ -1068,8 +1082,9 @@ class SlideReader:
 
     def stroke(self, line):
         out = {"stroke": hexc(line["color"]), "strokeW": r2(clamp(line["w"], 0.5, 200))}
-        if line.get("dash"):
-            out["dash"] = line["dash"]
+        for key in ("dash", "cap", "cmpd", "join"):
+            if line.get(key):
+                out[key] = line[key]
         return out
 
     def text_settings(self, text, o):
@@ -1100,7 +1115,7 @@ class SlideReader:
              "stroke": hexc(line["color"]), "strokeW": r2(clamp(line["w"], 0.5, 200))}
         if line["color"][1] < 0.995:
             o["opacity"] = r2(line["color"][1])
-        for key in ("dash", "head", "tail", "headSize", "tailSize"):
+        for key in ("dash", "cap", "cmpd", "join", "head", "tail", "headSize", "tailSize"):
             if line.get(key):
                 o[key] = line[key]
         if prst.startswith("bent"):

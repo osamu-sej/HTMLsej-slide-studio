@@ -1026,6 +1026,14 @@ export function createCanvas(app) {
     // Text only, as the box's own style (rich text from other apps would bring their colours and fonts).
     event.preventDefault();
     const text = event.clipboardData?.getData("text/plain") ?? "";
+    // Cells from Excel (or a table of a web page) in a table cell fill the cells from there on, as PowerPoint does.
+    const grid = ed.typing?.cell ? ops.clipboardGrid({ text, html: event.clipboardData?.getData("text/html") || "" }) : null;
+    if (grid) {
+      const [r, c] = ed.typing.cell;
+      changeTable((o) => ops.tableFill(o, r, c, grid));
+      app.toast(`セルに貼り付けました（${grid.rows.length}行×${grid.rows[0].length}列。足りない行・列は増やしました）`);
+      return;
+    }
     document.execCommand("insertText", false, text);
   }
   function onTypingBlur(event) {
@@ -1278,6 +1286,16 @@ export function createCanvas(app) {
     if (own) { event.preventDefault(); pasteObjects(JSON.parse(own), { mode: plain ? "text" : "keep" }); return true; }
     if (files.length) { event.preventDefault(); await app.insertFiles(files); return true; }
     const text = data?.getData("text/plain");
+    // Cells from Excel (tab-separated) or a table of a web page: a table, as PowerPoint pastes them.
+    const grid = plain ? null : ops.clipboardGrid({ text: text || "", html: data?.getData("text/html") || "" });
+    if (grid) {
+      event.preventDefault();
+      const o = { ...ops.tableFromGrid(grid), id: ops.newId() };
+      commit([...objects(), o], { select: [o.id] });
+      app.showTab?.("tableDesign");
+      app.toast(`表として貼り付けました（${grid.rows.length}行×${grid.rows[0].length}列）`);
+      return true;
+    }
     if (text && text.trim()) {
       event.preventDefault();
       const lines = text.replace(/\r/g, "").split("\n").slice(0, 60);
@@ -1397,7 +1415,25 @@ export function createCanvas(app) {
   function ungroupSelection() {
     if (!selected().some((o) => o.group)) return app.toast("グループが選ばれていません");
     ed.entered = null;
-    commit(ops.ungroup(objects(), ed.sel));
+    const list = objects();
+    // 再グループ化 remembers each group taken apart (its members' ids).
+    const groups = [...new Set(selected().filter((o) => o.group).map((o) => o.group))];
+    ed.regroup = [...(ed.regroup || []), ...groups.map((g) => list.filter((o) => o.group === g).map((o) => o.id))].slice(-20);
+    commit(ops.ungroup(list, ed.sel));
+  }
+  /** 再グループ化: the group last taken apart (the one the chosen objects belong to) put together again. */
+  function regroupIds() {
+    const list = objects();
+    const alive = (ids) => ids.filter((id) => list.some((o) => o.id === id && !o.group));
+    const mine = (ed.regroup || []).map(alive).filter((ids) => ids.length >= 2);
+    return (ed.sel.length ? mine.filter((ids) => ids.some((id) => ed.sel.includes(id))) : mine).at(-1) || null;
+  }
+  function regroupSelection() {
+    const ids = regroupIds();
+    if (!ids) return app.toast("再グループ化できるグループがありません（グループ解除したオブジェクトを選んでください）");
+    ed.entered = null;
+    ed.regroup = (ed.regroup || []).filter((g) => !g.some((id) => ids.includes(id)));
+    commit(ops.group(objects(), ids), { select: ids });
   }
   function order(how) { commit(ops.reorder(objects(), ops.withGroups(objects(), ed.sel), how)); }
   // 配置 → スライドに合わせて配置 / 選択したオブジェクトを揃える (one object always aligns to the slide).
@@ -1655,6 +1691,7 @@ export function createCanvas(app) {
       any && { label: "最背面へ移動", keys: "⇧⌘[", run: () => order("back") },
       "-",
       ed.sel.length > 1 && { label: "グループ化", keys: "⌘G", run: groupSelection },
+      regroupIds() && { label: "再グループ化", run: regroupSelection },
       selected().some((o) => o.group) && { label: "グループ解除", keys: "⇧⌘G", run: ungroupSelection },
       any && { label: locked ? "ロックを解除" : "ロック（動かないようにする）", run: () => setLocked(!locked) },
       any && { label: "図形の書式設定…", run: () => app.openPanel("format") },
@@ -1747,7 +1784,7 @@ export function createCanvas(app) {
     get selection() { return [...ed.sel]; },
     get typing() { return Boolean(ed.typing); },
     selectedObjects: () => selected(),
-    batch, resetPicture,
+    batch, resetPicture, regroupSelection, canRegroup: () => Boolean(regroupIds()),
     objects,
     attach, draw, emit,
     subscribe(fn) { subs.add(fn); return () => subs.delete(fn); },

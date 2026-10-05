@@ -22,6 +22,7 @@ async function loadEngine() {
   return { E: window.SlideEngine, window };
 }
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+const plainJson = (value) => JSON.parse(JSON.stringify(value));
 
 test("トリミング: 縦横比 keeps the picture's scale, 塗りつぶし keeps the frame, 枠に合わせる shows it all", () => {
   // A 4:3 picture shown 400 × 300 at (100, 100).
@@ -304,4 +305,93 @@ test("既定の図形に設定: only the look of a shape, text box or line is ke
   const checked = ops.objectDefaultsOf({ shape: { fill: "#ff0000", fs: 30 } }, (kind, s) => (kind === "shape" ? { ...s, fill: "#dce4f2" } : s));
   assert.deepEqual(checked, { shape: { fill: "#dce4f2", fs: 30 } });
   assert.equal(ops.objectDefaultsOf({ shape: { fill: "#ff0000" } }, () => null), null, "a look the check refuses is dropped");
+});
+
+test("線の書式設定: 線端・結合点・複合線 are kept only when known and drawn on shapes, lines and picture outlines", async () => {
+  const { E } = await loadEngine();
+  const [a, b, c] = E.normalizeObjects([
+    { id: "a", kind: "shape", shape: "rect", x: 0, y: 0, w: 200, h: 100, stroke: "#1f3864", strokeW: 8, cap: "round", join: "bevel", cmpd: "dbl" },
+    { id: "b", kind: "shape", shape: "rect", x: 0, y: 0, w: 200, h: 100, stroke: "#1f3864", strokeW: 8, cap: "flat", join: "weird", cmpd: "quad" },
+    { id: "c", kind: "line", x1: 0, y1: 0, x2: 300, y2: 0, stroke: "#1f3864", strokeW: 12, cap: "square", cmpd: "tri" },
+  ]);
+  assert.deepEqual([a.cap, a.join, a.cmpd], ["round", "bevel", "dbl"]);
+  assert.deepEqual([b.cap, b.join, b.cmpd], [undefined, undefined, undefined], "flat is the usual end; unknown names are dropped");
+  assert.deepEqual([c.cap, c.cmpd], ["square", "tri"]);
+  const slide = { type: "blank", title: "検証", elements: [a, b, c] };
+  const el = E.render(slide, { mode: "present", index: 1, deck: { slides: [{ type: "title", title: "表紙" }, slide], theme: "sej" } });
+  const stroked = (id) => [...el.querySelectorAll(`.hs-obj[data-el="${id}"] svg path`)];
+  const outline = stroked("a").find((p) => p.getAttribute("mask"));
+  assert.ok(outline, "the outline of a compound line is cut by a mask");
+  assert.equal(outline.getAttribute("stroke-linecap"), "round");
+  assert.equal(outline.getAttribute("stroke-linejoin"), "bevel");
+  assert.ok(stroked("a").some((p) => p.getAttribute("fill") !== "none" && p.getAttribute("stroke") === "none"), "the fill is drawn alone, not cut");
+  const mask = el.querySelector(`.hs-obj[data-el="a"] mask`);
+  assert.equal(mask.querySelectorAll("path").length, 1, "a double line: one band cut");
+  const lineMask = el.querySelector(`.hs-obj[data-el="c"] mask`);
+  assert.equal(lineMask.querySelectorAll("path").length, 2, "a triple line: two bands, the middle one drawn back");
+  assert.ok(stroked("c").some((p) => p.getAttribute("stroke-linecap") === "square" && p.getAttribute("mask")));
+  assert.equal(el.querySelectorAll(`.hs-obj[data-el="b"] mask`).length, 0, "a plain outline needs no mask");
+  assert.ok(stroked("b").every((p) => p.getAttribute("stroke-linejoin") === "miter"), "a shape's corners are sharp unless told otherwise");
+});
+
+test("表の貼り付け: Excel's tab-separated cells and a web page's table become a table (merged spans kept)", async () => {
+  const { E, window } = await loadEngine();
+  assert.deepEqual(ops.parseTsv('a\tb\n"x\ny"\t"q""r"\n'), [["a", "b"], ["x\ny", 'q"r']], "Excel's quoting");
+  assert.equal(ops.clipboardGrid({ text: "ただの文章です。\nもう1行" }), null, "plain words are not cells");
+  assert.equal(ops.clipboardGrid({ text: "ひとつのセル" }), null);
+  const sheet = ops.clipboardGrid({ text: "品目\t売上\t前年比\nお茶\t1,200\t98%\n水\t800\t105%\n" });
+  assert.equal(sheet.rows.length, 3, "the trailing newline makes no empty row");
+  assert.deepEqual(plainJson(sheet.rows[1]), [{ text: "<p>お茶</p>" }, { text: "<p>1,200</p>", align: "right" }, { text: "<p>98%</p>", align: "right" }], "numbers align right");
+  const table = ops.tableFromGrid(sheet);
+  assert.equal(table.kind, "table");
+  assert.equal(table.cells.length, 3);
+  assert.equal(table.cols.length, 3);
+  assert.ok(table.x >= 0 && table.x + table.w <= 1920 && table.y + table.h <= 1000, "inside the slide");
+  const kept = E.normalizeObject({ id: "t", ...table });
+  assert.equal(kept.cells[1][1].text, "<p>1,200</p>", "the normalizer keeps it");
+  // A web page's table: header cells, a span, line breaks.
+  const parse = (source) => parseHTML(source).document;
+  const html = '<table><tr><th colspan="2">計画</th></tr><tr><td>A<br>B</td><td style="text-align:center">2</td></tr><tr><td rowspan="2">合計</td><td>3</td></tr><tr><td>4</td></tr></table>';
+  const web = ops.clipboardGrid({ text: "", html }, parse);
+  assert.equal(web.rows.length, 4);
+  assert.equal(web.rows[0][0].cs, 2, "a column span");
+  assert.equal(web.rows[0][1].merged, true, "the covered cell");
+  assert.equal(web.rows[1][0].text, "<p>A</p><p>B</p>", "a line break is a new paragraph");
+  assert.equal(web.rows[1][1].align, "center");
+  assert.equal(web.rows[2][0].rs, 2);
+  assert.equal(web.rows[3][0].merged, true);
+  assert.equal(ops.clipboardGrid({ text: "", html: "<table><tr><td>one</td></tr></table>" }, parse), null, "one cell is just words");
+  assert.equal(ops.clipboardGrid({ text: "", html: "<p>no table</p>" }, parse), null);
+  // Pasted into a table at a cell: the table grows as the cells need; a merged cell's covered position is skipped.
+  const base = ops.makeTable(2, 2, { x: 100, y: 100, w: 400, h: 150 });
+  const filled = ops.tableFill(base, 1, 1, { rows: [[{ text: "<p>a</p>" }, { text: "<p>b</p>" }], [{ text: "<p>c</p>" }, { text: "<p>d</p>", align: "right" }]] });
+  assert.equal(filled.cells.length, 3, "a row added");
+  assert.equal(filled.cells[0].length, 3, "a column added");
+  assert.equal(filled.cells[1][1].text, "<p>a</p>");
+  assert.equal(filled.cells[2][2].text, "<p>d</p>");
+  assert.equal(filled.cells[2][2].align, "right");
+  assert.equal(filled.cells[0][0].text, undefined, "cells before are left alone");
+  assert.ok(filled.h > base.h && filled.w > base.w, "the table grew");
+});
+
+test("再グループ化 and the slide number's first number", async () => {
+  const { E } = await loadEngine();
+  const list = [{ id: "a", kind: "shape" }, { id: "b", kind: "shape" }, { id: "c", kind: "shape" }];
+  const grouped = ops.group(list, ["a", "b"]);
+  const apart = ops.ungroup(grouped, ["a"]);
+  assert.ok(apart.every((o) => !o.group), "taken apart");
+  const again = ops.group(apart, ["a", "b"]);
+  assert.equal(again.find((o) => o.id === "a").group, again.find((o) => o.id === "b").group, "put together again");
+  // スライド番号の開始番号: the master's page number and the number field count from it.
+  const slides = [{ type: "title", title: "表紙" }, { type: "blank", title: "本文", elements: [{ id: "f", kind: "text", x: 100, y: 300, w: 400, h: 80, text: '<p><span data-field="slideno">1</span></p>' }] }, { type: "blank", title: "次" }];
+  const page = (index, firstNumber) => {
+    const deck = { slides, theme: "sej", ...(firstNumber != null ? { firstNumber } : {}) };
+    const el = E.render(slides[index], { deck, index, mode: "present" });
+    return { master: el.querySelector(".hs-sej [data-sej='page'], .hs-sej .sej-page, .hs-sej")?.textContent || "", field: el.querySelector('span[data-field="slideno"]')?.textContent, label: el.getAttribute("aria-label") };
+  };
+  assert.equal(page(1, undefined).field, "2", "numbered from 1 as before");
+  assert.equal(page(1, 0).field, "1", "the cover is 0, so this is 1");
+  assert.equal(page(1, 5).field, "6");
+  assert.match(page(1, 5).label, /^2枚目/, "the screen reader says where it really is");
+  assert.equal(page(1, 99999).field, "2", "out of range: as before");
 });

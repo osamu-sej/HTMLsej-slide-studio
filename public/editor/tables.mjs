@@ -314,6 +314,8 @@ export function createTableUi(editor, app, kit) {
       "-", { head: "データ テーブル（グラフの下に値の表）" },
       { label: "表示する", on: opts.table === true, disabled: !E.TABLE_CHARTS.has(chart()?.chart.type), title: "縦棒・横軸に項目のあるグラフで使えます", run: () => setOpts({ table: true }) },
       { label: "なし", on: !opts.table, run: () => setOpts({ table: undefined }) },
+      "-", { head: "第2軸（複合グラフ）" },
+      { label: "折れ線を第2軸にする（右側に別の目盛り）", on: opts.axis2 === true, disabled: chart()?.chart.type !== "combo" || (chart()?.chart.series.length || 0) < 2, title: "複合（棒と折れ線）で系列が2つあるときに使えます", run: () => setOpts({ axis2: opts.axis2 === true ? undefined : true }) },
       "-", { head: "軸ラベル・近似曲線" },
       { label: opts.axisX || opts.axisY ? `軸ラベル（${[opts.axisX, opts.axisY].filter(Boolean).join("・")}）…` : "軸ラベル…", run: () => axisTitles() },
       { label: "近似曲線（線形）", on: opts.trend === "linear", disabled: !TREND_CHARTS.has(chart()?.chart.type), title: "縦棒・折れ線・散布図で使えます", run: () => setOpts({ trend: opts.trend === "linear" ? false : "linear" }) },

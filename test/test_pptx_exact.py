@@ -110,6 +110,8 @@ class SejDeckTest(unittest.TestCase):
         self.assertEqual(back["action"], {"type": "slide", "to": "p2"})
         self.assertEqual(by_text(self.slides[3], "終わる")["action"], {"type": "end"})
         self.assertEqual(back.get("overAction"), {"type": "next"}, "マウスの通過")
+        self.assertEqual((back.get("cap"), back.get("cmpd"), back.get("join")), ("round", "dbl", "bevel"), "線端・複合線・結合点")
+        self.assertNotIn("cmpd", by_text(self.slides[3], "終わる"))
         self.assertNotIn("overAction", by_text(self.slides[3], "終わる"))
 
     def test_animations_and_the_transition(self):

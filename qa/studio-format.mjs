@@ -1086,6 +1086,183 @@ await step("マウスの通過: 動作設定で「次のスライド」とサウ
   await page.waitForTimeout(400);
 });
 
+const freshSlide = async () => {
+  await page.keyboard.press("Escape");
+  await tab("挿入");
+  await ribbonBtn("新しいスライド");
+  await menuItem("白紙");
+  await page.waitForTimeout(400);
+};
+/** A paste of what Excel (text + a table) or a page puts on the clipboard, sent to the document or to a field. */
+const pasteClip = (selector, { text = "", html = "" }) => page.evaluate(({ selector, text, html }) => {
+  const dt = new DataTransfer();
+  dt.setData("text/plain", text);
+  if (html) dt.setData("text/html", html);
+  (selector ? document.querySelector(selector) : document).dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+}, { selector, text, html });
+await step("表の貼り付け: Excelのセル（タブ区切り）がスライドで表に、表のセルに貼ると続くセルに入る; Webの表は結合も保つ", async () => {
+  await freshSlide();
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  await pasteClip(null, { text: "品目\t売上\t前年比\nお茶\t1,200\t98%\n水\t800\t105%\n" });
+  await page.waitForFunction(() => (window.__hsej.slide().elements || []).some((o) => o.kind === "table"), null, { timeout: 5000 });
+  let t = (await slide()).elements.find((o) => o.kind === "table");
+  assert(t.cells.length === 3 && t.cells[0].length === 3, `3 × 3: ${t.cells.length} × ${t.cells[0].length}`);
+  const words = (c) => (c.text || "").replace(/<[^>]+>/g, "");
+  assert(words(t.cells[0][0]) === "品目" && words(t.cells[1][1]) === "1,200" && t.cells[1][1].align === "right", `the cells: ${JSON.stringify(t.cells[1])}`);
+  assert(await page.locator(".rb-tabs [role=tab]:text-is(\"テーブル デザイン\")").count(), "the table's tab opens");
+  await shot("paste-table");
+  // Into the cell under 水 / 前年比's row: 2 × 2 cells from the second row, second column on; the table grows by a column.
+  await page.mouse.dblclick(...(await (async () => { const r = await page.locator("#stageBody .slide-wrap .hs-obj[data-kind='table'] td[data-r='2'][data-c='1']").first().boundingBox(); return [r.x + r.width / 2, r.y + r.height / 2]; })()));
+  await page.waitForSelector(".ed-typing-tx");
+  await pasteClip(".ed-typing-tx", { text: "甲\t乙\n丙\t丁" });
+  await page.waitForTimeout(400);
+  t = (await slide()).elements.find((o) => o.kind === "table");
+  assert(t.cells[2].length === 3 && words(t.cells[2][1]) === "甲" && words(t.cells[2][2]) === "乙", `filled from the cell on: ${t.cells[2].map(words)}`);
+  assert(t.cells.length === 4 && words(t.cells[3][1]) === "丙" && words(t.cells[3][2]) === "丁", `a row added: ${t.cells.map((r) => r.map(words))}`);
+  assert(words(t.cells[1][1]) === "1,200" && words(t.cells[2][0]) === "水", "the others stay");
+  await page.keyboard.press("Escape");
+  await undo();
+  assert((await slide()).elements.find((o) => o.kind === "table").cells.length === 3, "⌘Z takes the fill back in one step");
+  // A web page's table: a span and a line break.
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  await pasteClip(null, { text: "計画\n2", html: '<table><tr><th colspan="2">計画</th></tr><tr><td>A<br>B</td><td>2</td></tr></table>' });
+  await page.waitForFunction(() => (window.__hsej.slide().elements || []).filter((o) => o.kind === "table").length === 2, null, { timeout: 5000 });
+  const web = (await slide()).elements.filter((o) => o.kind === "table").at(-1);
+  assert(web.cells[0][0].cs === 2 && web.cells[0][1].merged && words(web.cells[1][0]) === "AB", `the page's table: ${JSON.stringify(web.cells)}`);
+  // Plain words still become a text box.
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  await pasteClip(null, { text: "ただの文章です" });
+  await page.waitForTimeout(300);
+  assert((await slide()).elements.at(-1).kind === "text", "words stay words");
+});
+
+await step("再グループ化: グループ解除したあと、ひとつ選んで右クリック → 再グループ化で元のグループに戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.locator('.rb-pop .rb-gallery button[data-shape="ellipse"]').last().click({ button: "right" });
+  for (const x of [500, 900]) { await page.mouse.click(...(await stageAt(x, 500))); await page.waitForTimeout(200); }
+  await page.keyboard.press("Escape");
+  const [a, b] = (await slide()).elements.filter((o) => o.shape === "ellipse");
+  await pickInPane([a.id, b.id]);
+  await page.keyboard.press("Control+g");
+  await page.waitForTimeout(250);
+  let list = (await slide()).elements;
+  const group = list.find((o) => o.id === a.id).group;
+  assert(group && list.find((o) => o.id === b.id).group === group, "grouped");
+  await page.keyboard.press("Control+Shift+g");
+  await page.waitForTimeout(250);
+  assert(!(await slide()).elements.some((o) => o.group), "taken apart");
+  await pickInPane([a.id]);
+  await objRightClick(a.id, "再グループ化");
+  await page.waitForTimeout(250);
+  list = (await slide()).elements;
+  const again = list.find((o) => o.id === a.id).group;
+  assert(again && list.find((o) => o.id === b.id).group === again, "put together again");
+  await undo();
+  assert(!(await slide()).elements.some((o) => o.group), "⌘Z takes it back");
+});
+
+await step("第2軸: 複合グラフの折れ線が右側の別の目盛りで描かれる（グラフ要素 → 第2軸）", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="combo"]');
+  await page.waitForTimeout(400);
+  if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
+  const id = (await slide()).elements.at(-1).id;
+  await page.evaluate((id) => {
+    const o = window.__hsej.slide().elements.find((x) => x.id === id);
+    o.chart.labels = ["4月", "5月", "6月", "7月"];
+    o.chart.series = [{ name: "売上", values: [12000, 15000, 18000, 21000] }, { name: "前年比", values: [96, 102, 108, 111] }];
+  }, id);
+  await redraw();
+  const ys = () => page.$$eval(`#stageBody .hs-obj[data-el="${id}"] circle.hs-mark`, (els) => els.map((c) => Number(c.getAttribute("cy"))));
+  const flat = await ys();
+  assert(flat.length === 4 && Math.max(...flat) - Math.min(...flat) < 3, `the line sits on the bars' scale: ${flat}`);
+  await pickInPane([id]);
+  await tab("グラフのデザイン");
+  await byTitle("データ ラベル・凡例・目盛線");
+  await page.locator('.rb-pop .rb-menu button:has-text("折れ線を第2軸にする")').click();
+  await page.waitForTimeout(400);
+  assert((await slide()).elements.find((o) => o.id === id).chart.opts?.axis2 === true, "opts.axis2");
+  const climbs = await ys();
+  assert(Math.max(...climbs) - Math.min(...climbs) > 40, `a scale of its own: ${climbs}`);
+  const ticks = await page.$$eval(`#stageBody .hs-obj[data-el="${id}"] .hs-tick2`, (els) => els.map((t) => t.textContent));
+  assert(ticks.length === 5 && Number(ticks.at(-1)) >= 111, `the right scale: ${ticks}`);
+  await shot("second-axis");
+  await byTitle("データ ラベル・凡例・目盛線");
+  await page.locator('.rb-pop .rb-menu button:has-text("折れ線を第2軸にする")').click();
+  await page.waitForTimeout(300);
+  assert(!(await slide()).elements.find((o) => o.id === id).chart.opts?.axis2, "off again");
+});
+
+await step("スライドのサイズ → スライド番号の開始番号: 表紙を0にすると次のページが1になる（元に戻せる）", async () => {
+  await page.keyboard.press("Escape");
+  await page.locator(".film-item").nth(1).click();
+  await page.waitForTimeout(400);
+  const pageNo = () => page.evaluate(() => { const sej = document.querySelector("#stageBody .slide-wrap .hs-sej"); return [...sej.querySelectorAll("*")].map((n) => n.textContent.trim()).find((t) => /^\d+$/.test(t)) || ""; });
+  const before = await pageNo();
+  assert(before === "2", `the second slide is page 2: ${before}`);
+  await tab("デザイン");
+  await byTitle("スライドのサイズ");
+  await page.waitForSelector(".size-dialog[open]");
+  await page.fill('.size-dialog input[name="firstNumber"]', "0");
+  await page.click(".size-dialog .fmt-ok");
+  await page.waitForTimeout(500);
+  assert((await deck()).firstNumber === 0, `firstNumber: ${(await deck()).firstNumber}`);
+  assert((await pageNo()) === "1", `now page 1: ${await pageNo()}`);
+  await undo();
+  assert((await pageNo()) === "2" && !(await deck()).firstNumber && (await deck()).firstNumber !== 0, "⌘Z puts the numbering back");
+});
+
+await step("線の書式: 複合線（二重線）・線端（丸）・結合点（面取り）が図形の枠線に効く（二重線は本当に中が透ける）", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.locator('.rb-pop .rb-gallery button[data-shape="rect"]').last().click();
+  await page.mouse.click(...(await stageAt(700, 500)));
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((o) => o.id === id), { stroke: "#1f3864", strokeW: 12 }), id);
+  await redraw();
+  await pickInPane([id]);
+  await tab("図形の書式");
+  await byTitle("図形の枠線");
+  await page.locator('.rb-pop [data-lines="cmpd"] button[data-cmpd="dbl"]').click();
+  await byTitle("図形の枠線");
+  await page.locator('.rb-pop [data-lines="cap"] button[data-cap="round"]').click();
+  await byTitle("図形の枠線");
+  await page.locator('.rb-pop [data-lines="join"] button[data-join="bevel"]').click();
+  await page.waitForTimeout(300);
+  const o = (await slide()).elements.find((x) => x.id === id);
+  assert(o.cmpd === "dbl" && o.cap === "round" && o.join === "bevel", `kept: ${JSON.stringify([o.cmpd, o.cap, o.join])}`);
+  const drawn = await page.evaluate((id) => { const el = document.querySelector(`#stageBody .slide-wrap .hs-obj[data-el="${id}"]`); const p = [...el.querySelectorAll("svg path")].find((x) => x.getAttribute("mask")); return { mask: Boolean(el.querySelector("mask")), cap: p?.getAttribute("stroke-linecap"), join: p?.getAttribute("stroke-linejoin") }; }, id);
+  assert(drawn.mask && drawn.cap === "round" && drawn.join === "bevel", `drawn: ${JSON.stringify(drawn)}`);
+  // The double line really has a see-through middle: across the left edge, the colour shows twice with the slide between.
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((x) => x.id === id), { strokeW: 36 }), id);
+  await redraw();
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  const r = await page.locator(`#stageBody .slide-wrap .hs-obj[data-el="${id}"]`).first().boundingBox();
+  const strip = join(outDir, "format-compound-strip.png");
+  await page.screenshot({ path: strip, clip: { x: Math.max(0, r.x - 24), y: r.y + r.height / 2 - 4, width: 48, height: 8 } });
+  const bands = JSON.parse(execFileSync("python3", ["-c", `
+from PIL import Image; import json, sys
+im = Image.open(sys.argv[1]).convert("RGB"); w, h = im.size
+row = [im.getpixel((x, h // 2)) for x in range(w)]
+navy = lambda p: p[2] > p[0] + 25 and p[0] < 120
+runs = 0; prev = False
+for p in row:
+    cur = navy(p)
+    if cur and not prev: runs += 1
+    prev = cur
+print(json.dumps({"runs": runs, "navy": sum(navy(p) for p in row)}))`, strip]).toString());
+  assert(bands.runs === 2, `two bands of colour with the slide between: ${JSON.stringify(bands)}`);
+  await shot("compound-line");
+  await undo();
+  assert(!(await slide()).elements.find((x) => x.id === id).join, "⌘Z takes the last change back");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

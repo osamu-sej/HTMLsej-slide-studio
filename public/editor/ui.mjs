@@ -364,6 +364,8 @@ export function createEditorUi(editor, app) {
   ];
   const setStroke = (color) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { stroke: color, ...(color !== "none" && o.kind !== "line" && E.withDefaults(o).stroke === "none" ? { strokeW: E.withDefaults(o).strokeW || 2 } : {}) } : o.kind === "icon" ? { color } : null));
   const setStrokeWidth = (pt) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { strokeW: ops.fromPt(pt), ...(E.withDefaults(o).stroke === "none" && o.kind !== "line" ? { stroke: "#1f3864" } : {}) } : o.kind === "icon" ? { strokeW: Math.max(0.5, pt) } : null));
+  /** 線の書式設定 (複合線・線端・結合点): a change to the outline of whatever has one. */
+  const setLineLook = (patch) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? patch : null));
   const setDash = (dash) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { dash: dash === "solid" ? undefined : dash } : null));
 
   async function insertImages() {
@@ -723,6 +725,15 @@ export function createEditorUi(editor, app) {
     });
   }
 
+  /** デザイン → スライドのサイズ: the slide's size (the template's wide screen) and the number the first slide carries. */
+  function slideSizeDialog() {
+    const first = number("firstNumber", app.firstNumber(), { step: 1, min: 0, max: 9999 });
+    const body = h("div", {},
+      fieldset("スライドのサイズ", h("p", { class: "hint" }, "ワイド画面（16:9・13.33×7.5インチ）です。SEJテンプレートの大きさなので変えられません。")),
+      fieldset("スライド番号", labeled("開始番号", first), h("p", { class: "hint" }, "最初のスライドにつける番号です（表紙を0にして、次を1から数える、など）。ページ番号に出ます。")));
+    settingsDialog("size-dialog", "スライドのサイズ", body, () => app.setFirstNumber(first.value));
+  }
+
   function ribbonOptions(anchor) {
     openPop(anchor, menu([
       { head: "リボンの表示オプション" },
@@ -970,7 +981,7 @@ export function createEditorUi(editor, app) {
       group("デザイナー",
         btn("magic", "デザイン|アイデア", "このスライドの見せ方の違う3つの案をAIが作り、並べて選べます（Codexに接続しているとき。右の「AIと話す」に届きます）", () => app.designIdeas(), { big: true, enabled: () => app.canAi() })),
       group("ユーザー設定",
-        btn("slide", "スライドの|サイズ", "ワイド画面（16:9・13.33×7.5インチ）：SEJテンプレートの大きさです", () => app.toast("スライドのサイズはワイド画面（16:9・13.33×7.5インチ）です（SEJテンプレート）"), { big: true }),
+        btn("slide", "スライドの|サイズ", "スライドのサイズ（ワイド画面 16:9・SEJテンプレート）とスライド番号の開始番号", () => slideSizeDialog(), { big: true }),
         btn("background", "背景の|書式設定", "このスライドの背景（SEJの淡い色・図と透明度・並べて表示）。すべてに適用・背景のリセットも", () => app.formatBackground(), { big: true, enabled: () => Boolean(app.slide()) }),
         col(btn("chartBar", "数字を数え上げる", "数字のカウントアップとグラフが伸びる動き（資料全体）", () => app.setDeckDesign({ motion: { numbers: !motion().numbers } }), { pressed: () => motion().numbers }),
           btn("spot", "波紋を広げる", "SEJの波紋を発表中にゆっくり広げる", () => app.setDeckDesign({ motion: { ambient: !motion().ambient } }), { pressed: () => motion().ambient }),
@@ -1155,6 +1166,7 @@ export function createEditorUi(editor, app) {
       "-", { head: "グループ化" },
       { label: "グループ化", icon: "group", keys: "⌘G", run: () => editor.groupSelection(), disabled: editor.selection.length < 2 },
       { label: "グループ解除", icon: "ungroup", keys: "⇧⌘G", run: () => editor.ungroupSelection(), disabled: !selected().some((o) => o.group) },
+      { label: "再グループ化", icon: "group", title: "グループ解除したオブジェクトをもう一度グループにします（解除したオブジェクトを選んでから）", run: () => editor.regroupSelection(), disabled: !editor.canRegroup() },
       "-", { head: "回転" },
       { label: "右へ90°回転", icon: "rotate", run: () => editor.rotateSelection(90) },
       { label: "左へ90°回転", icon: "rotate", run: () => editor.rotateSelection(-90) },
@@ -1175,8 +1187,22 @@ export function createEditorUi(editor, app) {
       box.append(colors(E.PALETTE.line, strokeOf(), setStroke, { none: "枠線なし" })(close));
       box.append(h("div", { class: "rb-menu-head" }, "太さ"), h("div", { class: "rb-menu" }, LINE_WIDTHS.map((pt) => h("button", { type: "button", onclick: () => { close(); setStrokeWidth(pt); } }, h("span", { class: "rb-weight", style: { "border-top-width": `${Math.max(1, pt)}px` } }), h("span", {}, `${pt} pt`)))));
       box.append(h("div", { class: "rb-menu-head" }, "実線/点線"), h("div", { class: "rb-menu" }, Object.entries(E.DASHES).map(([key, [label]]) => h("button", { type: "button", onclick: () => { close(); setDash(key); } }, dashSample(key), h("span", {}, label)))));
+      box.append(h("div", { class: "rb-menu-head" }, "複合線"), h("div", { class: "rb-menu", "data-lines": "cmpd" }, [["", "一重線"], ...Object.entries(E.COMPOUNDS)].map(([key, label]) => h("button", { type: "button", "data-cmpd": key, onclick: () => { close(); setLineLook({ cmpd: key || undefined }); } }, lineLookSample("cmpd", key), h("span", {}, label)))));
+      box.append(h("div", { class: "rb-menu-head" }, "線端"), h("div", { class: "rb-menu", "data-lines": "cap" }, Object.entries(E.LINE_CAPS).map(([key, label]) => h("button", { type: "button", "data-cap": key, onclick: () => { close(); setLineLook({ cap: key === "flat" ? undefined : key }); } }, lineLookSample("cap", key), h("span", {}, label)))));
+      box.append(h("div", { class: "rb-menu-head" }, "結合点"), h("div", { class: "rb-menu", "data-lines": "join" }, Object.entries(E.LINE_JOINS).map(([key, label]) => h("button", { type: "button", "data-join": key, onclick: () => { close(); setLineLook({ join: key }); } }, lineLookSample("join", key), h("span", {}, label)))));
       return box;
     };
+  }
+  /** A small picture of a compound line, a line end or a join. */
+  function lineLookSample(kind, key) {
+    const svg = E.s("svg", { viewBox: "0 0 60 14", width: 60, height: 14, "aria-hidden": "true" });
+    const put = (attrs) => svg.append(E.s("path", { fill: "none", stroke: "currentColor", ...attrs }));
+    if (kind === "cmpd") {
+      const rows = key === "tri" ? [2.5, 7, 11.5] : key === "dbl" ? [4, 10] : [7];
+      for (const y of rows) put({ d: `M2 ${y}H58`, "stroke-width": key === "tri" ? 2 : key === "dbl" ? 3 : 2.5 });
+    } else if (kind === "cap") put({ d: "M12 7H48", "stroke-width": 8, "stroke-linecap": { flat: "butt", round: "round", square: "square" }[key] });
+    else put({ d: "M10 12L30 3L50 12", "stroke-width": 6, "stroke-linejoin": key });
+    return svg;
   }
   function dashSample(key) {
     const svg = E.s("svg", { viewBox: "0 0 60 8", width: 60, height: 8, "aria-hidden": "true" });
@@ -1611,6 +1637,9 @@ export function createEditorUi(editor, app) {
         line("その他の色", h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(o.stroke) ? o.stroke : "#1f3864", onchange: (event) => setStroke(event.target.value) }), eyedrop(setStroke)),
         line("幅", numberInput(ops.toPt(o.strokeW || 2), (v) => setStrokeWidth(Math.max(0.25, v)), { step: 0.25, min: 0.25, unit: "pt" })),
         line("実線/点線", choice(Object.entries(E.DASHES).map(([k, [label]]) => [k, label]), o.dash || "solid", setDash)),
+        line("複合線", choice([["", "一重線"], ...Object.entries(E.COMPOUNDS)], o.cmpd || "", (v) => setLineLook({ cmpd: v || undefined }))),
+        line("線端", choice(Object.entries(E.LINE_CAPS), o.cap || "flat", (v) => setLineLook({ cap: v === "flat" ? undefined : v }))),
+        line("結合点", choice(Object.entries(E.LINE_JOINS), o.join || (o.kind === "line" ? "round" : "miter"), (v) => setLineLook({ join: v }))),
         chosen.some((x) => x.kind === "line") ? [
           line("線の種類", choice(Object.entries(E.ROUTES), o.route || "straight", (v) => editor.apply((x) => (x.kind === "line" ? { route: v === "straight" ? undefined : v } : null)))),
           line("始点の形", choice(Object.entries(E.ARROWHEADS), o.head || "none", (v) => editor.apply((x) => (x.kind === "line" ? { head: v === "none" ? undefined : v } : null)))),

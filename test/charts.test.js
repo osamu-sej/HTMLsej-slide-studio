@@ -273,3 +273,24 @@ test("グラフ フィルター hides series and categories without losing them;
   const pie = draw(E, { type: "pie", labels: ["a", "b"], series: [{ name: "s", values: [1, 2] }], opts: { table: true } });
   assert.equal(pie.el.querySelector(".hs-chart-table"), null, "no table for a pie");
 });
+
+test("第2軸: a combination chart's line reads on a scale of its own, with ticks down the right side", async () => {
+  const E = await loadEngine();
+  const data = { type: "combo", labels: ["4月", "5月", "6月"], series: [{ name: "売上", values: [12000, 15000, 18000] }, { name: "前年比", values: [96, 102, 108] }] };
+  assert.equal(E.normalizeObject({ id: "a", kind: "chart", x: 0, y: 0, w: 900, h: 500, chart: { ...data, opts: { axis2: true } } }).chart.opts.axis2, true);
+  assert.equal(E.normalizeObject({ id: "b", kind: "chart", x: 0, y: 0, w: 900, h: 500, chart: { ...data, type: "line", opts: { axis2: true } } }).chart.opts, undefined, "only a combination chart");
+  assert.equal(E.normalizeObject({ id: "c", kind: "chart", x: 0, y: 0, w: 900, h: 500, chart: { ...data, series: [data.series[0]], opts: { axis2: true } } }).chart.opts, undefined, "it takes two series");
+  const heights = (el) => [...el.querySelectorAll(".hs-chart circle.hs-mark")].map((c) => Number(c.getAttribute("cy")));
+  const { el: shared } = draw(E, data);
+  const { el: second } = draw(E, { ...data, opts: { axis2: true } });
+  // On the bars' scale (12000…18000) a line of 96…108 sits on the floor; on its own scale it climbs.
+  const flat = heights(shared);
+  const climbs = heights(second);
+  assert.ok(Math.max(...flat) - Math.min(...flat) < 2, `flat on a shared axis: ${flat}`);
+  assert.ok(Math.max(...climbs) - Math.min(...climbs) > 40, `a line of its own: ${climbs}`);
+  const ticks = [...second.querySelectorAll(".hs-chart .hs-tick2")].map((t) => t.textContent);
+  assert.equal(ticks.length, 5, "five marks down the right");
+  assert.ok(Number(ticks.at(-1)) >= 108 && Number(ticks.at(-1)) < 200, `the line's scale: ${ticks}`);
+  assert.ok(second.querySelectorAll(".hs-chart .hs-tick:not(.hs-tick2)").length >= 5, "the bars' scale down the left");
+  assert.equal(shared.querySelectorAll(".hs-chart .hs-tick2").length, 0);
+});
