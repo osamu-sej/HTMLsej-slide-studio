@@ -1566,6 +1566,64 @@ await step("グラフのデータ ラベル（すべての点・折れ線のラ�
   assert((await page.$$(q(".hs-slice-label"))).length === 4 && (await page.$$(q("rect"))).length === 0, "one undo goes back to the names");
 });
 
+await step("検索・置換（大文字小文字・全角半角・単語・このスライドだけ・見つかった場所の一覧・1回のUndo）", async () => {
+  await freshSlide();
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  await pasteClip(null, { text: "DXとＤＸとdxとADXの話" });
+  await page.waitForFunction(() => (window.__hsej.slide().elements || []).some((o) => o.kind === "text"), null, { timeout: 5000 });
+  await page.keyboard.press("Escape");
+  await redraw();
+  const here = await page.evaluate(() => window.__hsej.deck().slides.indexOf(window.__hsej.slide()));
+  const words = async () => ((await slide()).elements.find((o) => o.kind === "text")?.text || "").replace(/<[^>]+>/g, "");
+  const open = async () => {
+    await page.keyboard.press("Escape");
+    await page.click("#replaceBtn", { force: true });
+    await page.waitForSelector("#replaceDialog[open]");
+  };
+  const found = async () => page.textContent("#findCount");
+  await open();
+  // The options are what they were last time in this browser; start from the usual ones.
+  for (const id of ["#findCase", "#findWord", "#findWidth"]) if (await page.isChecked(id)) await page.uncheck(id);
+  await page.selectOption("#findScope", "deck");
+  await page.fill("#findInput", "dx");
+  assert(/4か所見つかりました/.test(await found()), `case and width alike: ${await found()}`);
+  assert((await page.$$("#findHits .find-hit")).length >= 1, "the list of where");
+  const hit = await page.textContent("#findHits .find-hit");
+  assert(hit.includes(`${here + 1}枚目`) && hit.includes("DX") && hit.includes("4か所"), `the slide and the words round it: ${hit}`);
+  await page.check("#findCase");
+  assert(/1か所見つかりました/.test(await found()), `大文字と小文字を区別する: ${await found()}`);
+  await page.uncheck("#findCase");
+  await page.check("#findWidth");
+  assert(/3か所見つかりました/.test(await found()), `全角と半角を区別する (ＤＸ is not DX): ${await found()}`);
+  await page.uncheck("#findWidth");
+  await page.check("#findWord");
+  assert(/3か所見つかりました/.test(await found()), `完全に一致する単語だけ (ADX is not one): ${await found()}`);
+  // The options stay for next time.
+  await page.keyboard.press("Escape");
+  await open();
+  assert(await page.isChecked("#findWord"), "the option stays");
+  await page.uncheck("#findWord");
+  // Only this slide: another slide with the same word is left alone.
+  await page.selectOption("#findScope", "slide");
+  assert(/4か所見つかりました/.test(await found()), `このスライドだけ: ${await found()}`);
+  await page.fill("#replaceInput", "DX推進");
+  await page.click("#replaceAllBtn");
+  await page.waitForTimeout(400);
+  assert((await words()) === "DX推進とDX推進とDX推進とADX推進の話", `all four replaced as plain text: ${await words()}`);
+  await undo();
+  assert((await words()) === "DXとＤＸとdxとADXの話", `one undo: ${await words()}`);
+  // Clicking a hit goes to the slide.
+  await page.keyboard.press("Control+Home");
+  await page.waitForTimeout(300);
+  await open();
+  await page.selectOption("#findScope", "deck");
+  await page.fill("#findInput", "ＡＤＸ");
+  await page.click("#findHits .find-hit");
+  await page.waitForTimeout(400);
+  assert(!(await page.isVisible("#replaceDialog[open]")), "the dialog closes");
+  assert(await page.evaluate((n) => window.__hsej.slide() === window.__hsej.deck().slides[n], here), "and the slide with the words is on the stage");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

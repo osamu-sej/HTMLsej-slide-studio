@@ -16,6 +16,7 @@ import { inkObject } from "./editor/ink.mjs?v=__APP_VERSION__";
 import { createShowTools, customShowsOf, keptInk, playerOptions, showOf, showSlides } from "./editor/show.mjs?v=__APP_VERSION__";
 import { createA11y } from "./editor/a11y.mjs?v=__APP_VERSION__";
 import { createPrinter } from "./editor/print.mjs?v=__APP_VERSION__";
+import { matcher as findMatcher, snippet as findSnippet } from "./editor/find.mjs?v=__APP_VERSION__";
 import { createProofing } from "./editor/proof.mjs?v=__APP_VERSION__";
 import { createFileInfo, infoOf, isFinal, FINAL_STATUS, strip as stripDeckData } from "./editor/fileinfo.mjs?v=__APP_VERSION__";
 import { createSlideTools } from "./editor/slidetools.mjs?v=__APP_VERSION__";
@@ -3349,21 +3350,55 @@ async function runNotes() {
 
 // ---------------------------------------------------------------- find & replace
 
-function countMatches(needle) {
-  if (!needle || !state.deck) return 0;
-  let count = 0;
-  const visit = (text) => { count += text.split(needle).length - 1; return text; };
-  eachText(state.deck.slides, visit);
-  eachObjectText(state.deck.slides, visit);
-  visit(state.deck.title || "");
-  return count;
+// 検索・置換: the options (大文字と小文字・単語・全角と半角) are kept in this browser; the matching itself is editor/find.mjs.
+const FIND_KEY = "hsej-find";
+function findOptions() {
+  return { needle: $("findInput").value, caseSensitive: $("findCase").checked, wholeWord: $("findWord").checked, width: !$("findWidth").checked };
 }
+function loadFindOptions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FIND_KEY) || "{}");
+    $("findCase").checked = saved.caseSensitive === true;
+    $("findWord").checked = saved.wholeWord === true;
+    $("findWidth").checked = saved.distinguishWidth === true;
+  } catch { /* the usual options */ }
+}
+function saveFindOptions() {
+  try { localStorage.setItem(FIND_KEY, JSON.stringify({ caseSensitive: $("findCase").checked, wholeWord: $("findWord").checked, distinguishWidth: $("findWidth").checked })); } catch { /* not kept */ }
+}
+/** The slides a search covers: all of them, or only the one on the stage. */
+const findScope = () => ($("findScope").value === "slide" ? [state.selected] : (state.deck?.slides || []).map((_, i) => i));
+
+/** Where the text is: for each slide in scope the number of hits and the words round the first. */
+function findHits(m) {
+  const hits = [];
+  if (!m || !state.deck) return hits;
+  for (const index of findScope()) {
+    const slide = state.deck.slides[index];
+    if (!slide) continue;
+    let count = 0;
+    let first = "";
+    const visit = (text) => {
+      const ranges = m.ranges(text);
+      if (ranges.length) { count += ranges.length; first ||= findSnippet(text, ranges[0]); }
+      return text;
+    };
+    eachText([slide], visit);
+    eachObjectText([slide], visit);
+    if (count) hits.push({ index, count, text: first });
+  }
+  return hits;
+}
+const findInTitle = (m) => ($("findScope").value === "deck" && m ? m.count(state.deck?.title || "") : 0);
 
 function updateFindCount() {
-  const needle = $("findInput").value;
-  const count = countMatches(needle);
-  $("findCount").textContent = needle ? `${count}か所見つかりました` : "資料タイトル・本文・ノート・詳細を対象にします。";
-  $("replaceAllBtn").disabled = !count;
+  const m = findMatcher(findOptions());
+  const hits = findHits(m);
+  const total = hits.reduce((sum, hit) => sum + hit.count, 0) + findInTitle(m);
+  $("findCount").textContent = !m ? "資料タイトル・本文・ノート・詳細を対象にします。" : total ? `${total}か所見つかりました（${hits.length}枚のスライド）` : "見つかりませんでした";
+  $("replaceAllBtn").disabled = !total;
+  $("findHits").replaceChildren(...hits.slice(0, 200).map((hit) => h("li", {}, h("button", { type: "button", class: "find-hit", title: `${hit.index + 1}枚目へ移動`, onclick: () => { $("replaceDialog").close(); select(hit.index); } },
+    h("b", {}, `${hit.index + 1}枚目`), ` ${hit.text}`, hit.count > 1 ? h("small", {}, `（${hit.count}か所）`) : null))));
 }
 
 /** Every word of the deck (slides, objects, notes, details) through `fn`: one undo step. */
@@ -3377,21 +3412,27 @@ function transformAllText(fn) {
 const spellcheckOn = () => { try { return localStorage.getItem("hsej-spellcheck") === "1"; } catch { return false; } };
 
 function replaceAll() {
-  const needle = $("findInput").value;
+  const m = findMatcher(findOptions());
+  if (!m) return;
   const replacement = $("replaceInput").value;
-  const count = countMatches(needle);
+  const hits = findHits(m);
+  const inTitle = findInTitle(m);
+  const count = hits.reduce((sum, hit) => sum + hit.count, 0) + inTitle;
   if (!count) return;
   pushUndo();
-  state.deck.slides = eachText(state.deck.slides, (text) => text.split(needle).join(replacement));
-  eachObjectText(state.deck.slides, (text) => text.split(needle).join(replacement));
-  state.deck.title = (state.deck.title || "").split(needle).join(replacement);
-  $("deckTitleInput").value = state.deck.title;
+  const swap = (text) => m.replace(text, replacement);
+  for (const hit of hits) {
+    state.deck.slides[hit.index] = eachText([state.deck.slides[hit.index]], swap)[0];
+    eachObjectText([state.deck.slides[hit.index]], swap);
+  }
+  if (inTitle) { state.deck.title = m.replace(state.deck.title || "", replacement); $("deckTitleInput").value = state.deck.title; }
   $("replaceDialog").close();
   markChanged({ structural: true });
   toast(`${count}か所を置き換えました（⌘Zで元に戻せます）`);
 }
 
 function openReplace() {
+  loadFindOptions();
   updateFindCount();
   $("replaceDialog").showModal();
   $("findInput").focus();
@@ -6645,6 +6686,7 @@ function bind() {
   $("notesRun").addEventListener("click", runNotes);
   $("replaceBtn").addEventListener("click", openReplace);
   $("findInput").addEventListener("input", updateFindCount);
+  for (const id of ["findCase", "findWord", "findWidth", "findScope"]) $(id).addEventListener("change", () => { saveFindOptions(); updateFindCount(); });
   $("replaceAllBtn").addEventListener("click", replaceAll);
   $("helpBtn").addEventListener("click", () => $("helpDialog").showModal());
   $("briefInput").addEventListener("input", () => { updateBriefCount(); saveCurrent(); });
