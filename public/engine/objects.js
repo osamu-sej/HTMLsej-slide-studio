@@ -1888,6 +1888,13 @@
   // As many categories and series as a PowerPoint chart brought over may carry.
   const CHART_MAX_LABELS = 500;
   const CHART_MAX_SERIES = 100;
+  // The chart kinds that take 近似曲線, 棒の間隔・重なり, 項目を逆順, 折れ線の書式 and 目盛間隔.
+  const TREND_CHART_KINDS = new Set(["bar", "line", "multi-line", "scatter"]);
+  const BAR_GAP_CHARTS = new Set(["bar", "combo", "clustered-bar", "stacked-bar", "100-stacked-bar", "hbar", "stacked-hbar"]);
+  const REVERSE_CHARTS = new Set(["bar", "combo", "clustered-bar", "stacked-bar", "100-stacked-bar", "line", "multi-line", "area", "stacked-area", "hbar", "stacked-hbar", "pie", "donut", "funnel", "radar"]);
+  const LINE_CHART_KINDS = new Set(["line", "multi-line"]);
+  const STEP_CHARTS = new Set(["line", "multi-line", "area", "scatter"]);
+  const MARKER_SHAPES = ["none", "circle", "square", "diamond", "triangle"];
   /** A chart's kind, category labels and series (numbers), title and unit. */
   function normalizeChart(raw) {
     if (!raw || typeof raw !== "object") return null;
@@ -1915,7 +1922,40 @@
     if (raw.opts?.grid === false) opts.grid = false;
     // 軸ラベル and 近似曲線 (グラフ要素).
     for (const key of ["axisX", "axisY"]) if (typeof raw.opts?.[key] === "string" && raw.opts[key].trim()) opts[key] = raw.opts[key].trim().slice(0, 40);
-    if (raw.opts?.trend === "linear") opts.trend = "linear";
+    // 近似曲線: a kind (線形・指数・対数・多項式・累乗・移動平均), its equation and R², a moving average's span.
+    const trend = raw.opts?.trend === true ? "linear" : raw.opts?.trend;
+    if (TREND_CHART_KINDS.has(out.type) && E.TREND_KINDS[trend]) {
+      opts.trend = trend;
+      if (raw.opts.trendEq === true && trend !== "movavg") opts.trendEq = true;
+      if (raw.opts.trendR2 === true && trend !== "movavg") opts.trendR2 = true;
+      const period = Math.round(Number(raw.opts.trendPeriod));
+      if (trend === "movavg" && period >= 2 && period <= 12 && period !== 2) opts.trendPeriod = period;
+    }
+    // 棒の間隔の幅・系列の重なり (% of a bar), 項目を逆順, 折れ線の滑らかさとマーカー, 円の角度・ドーナツの穴・切り出し, 目盛間隔.
+    const whole = (v, lo, hi) => { const n = v == null || v === "" ? NaN : Math.round(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : null; };
+    if (BAR_GAP_CHARTS.has(out.type)) {
+      const gap = whole(raw.opts?.gap, 0, 500);
+      const overlap = whole(raw.opts?.overlap, -100, 100);
+      if (gap != null) opts.gap = gap;
+      if (overlap != null && (out.type === "clustered-bar" || out.type === "hbar") && series.length > 1) opts.overlap = overlap;
+    }
+    if (raw.opts?.reverse === true && REVERSE_CHARTS.has(out.type)) opts.reverse = true;
+    if (LINE_CHART_KINDS.has(out.type)) {
+      if (raw.opts?.smooth === true) opts.smooth = true;
+      if (MARKER_SHAPES.includes(raw.opts?.marker) && raw.opts.marker !== "circle") opts.marker = raw.opts.marker;
+    }
+    if (out.type === "pie" || out.type === "donut") {
+      const angle = whole(raw.opts?.angle, 1, 359);
+      const explode = whole(raw.opts?.explode, 1, 40);
+      const hole = whole(raw.opts?.hole, 10, 90);
+      if (angle != null) opts.angle = angle;
+      if (explode != null) opts.explode = explode;
+      if (hole != null && out.type === "donut") opts.hole = hole;
+    }
+    if (STEP_CHARTS.has(out.type)) {
+      const step = Number(raw.opts?.axisStep);
+      if (Number.isFinite(step) && step > 0 && step < 1e12) opts.axisStep = step;
+    }
     // 数値の書式 (グラフ要素): decimals, a display unit (千・万・百万・億) and signs before and after the number.
     const nf = raw.opts?.numFmt;
     if (nf && typeof nf === "object") {
@@ -2538,7 +2578,8 @@
   function visibleChart(c) {
     const hs = new Set(c.opts?.hideSeries || []);
     const hl = new Set(c.opts?.hideLabels || []);
-    if (!hs.size && !hl.size) return c;
+    const flip = c.opts?.reverse === true && REVERSE_CHARTS.has(c.type);
+    if (!hs.size && !hl.size) return flip ? { ...c, labels: [...c.labels].reverse(), series: c.series.map((s) => ({ ...s, values: [...s.values].reverse() })) } : c;
     const keep = c.labels.map((_, i) => !hl.has(i));
     const at = [];
     let n = 0;
@@ -2546,6 +2587,7 @@
     const { hideSeries: _s, hideLabels: _l, ...opts } = c.opts;
     if (opts.totals) { opts.totals = opts.totals.filter((i) => keep[i]).map((i) => at[i]); if (!opts.totals.length) delete opts.totals; }
     const out = { ...c, labels: c.labels.filter((_, i) => keep[i]), series: c.series.filter((_, i) => !hs.has(i)).map((s) => ({ ...s, values: s.values.filter((_, i) => keep[i]) })) };
+    if (flip) { out.labels.reverse(); for (const s of out.series) s.values.reverse(); }
     if (Object.keys(opts).length) out.opts = opts; else delete out.opts;
     return out;
   }
@@ -3750,7 +3792,7 @@
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
-    LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
+    LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,

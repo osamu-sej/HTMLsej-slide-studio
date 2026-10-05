@@ -370,6 +370,46 @@
   }
   /** Where a mark's value label goes: its usual place, or above the error bar when there is one. */
   const labelAbove = (usual, errTop) => (errTop == null ? usual : Math.min(usual, errTop - 12));
+  // 棒の間隔の幅 (gap: % of a bar) and 系列の重なり (overlap: % of a bar): once either is set, a group of `k` bars fills
+  // its slot the way PowerPoint lays it out; otherwise the chart keeps its own width (`legacy`, the width of the group).
+  function barLayout(opts, slot, k, legacy) {
+    if (!Number.isFinite(opts?.gap) && !Number.isFinite(opts?.overlap)) return { bar: legacy / k, pitch: legacy / k, group: legacy };
+    const gap = (Number.isFinite(opts.gap) ? opts.gap : 80) / 100;
+    const ov = k > 1 && Number.isFinite(opts.overlap) ? opts.overlap / 100 : 0;
+    const bar = slot / (k - (k - 1) * ov + gap);
+    const pitch = bar * (1 - ov);
+    return { bar, pitch, group: pitch * (k - 1) + bar };
+  }
+  // 目盛間隔 (axisStep): the values the value axis marks, every step from its minimum, else `count` equal parts.
+  function axisTicks(opts, lo, hi, count = 4) {
+    const step = Number(opts?.axisStep);
+    if (step > 0 && (hi - lo) / step <= 24) {
+      const out = [];
+      for (let k = 0; lo + step * k <= hi + step * 1e-9; k += 1) out.push(Math.round((lo + step * k) * 1e9) / 1e9);
+      return out;
+    }
+    return Array.from({ length: count + 1 }, (_, k) => lo + ((hi - lo) * k) / count);
+  }
+  // 滑らかな線: a Catmull-Rom curve through the points as cubic segments (after an "M" to the first point).
+  function curveSegments(pts) {
+    const f = (v) => Math.round(v * 10) / 10;
+    let d = "";
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      const [p0, p1, p2, p3] = [pts[i - 1] || pts[i], pts[i], pts[i + 1], pts[i + 2] || pts[i + 1]];
+      d += ` C${f(p1[0] + (p2[0] - p0[0]) / 6)},${f(p1[1] + (p2[1] - p0[1]) / 6)} ${f(p2[0] - (p3[0] - p1[0]) / 6)},${f(p2[1] - (p3[1] - p1[1]) / 6)} ${f(p2[0])},${f(p2[1])}`;
+    }
+    return d;
+  }
+  // マーカーの形: the mark on each point of a line.
+  function lineMarker(shape, x, y, r, color) {
+    const common = { fill: color, stroke: "var(--bg)", "stroke-width": 4 };
+    const poly = (points) => s("polygon", { class: "hs-marker", points: points.map(([px, py]) => `${Math.round(px * 10) / 10},${Math.round(py * 10) / 10}`).join(" "), ...common, "stroke-linejoin": "round" });
+    if (shape === "square") return poly([[x - r, y - r], [x + r, y - r], [x + r, y + r], [x - r, y + r]]);
+    if (shape === "diamond") return poly([[x, y - r * 1.4], [x + r * 1.4, y], [x, y + r * 1.4], [x - r * 1.4, y]]);
+    if (shape === "triangle") return poly([[x, y - r * 1.3], [x + r * 1.2, y + r * 0.95], [x - r * 1.2, y + r * 0.95]]);
+    if (shape === "none") return s("circle", { cx: x, cy: y, r: Math.max(r, 9), fill: "transparent" });
+    return s("circle", { cx: x, cy: y, r, ...common });
+  }
 
   function pathLength(points) {
     let len = 0;
@@ -464,8 +504,9 @@
     const plotH = h - top - bottom;
     const max = axisBounds(opts, 0, niceMax(Math.max(...model.series.flatMap((serie) => serie.values), 0) * 1.05))[1];
     const slot = w / n;
-    const groupW = Math.min(slot * 0.74, 110 * k);
-    const bw = groupW / k;
+    const lay = barLayout(opts, slot, k, Math.min(slot * 0.74, 110 * k));
+    const groupW = lay.group;
+    const bw = lay.bar;
     const y0 = top + plotH;
     const showValues = n * k <= 18;
     svg.append(s("line", { class: "hs-axisline", x1: 0, x2: w, y1: y0, y2: y0 }));
@@ -474,7 +515,7 @@
       model.series.forEach((serie, si) => {
         const value = serie.values[i] ?? 0;
         const bh = (Math.min(max, Math.max(0, value)) / max) * plotH;
-        const x = x0 + si * bw;
+        const x = x0 + si * lay.pitch;
         svg.append(markTip(s("path", { class: "hs-bar", d: roundTop(x + 2, y0 - bh, Math.max(2, bw - 4), bh, Math.min(8, bw / 4)), fill: SERIES[si % SERIES.length] }), `${label}・${serie.name}：${fmt(value)}`, i * k + si));
         const errTop = errorBar(svg, x + bw / 2, value, (v) => y0 - (Math.min(max, Math.max(0, v)) / max) * plotH, opts);
         if (showValues) svg.append(s("text", { class: "hs-val", x: x + bw / 2, y: labelAbove(y0 - bh - 12, errTop), "text-anchor": "middle", style: { "font-size": "22px" } }, fmt(value)));
@@ -495,7 +536,7 @@
       const labelW = Math.min(w * 0.36, Math.max(...labels.map((label) => label.length), 2) * 26 + 24);
       const plotW = w - labelW - 130;
       const slot = h / n;
-      const barH = Math.min(46, slot * 0.58);
+      const barH = barLayout(opts, slot, 1, Math.min(46, slot * 0.58)).bar;
       const max = Math.max(...values, 0) || 1;
       labels.forEach((label, i) => {
         const y = slot * i + (slot - barH) / 2;
@@ -517,9 +558,9 @@
     const all = combo && !second ? [...values, ...model.series[1].values] : values;
     const max = axisBounds(opts, 0, niceMax(Math.max(...all, 0) * 1.05))[1];
     const slot = (w - padL - padR) / n;
-    const bw = Math.min(110, slot * 0.54);
+    const bw = barLayout(opts, slot, 1, Math.min(110, slot * 0.54)).bar;
     const y0 = top + plotH;
-    if (second) valueAxis(svg, 0, max, { left: padL, right: w - padR, top, bottom: y0 });
+    if (second) valueAxis(svg, 0, max, { left: padL, right: w - padR, top, bottom: y0 }, opts);
     else svg.append(s("line", { class: "hs-axisline", x1: 0, x2: w, y1: y0, y2: y0 }));
     values.forEach((value, i) => {
       const x = padL + slot * i + (slot - bw) / 2;
@@ -530,7 +571,7 @@
       if (!combo) svg.append(s("text", { class: `hs-val${isHot ? " hot" : ""}`, x: x + bw / 2, y: labelAbove(y0 - bh - 16, errTop), "text-anchor": "middle" }, fmt(value)));
       svg.append(s("text", { x: x + bw / 2, y: y0 + 40, "text-anchor": "middle" }, labels[i]));
     });
-    if (opts.trend === "linear" && !combo) trendLine(svg, values.map((v, i) => [slot * i + slot / 2, y0 - (Math.min(max, Math.max(0, v)) / max) * plotH]));
+    if (opts.trend && !combo) trendLine(svg, values.map((_, i) => i + 1), values, (x, y) => [slot * (x - 1) + slot / 2, y0 - (Math.min(max, Math.max(0, y)) / max) * plotH], "var(--ink)", opts, 0, [w, top - 24]);
     if (combo) {
       const line = model.series[1].values;
       const lo2 = second ? Math.min(0, ...line) : 0;
@@ -577,28 +618,29 @@
     const xOf = (i) => left + (n === 1 ? plotW / 2 : (plotW * i) / (n - 1));
     // Values beyond the axis (軸の書式) stay on its edge.
     const yOf = (v) => top + plotH - ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo || 1)) * plotH;
-    for (let k = 0; k <= 4; k += 1) {
-      const v = lo + ((hi - lo) * k) / 4;
+    axisTicks(opts, lo, hi).forEach((v, k) => {
       const y = yOf(v);
       svg.append(s("line", { class: k === 0 ? "hs-axisline" : "hs-grid", x1: left, x2: left + plotW, y1: y, y2: y }));
       svg.append(s("text", { class: "hs-tick", x: left - 14, y: y + 7, "text-anchor": "end" }, fmtTick(v)));
-    }
+    });
     const step = Math.ceil(n / 8);
     labels.forEach((label, i) => { if (i % step === 0 || i === n - 1) svg.append(s("text", { x: xOf(i), y: top + plotH + 42, "text-anchor": "middle" }, label.length > 8 ? `${label.slice(0, 7)}…` : label)); });
     series.forEach((serie, si) => {
       const color = many ? SERIES[si % SERIES.length] : "var(--accent)";
       const pts = serie.values.map((v, i) => [xOf(i), yOf(v)]);
+      const smooth = opts.smooth === true && pts.length > 2;
       if (!many) {
-        const area = `M${pts[0][0]},${yOf(lo)} ${pts.map((p) => `L${p[0]},${p[1]}`).join(" ")} L${pts.at(-1)[0]},${yOf(lo)} Z`;
+        const area = `M${pts[0][0]},${yOf(lo)} L${pts[0][0]},${pts[0][1]}${smooth ? curveSegments(pts) : ` ${pts.slice(1).map((p) => `L${p[0]},${p[1]}`).join(" ")}`} L${pts.at(-1)[0]},${yOf(lo)} Z`;
         svg.append(s("path", { d: area, fill: color, "fill-opacity": 0.1 }));
       }
-      svg.append(s("polyline", { class: "hs-draw", points: pts.map((p) => p.join(",")).join(" "), fill: "none", stroke: color, "stroke-width": si === 0 ? 5 : 3.5, "stroke-linejoin": "round", "stroke-linecap": "round", style: { "--len": pathLength(pts), "--i": si } }));
-      if (opts.trend === "linear") trendLine(svg, pts, color);
+      const stroke = { class: "hs-draw", fill: "none", stroke: color, "stroke-width": si === 0 ? 5 : 3.5, "stroke-linejoin": "round", "stroke-linecap": "round", style: { "--len": Math.ceil(pathLength(pts) * (smooth ? 1.2 : 1)), "--i": si } };
+      svg.append(smooth ? s("path", { ...stroke, d: `M${pts[0][0]},${pts[0][1]}${curveSegments(pts)}` }) : s("polyline", { ...stroke, points: pts.map((p) => p.join(",")).join(" ") }));
+      if (opts.trend) trendLine(svg, serie.values.map((_, i) => i + 1), serie.values, (x, y) => [xOf(x - 1), yOf(y)], color, opts, si, [left + plotW, top - 12]);
       const hotIndex = serie.values.length - 1;
       pts.forEach(([x, y], i) => {
         const end = i === hotIndex;
         const errTop = errorBar(svg, x, serie.values[i], yOf, opts);
-        svg.append(markTip(s("circle", { cx: x, cy: y, r: end ? 11 : 7, fill: color, stroke: "var(--bg)", "stroke-width": 4 }), `${many ? `${serie.name} ` : ""}${labels[i] ?? ""}：${fmt(serie.values[i])}`, i));
+        svg.append(markTip(lineMarker(opts.marker, x, y, end ? 11 : 7, color), `${many ? `${serie.name} ` : ""}${labels[i] ?? ""}：${fmt(serie.values[i])}`, i));
         if (!many && (end || serie.values[i] === Math.max(...serie.values))) svg.append(s("text", { class: `hs-val${end ? " hot" : ""}`, x, y: labelAbove(y - 24, errTop), "text-anchor": "middle" }, fmt(serie.values[i])));
       });
       if (direct) {
@@ -622,31 +664,43 @@
     return 10 * exp;
   }
 
-  function donutChart(svg, model, w, h) {
+  function donutChart(svg, model, w, h, opts = {}) {
     const values = (model.series[0]?.values || []).map((v) => Math.max(0, v));
     const labels = model.labels;
     const total = values.reduce((a, b) => a + b, 0) || 1;
     // 円 (pie): the same slices with no hole — a circle of half the radius stroked as wide as the radius.
     const pie = model.type === "pie";
-    const outer = Math.min(h * 0.38, w * 0.24);
-    const r = pie ? (outer * 1.1) / 2 : outer;
-    const cx = outer + 60;
+    // The slices pulled out (要素の切り出し) need room round the circle, so the circle shrinks by as much.
+    const outer = Math.min(h * 0.38, w * 0.24) / (1 + (Number.isFinite(opts.explode) ? opts.explode : 0) / 100);
+    let r = pie ? (outer * 1.1) / 2 : outer;
+    let stroke = pie ? r * 2 : r * 0.42;
+    // ドーナツの穴の大きさ (% of the outer radius), 最初のスライスの角度 and 要素の切り出し (% of the radius).
+    if (!pie && Number.isFinite(opts.hole)) {
+      const outerR = outer * 1.21;
+      const innerR = (outerR * opts.hole) / 100;
+      r = (outerR + innerR) / 2;
+      stroke = outerR - innerR;
+    }
+    const outerR = r + stroke / 2;
+    const push = Number.isFinite(opts.explode) ? (outerR * opts.explode) / 100 : 0;
+    const cx = outer + 60 + push;
     const cy = h / 2;
-    const stroke = pie ? r * 2 : r * 0.42;
     const circ = 2 * Math.PI * r;
-    let start = -90;
+    let start = -90 + (Number.isFinite(opts.angle) ? opts.angle : 0);
     values.forEach((value, i) => {
       const len = (value / total) * circ;
       const gap = values.length > 1 ? 4 : 0;
-      svg.append(markTip(s("circle", { class: "hs-arc", cx, cy, r, fill: "none", stroke: SERIES[i % SERIES.length], "stroke-width": stroke, "stroke-dasharray": `${Math.max(0, len - gap)} ${circ}`, transform: `rotate(${start} ${cx} ${cy})`, style: { "--len": Math.max(0, len - gap), "--i": i } }), `${labels[i]}：${fmt(value)}（${Math.round((value / total) * 100)}%）`, i));
+      const mid = ((start + ((value / total) * 360) / 2) * Math.PI) / 180;
+      const move = push && values.length > 1 ? `translate(${Math.round(Math.cos(mid) * push * 10) / 10} ${Math.round(Math.sin(mid) * push * 10) / 10}) ` : "";
+      svg.append(markTip(s("circle", { class: "hs-arc", cx, cy, r, fill: "none", stroke: SERIES[i % SERIES.length], "stroke-width": stroke, "stroke-dasharray": `${Math.max(0, len - gap)} ${circ}`, transform: `${move}rotate(${Math.round(start * 100) / 100} ${cx} ${cy})`, style: { "--len": Math.max(0, len - gap), "--i": i } }), `${labels[i]}：${fmt(value)}（${Math.round((value / total) * 100)}%）`, i));
       start += (value / total) * 360;
     });
     const top = values.indexOf(Math.max(...values));
-    if (!pie) {
+    if (!pie && r - stroke / 2 > 90) {
       svg.append(s("text", { class: "hs-val", x: cx, y: cy + 10, "text-anchor": "middle", style: { "font-size": "64px" } }, `${Math.round((values[top] / total) * 100)}%`));
       svg.append(s("text", { x: cx, y: cy + 52, "text-anchor": "middle", class: "hs-tick" }, labels[top] ?? ""));
     }
-    const lx = cx + r + stroke / 2 + 70;
+    const lx = cx + outerR + push + 70;
     const rowH = Math.min(72, (h - 40) / Math.max(1, labels.length));
     const y0 = cy - (rowH * labels.length) / 2 + rowH / 2;
     labels.forEach((label, i) => {
@@ -658,15 +712,14 @@
   }
 
   /** Value axis shared by the area, scatter and waterfall charts: nice limits, a few gridlines with their numbers. */
-  function valueAxis(svg, lo, hi, { left, right, top, bottom, ticks = 4 }) {
+  function valueAxis(svg, lo, hi, { left, right, top, bottom, ticks = 4 }, opts = null) {
     const plotH = bottom - top;
     const yOf = (v) => bottom - ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo || 1)) * plotH;
-    for (let k = 0; k <= ticks; k += 1) {
-      const v = lo + ((hi - lo) * k) / ticks;
+    axisTicks(opts, lo, hi, ticks).forEach((v, k) => {
       const y = yOf(v);
       svg.append(s("line", { class: k === 0 ? "hs-axisline" : "hs-grid", x1: left, x2: right, y1: y, y2: y }));
       svg.append(s("text", { class: "hs-tick", x: left - 12, y: y + 8, "text-anchor": "end" }, fmtTick(Math.round(v * 100) / 100)));
-    }
+    });
     return yOf;
   }
 
@@ -680,7 +733,7 @@
     const left = 90;
     const top = 40;
     const bottom = h - 64;
-    const yOf = valueAxis(svg, lo, hi, { left, right: w, top, bottom });
+    const yOf = valueAxis(svg, lo, hi, { left, right: w, top, bottom }, opts);
     const n = Math.max(2, labels.length);
     const xOf = (i) => left + ((w - left - 20) * i) / (n - 1);
     const step = Math.ceil(labels.length / 8);
@@ -706,7 +759,7 @@
     const top = 30;
     const bottom = h - 64;
     const right = w - 20;
-    const yOf = valueAxis(svg, ylo, yhi, { left, right, top, bottom });
+    const yOf = valueAxis(svg, ylo, yhi, { left, right, top, bottom }, opts);
     const xOf = (v) => left + ((v - xlo) / (xhi - xlo || 1)) * (right - left);
     for (let k = 0; k <= 4; k += 1) {
       const v = xlo + ((xhi - xlo) * k) / 4;
@@ -714,7 +767,7 @@
     }
     model.series.forEach((serie, si) => {
       serie.values.forEach((v, i) => svg.append(markTip(s("circle", { class: "hs-dot", cx: xOf(xs[i]), cy: yOf(v), r: 11, fill: SERIES[si % SERIES.length], "fill-opacity": 0.85 }), `${model.series.length > 1 ? `${serie.name}・` : ""}X ${fmt(xs[i])}／Y ${fmt(v)}`, i)));
-      if (opts.trend === "linear") trendLine(svg, serie.values.map((v, i) => [xOf(xs[i]), yOf(v)]), SERIES[si % SERIES.length]);
+      if (opts.trend) trendLine(svg, xs, serie.values, (x, y) => [xOf(x), yOf(y)], SERIES[si % SERIES.length], opts, si, [right, top - 6]);
     });
   }
 
@@ -803,24 +856,95 @@
   // Charts with axes (they take 軸ラベル).
   const AXIS_CHARTS = new Set(["bar", "combo", "clustered-bar", "stacked-bar", "100-stacked-bar", "line", "multi-line", "area", "stacked-area", "scatter", "bubble", "waterfall", "hbar", "stacked-hbar", "histogram", "boxplot"]);
 
-  /** 近似曲線（線形）: the least-squares line through points on the screen (both axes being linear, it is the same line). */
-  function trendLine(svg, pts, color = "var(--ink)") {
-    const ok = pts.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
-    if (ok.length < 2) return;
-    const n = ok.length;
-    const sx = ok.reduce((a, [x]) => a + x, 0);
-    const sy = ok.reduce((a, [, y]) => a + y, 0);
-    const sxx = ok.reduce((a, [x]) => a + x * x, 0);
-    const sxy = ok.reduce((a, [x, y]) => a + x * y, 0);
-    const b = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1);
-    const a = (sy - b * sx) / n;
-    const x1 = Math.min(...ok.map(([x]) => x));
-    const x2 = Math.max(...ok.map(([x]) => x));
-    svg.append(s("line", { class: "hs-trend", x1, y1: a + b * x1, x2, y2: a + b * x2, stroke: color, "stroke-width": 3, "stroke-dasharray": "12 9", "stroke-linecap": "round" }));
+  // 近似曲線: the kinds PowerPoint offers, fitted by least squares on the data (not on the screen).
+  const TREND_KINDS = { linear: "線形", exp: "指数", log: "対数", poly: "多項式（2次）", power: "累乗", movavg: "移動平均" };
+  const sig = (v) => { const n = Number(Number(v).toPrecision(4)); return Number.isFinite(n) ? String(n) : "0"; };
+  /** Terms joined as PowerPoint writes them: "y = 2x - 3" (a term too small to matter is left out). */
+  const polyWords = (terms) => {
+    const big = Math.max(...terms.map(([c]) => Math.abs(c)), 0);
+    const kept = terms.map(([c, tail]) => [Number(Number(c).toPrecision(4)), tail]).filter(([c]) => Math.abs(c) > big * 1e-9);
+    return `y = ${kept.map(([c, tail], i) => `${i ? (c < 0 ? " - " : " + ") : c < 0 ? "-" : ""}${Math.abs(c) === 1 && tail ? "" : sig(Math.abs(c))}${tail}`).join("") || "0"}`;
+  };
+  /** The curve of one kind through the points (xs, ys): { pts (data space), eq, r2 }, or null when the data cannot carry
+   *  it (指数・累乗 need every y above 0, 対数・累乗 every x above 0, and each kind needs enough points). */
+  function trendFit(kind, xs, ys, { samples = 48, period = 2 } = {}) {
+    const pts = xs.map((x, i) => [Number(x), Number(ys[i])]).filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+    const n = pts.length;
+    if (n < 2 || !TREND_KINDS[kind]) return null;
+    if (kind === "movavg") {
+      const k = Math.min(12, Math.max(2, Math.round(period) || 2));
+      if (n <= k) return null;
+      const out = [];
+      for (let i = k - 1; i < n; i += 1) out.push([pts[i][0], pts.slice(i - k + 1, i + 1).reduce((a, p) => a + p[1], 0) / k]);
+      return { pts: out, eq: "", r2: null };
+    }
+    const mean = (list) => list.reduce((a, v) => a + v, 0) / list.length;
+    if ((kind === "exp" || kind === "power") && pts.some(([, y]) => y <= 0)) return null;
+    if ((kind === "log" || kind === "power") && pts.some(([x]) => x <= 0)) return null;
+    // y' = a + b x' on the transformed data (the straight-line family), or the quadratic by its normal equations.
+    const line = (fx, fy) => {
+      const tx = pts.map(([x]) => fx(x));
+      const ty = pts.map(([, y]) => fy(y));
+      const mx = mean(tx);
+      const my = mean(ty);
+      let sxx = 0;
+      let sxy = 0;
+      tx.forEach((v, i) => { sxx += (v - mx) ** 2; sxy += (v - mx) * (ty[i] - my); });
+      const b = sxx ? sxy / sxx : 0;
+      return { a: my - b * mx, b, tx, ty };
+    };
+    let predict;
+    let eq;
+    let actual = pts.map(([, y]) => y);
+    let guess;
+    if (kind === "poly") {
+      if (n < 3) return null;
+      const s = (k) => pts.reduce((a, [x]) => a + x ** k, 0);
+      const t = (k) => pts.reduce((a, [x, y]) => a + y * x ** k, 0);
+      const m = [[s(4), s(3), s(2), t(2)], [s(3), s(2), s(1), t(1)], [s(2), s(1), n, t(0)]];
+      for (let c = 0; c < 3; c += 1) {
+        let best = c;
+        for (let r = c + 1; r < 3; r += 1) if (Math.abs(m[r][c]) > Math.abs(m[best][c])) best = r;
+        [m[c], m[best]] = [m[best], m[c]];
+        if (Math.abs(m[c][c]) < 1e-12) return null;
+        for (let r = 0; r < 3; r += 1) if (r !== c) { const f = m[r][c] / m[c][c]; for (let k = c; k < 4; k += 1) m[r][k] -= f * m[c][k]; }
+      }
+      const [a2, a1, a0] = m.map((row, i) => row[3] / row[i]);
+      predict = (x) => a2 * x * x + a1 * x + a0;
+      eq = polyWords([[a2, "x²"], [a1, "x"], [a0, ""]]);
+      guess = pts.map(([x]) => predict(x));
+    } else {
+      const fit = { linear: () => line((x) => x, (y) => y), exp: () => line((x) => x, Math.log), log: () => line(Math.log, (y) => y), power: () => line(Math.log, Math.log) }[kind]();
+      const { a, b } = fit;
+      predict = { linear: (x) => a + b * x, exp: (x) => Math.exp(a + b * x), log: (x) => a + b * Math.log(x), power: (x) => Math.exp(a + b * Math.log(x)) }[kind];
+      eq = { linear: () => polyWords([[b, "x"], [a, ""]]), exp: () => `y = ${sig(Math.exp(a))}e^${sig(b)}x`, log: () => polyWords([[b, "ln(x)"], [a, ""]]), power: () => `y = ${sig(Math.exp(a))}x^${sig(b)}` }[kind]();
+      // Like Office, the curves that are straight lines in log space report R² in that space.
+      if (kind === "exp" || kind === "power") { actual = fit.ty; guess = fit.tx.map((v) => a + b * v); } else guess = pts.map(([x]) => predict(x));
+    }
+    const my = mean(actual);
+    const total = actual.reduce((acc, v) => acc + (v - my) ** 2, 0);
+    const resid = actual.reduce((acc, v, i) => acc + (v - guess[i]) ** 2, 0);
+    const r2 = total ? Math.max(0, 1 - resid / total) : 1;
+    const x1 = Math.min(...pts.map((p) => p[0]));
+    const x2 = Math.max(...pts.map((p) => p[0]));
+    const steps = kind === "linear" ? 1 : samples;
+    const curve = Array.from({ length: steps + 1 }, (_, i) => { const x = x1 + ((x2 - x1) * i) / steps; return [x, predict(x)]; }).filter(([, y]) => Number.isFinite(y));
+    return curve.length > 1 ? { pts: curve, eq, r2 } : null;
+  }
+  /** 近似曲線: the fitted curve drawn dashed (`toPx` maps data to the screen), with its equation and R² when asked
+   *  (written right-aligned at `corner`, the chart's top right, a row for each series). */
+  function trendLine(svg, xs, ys, toPx, color = "var(--ink)", opts = {}, row = 0, corner = null) {
+    const fit = trendFit(TREND_KINDS[opts.trend] ? opts.trend : "linear", xs, ys, { period: opts.trendPeriod });
+    if (!fit) return;
+    const px = fit.pts.map(([x, y]) => toPx(x, y));
+    const fix = (v) => Math.round(v * 10) / 10;
+    svg.append(s("polyline", { class: "hs-trend", points: px.map(([x, y]) => `${fix(x)},${fix(y)}`).join(" "), fill: "none", stroke: color, "stroke-width": 3, "stroke-dasharray": "12 9", "stroke-linecap": "round", "stroke-linejoin": "round" }));
+    const words = [opts.trendEq ? fit.eq : "", opts.trendR2 && fit.r2 != null ? `R² = ${sig(fit.r2)}` : ""].filter(Boolean).join("　");
+    if (words) { const [x, y] = corner || [px.at(-1)[0], px.at(-1)[1] - 16]; svg.append(s("text", { class: "hs-trend-eq", x: fix(x), y: fix(y + row * 26), "text-anchor": "end" }, words)); }
   }
 
   /** 集合横棒・積み上げ横棒: the labels down the left, each series a bar beside the others (or after them). */
-  function hbarChart(svg, model, w, h) {
+  function hbarChart(svg, model, w, h, opts = {}) {
     const stacked = model.type === "stacked-hbar";
     const labels = model.labels;
     const series = model.series.length ? model.series : [{ name: "", values: [] }];
@@ -831,8 +955,9 @@
     const slot = h / n;
     const totals = labels.map((_, i) => series.reduce((a, serie) => a + Math.max(0, serie.values[i] || 0), 0));
     const max = niceMax((stacked ? Math.max(...totals, 0) : Math.max(...series.flatMap((serie) => serie.values), 0)) * 1.02 || 1);
-    const groupH = Math.min(slot * 0.74, (stacked ? 1 : k) * 46);
-    const bh = stacked ? groupH : groupH / k;
+    const lay = barLayout(opts, slot, stacked ? 1 : k, Math.min(slot * 0.74, (stacked ? 1 : k) * 46));
+    const groupH = lay.group;
+    const bh = lay.bar;
     const hot = k === 1 ? totals.indexOf(Math.max(...totals)) : -1;
     svg.append(s("line", { class: "hs-axisline", x1: labelW, x2: labelW, y1: 0, y2: h }));
     labels.forEach((label, i) => {
@@ -842,7 +967,7 @@
       series.forEach((serie, si) => {
         const v = Math.max(0, serie.values[i] || 0);
         const bw = (v / max) * plotW;
-        const y = stacked ? y0 : y0 + si * bh;
+        const y = stacked ? y0 : y0 + si * lay.pitch;
         const fill = stacked ? stackColor(si) : k > 1 ? SERIES[si % SERIES.length] : i === hot ? "var(--accent)" : "var(--c-muted)";
         svg.append(markTip(s("rect", { class: "hs-bar h", x, y: stacked ? y : y + 2, width: Math.max(stacked ? 0 : 2, bw), height: Math.max(2, stacked ? bh : bh - 4), rx: stacked ? 0 : 6, fill }), `${label}${serie.name ? `・${serie.name}` : ""}：${fmt(v)}`, i * k + si));
         if (stacked) {
@@ -1112,7 +1237,7 @@
     });
   }
 
-  function stackedChart(svg, model, w, h) {
+  function stackedChart(svg, model, w, h, opts = {}) {
     const percent = model.type === "100-stacked-bar";
     const labels = model.labels;
     const n = Math.max(1, labels.length);
@@ -1122,7 +1247,7 @@
     const bottom = 64;
     const plotH = h - top - bottom;
     const slot = w / n;
-    const bw = Math.min(120, slot * 0.56);
+    const bw = barLayout(opts, slot, 1, Math.min(120, slot * 0.56)).bar;
     const y0 = top + plotH;
     svg.append(s("line", { class: "hs-axisline", x1: 0, x2: w, y1: y0, y2: y0 }));
     labels.forEach((label, i) => {
@@ -2812,7 +2937,7 @@
     get icons() { return ICONS; },
     setIcons(map) { ICONS = map || {}; },
     setSejArt(art) { SEJ_ART = art || {}; },
-    render, mount, fit, brandCheck, formatNumber, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, mediaEl, resolveSrc, chart, chartModel, histogramBins, boxStats, squarify, hierarchy, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
+    render, mount, fit, brandCheck, formatNumber, trendFit, TREND_KINDS, axisTicks, barLayout, scale, fontHref, recommendedBuild, kineticOf, backdropOf, repaintCharts, mediaOf, mediaEl, resolveSrc, chart, chartModel, histogramBins, boxStats, squarify, hierarchy, youtubeId, numParts, splitLabel, strip, rich, icon, h, s, cssEscape, storyMap,
     evalFormula, formulaTokens, rankShow, simUpdate, gapUpdate, fmtNum,
   });
   root.SlideEngine = Engine;

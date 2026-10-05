@@ -320,11 +320,14 @@ export function createTableUi(editor, app, kit) {
       "-", { head: "数値の書式" },
       { label: opts.numFmt ? `数値の書式（${numFmtWords(opts.numFmt)}）…` : "数値の書式（桁数・表示単位・記号）…", run: () => numberFormat() },
       { label: "数値の書式をもとに戻す", disabled: !opts.numFmt, run: () => setOpts({ numFmt: undefined }) },
+      "-", { head: "書式設定" },
+      { label: "グラフの書式設定（棒の間隔・折れ線・円・目盛間隔・項目の順）…", disabled: !formatParts(chart()?.chart || {}).length, title: "棒の間隔の幅と系列の重なり、折れ線の滑らかさとマーカー、円の角度と穴と切り出し、目盛間隔、項目を逆順に", run: () => chartFormat() },
       "-", { head: "第2軸（複合グラフ）" },
       { label: "折れ線を第2軸にする（右側に別の目盛り）", on: opts.axis2 === true, disabled: chart()?.chart.type !== "combo" || (chart()?.chart.series.length || 0) < 2, title: "複合（棒と折れ線）で系列が2つあるときに使えます", run: () => setOpts({ axis2: opts.axis2 === true ? undefined : true }) },
       "-", { head: "軸ラベル・近似曲線" },
       { label: opts.axisX || opts.axisY ? `軸ラベル（${[opts.axisX, opts.axisY].filter(Boolean).join("・")}）…` : "軸ラベル…", run: () => axisTitles() },
       { label: "近似曲線（線形）", on: opts.trend === "linear", disabled: !TREND_CHARTS.has(chart()?.chart.type), title: "縦棒・折れ線・散布図で使えます", run: () => setOpts({ trend: opts.trend === "linear" ? false : "linear" }) },
+      { label: opts.trend && opts.trend !== "linear" ? `近似曲線（${E.TREND_KINDS[opts.trend]}）…` : "近似曲線の種類（指数・対数・多項式・累乗・移動平均）…", disabled: !TREND_CHARTS.has(chart()?.chart.type), title: "縦棒・折れ線・散布図で使えます。数式とR-2乗値も出せます", run: () => chartFormat() },
       { label: opts.axisMin != null || opts.axisMax != null ? `軸の書式（${opts.axisMin ?? "自動"} 〜 ${opts.axisMax ?? "自動"}）…` : "軸の書式（最小値・最大値）…", disabled: !BOUND_CHARTS.has(chart()?.chart.type), title: "縦棒・集合縦棒・折れ線・面・散布図で使えます（空にすると自動）", run: () => axisFormat() },
     ]);
   }
@@ -405,6 +408,67 @@ export function createTableUi(editor, app, kit) {
           const v = (label) => dialog.querySelector(`[name="${label}"]`).value;
           dialog.close();
           setOpts({ numFmt: { decimals: v("小数点以下の桁数") === "" ? undefined : Number(v("小数点以下の桁数")), scale: Number(v("表示単位")) > 1 ? Number(v("表示単位")) : undefined, prefix: v("数値の前の記号").trim() || undefined, suffix: v("数値の後ろの記号").trim() || undefined } });
+        } }, "OK")));
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => dialog.remove());
+    dialog.showModal();
+  }
+  const MARKER_NAMES = [["circle", "丸（標準）"], ["square", "四角"], ["diamond", "ひし形"], ["triangle", "三角"], ["none", "なし"]];
+  /** The parts of グラフの書式設定 that suit a kind of chart (and how many series it has). */
+  function formatParts(c) {
+    const parts = [];
+    if (E.BAR_GAP_CHARTS.has(c.type)) parts.push("bars");
+    if (E.LINE_CHART_KINDS.has(c.type)) parts.push("line");
+    if (c.type === "pie" || c.type === "donut") parts.push("pie");
+    if (E.STEP_CHARTS.has(c.type) || E.REVERSE_CHARTS.has(c.type)) parts.push("axis");
+    if (E.TREND_CHART_KINDS.has(c.type)) parts.push("trend");
+    return parts;
+  }
+  /** グラフの書式設定: bar gap and overlap, smooth lines and markers, a pie's angle, hole and explosion, the axis step,
+   *  the category order, and the trendline's kind (the parts that suit the chart show). */
+  function chartFormat() {
+    const o = chart();
+    if (!o) return;
+    const c = o.chart;
+    const opts = c.opts || {};
+    const parts = formatParts(c);
+    const field = (label, control) => h("label", { class: "field" }, h("span", {}, label), control);
+    const num = (name, label, value, min, max, hint) => field(label, h("input", { type: "number", name, "aria-label": label, min: String(min), max: String(max), step: name === "step" ? "any" : "1", value: value ?? "", placeholder: hint || "自動" }));
+    const check = (name, label, on) => h("label", { class: "field cf-check" }, h("input", { type: "checkbox", name, checked: on || null }), h("span", {}, label));
+    const choose = (name, label, choices, value) => field(label, h("select", { name, "aria-label": label }, choices.map(([v, l]) => h("option", { value: v, selected: v === value || null }, l))));
+    const section = (title, ...controls) => h("fieldset", { class: "cf-section" }, h("legend", {}, title), ...controls);
+    const body = [];
+    if (parts.includes("bars")) body.push(section("棒", num("gap", "棒の間隔の幅（%）", opts.gap, 0, 500), ...((c.type === "clustered-bar" || c.type === "hbar") && c.series.length > 1 ? [num("overlap", "系列の重なり（%）", opts.overlap, -100, 100)] : [])));
+    if (parts.includes("line")) body.push(section("折れ線", check("smooth", "滑らかな線にする", opts.smooth), choose("marker", "マーカーの形", MARKER_NAMES, opts.marker || "circle")));
+    if (parts.includes("pie")) body.push(section(c.type === "donut" ? "ドーナツ" : "円", num("angle", "最初のスライスの角度（度）", opts.angle, 0, 359, "0"), num("explode", "要素の切り出し（%）", opts.explode, 0, 40, "0"), ...(c.type === "donut" ? [num("hole", "ドーナツの穴の大きさ（%）", opts.hole, 10, 90, "65")] : [])));
+    if (parts.includes("axis")) body.push(section("軸", ...(E.STEP_CHARTS.has(c.type) ? [num("step", "目盛間隔（空にすると自動）", opts.axisStep, 0, 1e12)] : []), ...(E.REVERSE_CHARTS.has(c.type) ? [check("reverse", "項目を逆順にする", opts.reverse)] : [])));
+    if (parts.includes("trend")) body.push(section("近似曲線", choose("trend", "種類", [["", "なし"], ...Object.entries(E.TREND_KINDS)], opts.trend || ""), num("period", "移動平均の区間（2〜12）", opts.trendPeriod, 2, 12, "2"), check("eq", "グラフに数式を表示する", opts.trendEq), check("r2", "グラフにR-2乗値を表示する", opts.trendR2)));
+    const dialog = h("dialog", { class: "cf-dialog", "aria-label": "グラフの書式設定" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "グラフの書式設定"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body" }, ...(body.length ? body : [h("p", { class: "hint" }, "このグラフには書式を変えられる項目がありません。")]),
+        h("p", { class: "hint" }, "空欄は自動（標準）の見た目です。近似曲線は縦棒・折れ線・散布図で、指数と累乗は0以下の値があると、対数と累乗は0以下のXがあると引けません。")),
+      h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"),
+        h("button", { type: "button", class: "btn btn-primary cf-ok", onclick: () => {
+          const el = (name) => dialog.querySelector(`[name="${name}"]`);
+          const whole = (name, min, max) => { const e = el(name); if (!e || e.value === "") return undefined; const v = Number(e.value); return Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : undefined; };
+          const on = (name) => (el(name)?.checked ? true : undefined);
+          const patch = {};
+          if (parts.includes("bars")) { patch.gap = whole("gap", 0, 500); if (el("overlap")) patch.overlap = whole("overlap", -100, 100); }
+          if (parts.includes("line")) { patch.smooth = on("smooth"); patch.marker = el("marker").value === "circle" ? undefined : el("marker").value; }
+          if (parts.includes("pie")) { patch.angle = whole("angle", 0, 359) || undefined; patch.explode = whole("explode", 0, 40) || undefined; if (el("hole")) patch.hole = whole("hole", 10, 90); }
+          if (parts.includes("axis")) {
+            if (el("step")) { const v = Number(el("step").value); patch.axisStep = el("step").value !== "" && Number.isFinite(v) && v > 0 ? v : undefined; }
+            if (el("reverse")) patch.reverse = on("reverse");
+          }
+          if (parts.includes("trend")) {
+            const kind = el("trend").value || undefined;
+            patch.trend = kind;
+            patch.trendEq = kind && kind !== "movavg" ? on("eq") : undefined;
+            patch.trendR2 = kind && kind !== "movavg" ? on("r2") : undefined;
+            patch.trendPeriod = kind === "movavg" ? whole("period", 2, 12) : undefined;
+          }
+          dialog.close();
+          setOpts(patch);
         } }, "OK")));
     document.body.append(dialog);
     dialog.addEventListener("close", () => dialog.remove());

@@ -858,7 +858,7 @@
         if (Number.isFinite(cx)) { slice.style.transformBox = "view-box"; slice.style.transformOrigin = `${cx}px ${cy}px`; }
         at(slice, [{ opacity: 0, transform: "scale(0.55) rotate(-25deg)" }, { opacity: 1, transform: "scale(1) rotate(0deg)" }], i / Math.max(1, slices.length - 1), 0.6);
       });
-      for (const el of node.querySelectorAll(".hs-ochart-labels text, .hs-omark, .hs-chart .hs-val, .hs-chart .hs-err, .hs-chart circle")) at(el, [{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 1 }], 0, 1);
+      for (const el of node.querySelectorAll(".hs-ochart-labels text, .hs-omark, .hs-chart .hs-val, .hs-chart .hs-err, .hs-chart .hs-trend-eq, .hs-chart circle, .hs-chart .hs-marker")) at(el, [{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 1 }], 0, 1);
       if (!bars.length && !slices.length && !node.querySelector(".hs-oline, .hs-draw, .hs-oarea")) out.push(...animateEl(c, part.fx, [{ opacity: 0 }, { opacity: 1 }]));
     }
     return out;
