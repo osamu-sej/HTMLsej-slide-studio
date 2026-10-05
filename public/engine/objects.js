@@ -1916,6 +1916,22 @@
     // 軸ラベル and 近似曲線 (グラフ要素).
     for (const key of ["axisX", "axisY"]) if (typeof raw.opts?.[key] === "string" && raw.opts[key].trim()) opts[key] = raw.opts[key].trim().slice(0, 40);
     if (raw.opts?.trend === "linear") opts.trend = "linear";
+    // 数値の書式 (グラフ要素): decimals, a display unit (千・万・百万・億) and signs before and after the number.
+    const nf = raw.opts?.numFmt;
+    if (nf && typeof nf === "object") {
+      const numFmt = {};
+      const decimals = Number(nf.decimals);
+      if (nf.decimals != null && nf.decimals !== "" && Number.isInteger(decimals) && decimals >= 0 && decimals <= 4) numFmt.decimals = decimals;
+      if ([1000, 10000, 1000000, 100000000].includes(Number(nf.scale))) numFmt.scale = Number(nf.scale);
+      for (const [key, max] of [["prefix", 4], ["suffix", 6]]) if (typeof nf[key] === "string" && nf[key].trim()) numFmt[key] = nf[key].replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, max);
+      if (Object.keys(numFmt).length) opts.numFmt = numFmt;
+    }
+    // 誤差範囲 (グラフ要素): a fixed amount or a share of each value, on the bars and lines of a chart with axes.
+    const eb = raw.opts?.errorBars;
+    if (eb && typeof eb === "object" && ["fixed", "percent"].includes(eb.type) && ["bar", "combo", "clustered-bar", "line", "multi-line"].includes(out.type)) {
+      const amount = Number(eb.amount);
+      if (Number.isFinite(amount) && amount > 0 && amount <= (eb.type === "percent" ? 100 : 1e12)) opts.errorBars = { type: eb.type, amount };
+    }
     // 第2軸: a combination chart's line on a scale of its own (drawn down the right side).
     if (raw.opts?.axis2 === true && out.type === "combo" && series.length >= 2) opts.axis2 = true;
     // 軸の書式: the value axis's own minimum and maximum (a maximum above the minimum).
@@ -2536,7 +2552,7 @@
   // データ テーブル: the charts with categories along an axis.
   const TABLE_CHARTS = new Set(["bar", "clustered-bar", "stacked-bar", "100-stacked-bar", "line", "multi-line", "area", "stacked-area", "combo", "waterfall"]);
   function dataTable(c) {
-    const shown = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString("ja-JP"));
+    const shown = (v) => (v == null || v === "" ? "" : c.opts?.numFmt ? E.formatNumber(v, c.opts.numFmt, true) : Number(v).toLocaleString("ja-JP"));
     return h("table", { class: "hs-chart-table" },
       h("thead", {}, h("tr", {}, h("th", {}), c.labels.map((label) => h("th", {}, label)))),
       h("tbody", {}, c.series.map((series) => h("tr", {}, h("th", {}, series.name), series.values.map((v) => h("td", {}, shown(v)))))));

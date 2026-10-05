@@ -642,6 +642,7 @@
 /* 軸ラベル and 近似曲線 (グラフ要素), and the words inside ツリーマップ and サンバースト. */
 .hs-chart .hs-axis-title { fill: var(--muted); font-size: 21px; font-weight: 700; }
 .hs-chart .hs-trend { fill: none; opacity: .85; }
+.hs-chart .hs-err { stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
 .hs-chart .hs-tm-name, .hs-chart .hs-sb-name { font-weight: 700; }
 .hs-obj-media .hs-video-poster { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: cover; }
 .hs-legend { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-bottom: 16px; font-size: 22px; color: var(--ink2); }
