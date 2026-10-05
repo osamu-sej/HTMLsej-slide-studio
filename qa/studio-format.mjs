@@ -1577,14 +1577,14 @@ await step("検索・置換（大文字小文字・全角半角・単語・こ�
   const words = async () => ((await slide()).elements.find((o) => o.kind === "text")?.text || "").replace(/<[^>]+>/g, "");
   const open = async () => {
     await page.keyboard.press("Escape");
-    await page.click("#replaceBtn", { force: true });
+    await page.keyboard.press("Control+f");
     await page.waitForSelector("#replaceDialog[open]");
   };
   const found = async () => page.textContent("#findCount");
   await open();
   // The options are what they were last time in this browser; start from the usual ones.
   for (const id of ["#findCase", "#findWord", "#findWidth"]) if (await page.isChecked(id)) await page.uncheck(id);
-  await page.selectOption("#findScope", "deck");
+  await page.selectOption("#findScope", "slide");
   await page.fill("#findInput", "dx");
   assert(/4か所見つかりました/.test(await found()), `case and width alike: ${await found()}`);
   assert((await page.$$("#findHits .find-hit")).length >= 1, "the list of where");
