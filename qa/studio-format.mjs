@@ -1671,6 +1671,22 @@ await step("繰り返し（F4・やり直す操作がないときの ⌘Y）: �
   assert((await look(b, "stroke")) === line, "⌘Y redoes what was undone");
 });
 
+await step("PowerPoint のファンクション キー: ⇧F9 でグリッド線、F7 で表記ゆれチェック", async () => {
+  await freshSlide();
+  await page.keyboard.press("Escape");
+  const grid = () => page.$$("#stageBody .ed-grid").then((l) => l.length);
+  const before = await grid();
+  await page.keyboard.press("Shift+F9");
+  await page.waitForTimeout(300);
+  assert((await grid()) !== before, `⇧F9 toggles the grid: ${before} → ${await grid()}`);
+  await page.keyboard.press("Shift+F9");
+  await page.waitForTimeout(300);
+  assert((await grid()) === before, "and back");
+  await page.keyboard.press("F7");
+  await page.waitForSelector(".proof-dialog[open]", { timeout: 4000 });
+  await page.keyboard.press("Escape");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

@@ -6765,6 +6765,9 @@ function bind() {
       // フォント (⇧⌘F, as PowerPoint's Ctrl+Shift+F), also while typing.
       if (meta && event.shiftKey && event.key.toLowerCase() === "f" && state.view === "single" && !isFinal(state.deck) && editor.textState()) { event.preventDefault(); editorUi.fontDialog(); return; }
       if (!typing && shell.zoomKey(event)) { event.preventDefault(); return; }
+      // PowerPoint's function keys: ⇧F9 the grid, ⌥F9 the guides, F7 the check of the words.
+      if (!typing && event.key === "F9" && (event.shiftKey || event.altKey) && state.view === "single") { event.preventDefault(); const key = event.shiftKey ? "grid" : "guides"; editor.setView(key, !editor.state[key]); return; }
+      if (!typing && event.key === "F7" && !meta && !event.shiftKey && !event.altKey) { event.preventDefault(); proofing.open(); return; }
       if (meta && event.key.toLowerCase() === "m" && !typing) { event.preventDefault(); openTypeDialog("insert"); return; }
       if (document.activeElement === $("filmstrip") && filmKey(event)) { event.preventDefault(); return; }
     }
