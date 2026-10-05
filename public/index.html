@@ -421,12 +421,19 @@
     </dialog>
 
     <dialog id="replaceDialog">
-      <div class="dialog-head"><h3>検索・置換（資料全体）</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
+      <div class="dialog-head"><h3>検索・置換</h3><button class="btn btn-ghost btn-icon" type="button" data-close aria-label="閉じる">✕</button></div>
       <div class="dialog-body">
         <div class="grid-2">
           <div class="field"><label for="findInput">検索する文字</label><input id="findInput" type="text" placeholder="例：DX" /></div>
           <div class="field"><label for="replaceInput">置き換える文字</label><input id="replaceInput" type="text" placeholder="例：デジタル化" /></div>
         </div>
+        <div class="find-options">
+          <label><input id="findCase" type="checkbox" /> 大文字と小文字を区別する</label>
+          <label><input id="findWord" type="checkbox" /> 完全に一致する単語だけを検索する</label>
+          <label><input id="findWidth" type="checkbox" /> 全角と半角を区別する</label>
+          <label>対象 <select id="findScope" aria-label="対象"><option value="deck">資料全体</option><option value="slide">このスライドだけ</option></select></label>
+        </div>
+        <ol id="findHits" class="find-hits" aria-label="見つかった場所"></ol>
         <div class="create-actions">
           <button id="replaceAllBtn" class="btn btn-primary" type="button" disabled>すべて置換</button>
           <span id="findCount" class="hint">資料タイトル・本文・ノートを対象にします。</span>
@@ -450,6 +457,8 @@
         <table class="help-keys">
           <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>前後のスライドへ</td></tr>
           <tr><td><kbd>⌘</kbd>+<kbd>Z</kbd> / <kbd>⌘</kbd>+<kbd>Y</kbd>（<kbd>⇧</kbd>+<kbd>⌘</kbd>+<kbd>Z</kbd>）</td><td>元に戻す / やり直す</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>F9</kbd> / <kbd>Alt</kbd>+<kbd>F9</kbd> / <kbd>F7</kbd></td><td>グリッド線 / ガイドの表示 / 表記ゆれチェック</td></tr>
+          <tr><td><kbd>F4</kbd>（やり直す操作がないときの <kbd>⌘</kbd>+<kbd>Y</kbd>）</td><td>直前の書式の操作を、いま選んでいる部品（か文字）にもう一度行う（繰り返し）</td></tr>
           <tr><td><kbd>⌘</kbd>+<kbd>↑</kbd> / <kbd>⌘</kbd>+<kbd>↓</kbd>（サムネイル）</td><td>スライドを上へ / 下へ移動</td></tr>
           <tr><td><kbd>F5</kbd>（<kbd>⇧</kbd>+<kbd>F5</kbd>）</td><td>最初から（今のスライドから）発表</td></tr>
           <tr><td><kbd>⌘</kbd>+<kbd>K</kbd></td><td>検索・コマンド（AIへの依頼もここから）</td></tr>

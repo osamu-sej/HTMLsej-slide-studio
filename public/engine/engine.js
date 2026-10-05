@@ -478,7 +478,7 @@
     if (axisY) svg.append(s("text", { class: "hs-axis-title", x: 0, y: 0, transform: `translate(22,${(ht - padB) / 2}) rotate(-90)`, "text-anchor": "middle" }, axisY.slice(0, 40)));
     if (axisX) svg.append(s("text", { class: "hs-axis-title", x: padL + (w - padL) / 2, y: ht - 10, "text-anchor": "middle" }, axisX.slice(0, 40)));
     // グラフ要素: no data labels (the values on the marks), no gridlines.
-    if (opts.labels === false) svg.querySelectorAll(".hs-val").forEach((el) => el.remove());
+    if (opts.labels === false) svg.querySelectorAll(".hs-val, .hs-slice-label, .hs-leader").forEach((el) => el.remove());
     if (opts.grid === false) svg.querySelectorAll("line.hs-grid, polygon.hs-grid").forEach((el) => el.remove());
     holder.append(svg);
     if (legend && opts.legend === "right") { wrap.style.flexDirection = "row"; wrap.style.alignItems = "center"; holder.style.flex = "1"; wrap.append(holder, legend); }
@@ -508,7 +508,7 @@
     const groupW = lay.group;
     const bw = lay.bar;
     const y0 = top + plotH;
-    const showValues = n * k <= 18;
+    const showValues = opts.labelAll === true || n * k <= 18;
     svg.append(s("line", { class: "hs-axisline", x1: 0, x2: w, y1: y0, y2: y0 }));
     labels.forEach((label, i) => {
       const x0 = slot * i + (slot - groupW) / 2;
@@ -641,7 +641,12 @@
         const end = i === hotIndex;
         const errTop = errorBar(svg, x, serie.values[i], yOf, opts);
         svg.append(markTip(lineMarker(opts.marker, x, y, end ? 11 : 7, color), `${many ? `${serie.name} ` : ""}${labels[i] ?? ""}：${fmt(serie.values[i])}`, i));
-        if (!many && (end || serie.values[i] === Math.max(...serie.values))) svg.append(s("text", { class: `hs-val${end ? " hot" : ""}`, x, y: labelAbove(y - 24, errTop), "text-anchor": "middle" }, fmt(serie.values[i])));
+        // The labels: the last point and the highest (or every point: すべての点), above it, below it or to its right.
+        const named = direct && end;
+        if (opts.labelAll === true ? !named : !many && (end || serie.values[i] === Math.max(...serie.values))) {
+          const [lx, ly, anchor] = opts.labelPos === "below" ? [x, y + 42, "middle"] : opts.labelPos === "right" ? [x + 18, y + 8, "start"] : [x, labelAbove(y - 24, errTop), "middle"];
+          svg.append(s("text", { class: `hs-val${end ? " hot" : ""}`, x: lx, y: ly, "text-anchor": anchor }, fmt(serie.values[i])));
+        }
       });
       if (direct) {
         const [x, y] = pts.at(-1);
@@ -671,7 +676,10 @@
     // 円 (pie): the same slices with no hole — a circle of half the radius stroked as wide as the radius.
     const pie = model.type === "pie";
     // The slices pulled out (要素の切り出し) need room round the circle, so the circle shrinks by as much.
-    const outer = Math.min(h * 0.38, w * 0.24) / (1 + (Number.isFinite(opts.explode) ? opts.explode : 0) / 100);
+    // ラベル (分類名・値・パーセンテージ) outside the slices need room too.
+    const parts = ["category", "value", "percent"].filter((part) => Array.isArray(opts.sliceLabels) && opts.sliceLabels.includes(part));
+    const named = parts.includes("category");
+    const outer = (Math.min(h * 0.38, w * 0.24) / (1 + (Number.isFinite(opts.explode) ? opts.explode : 0) / 100)) * (parts.length ? 0.78 : 1);
     let r = pie ? (outer * 1.1) / 2 : outer;
     let stroke = pie ? r * 2 : r * 0.42;
     // ドーナツの穴の大きさ (% of the outer radius), 最初のスライスの角度 and 要素の切り出し (% of the radius).
@@ -683,7 +691,8 @@
     }
     const outerR = r + stroke / 2;
     const push = Number.isFinite(opts.explode) ? (outerR * opts.explode) / 100 : 0;
-    const cx = outer + 60 + push;
+    // Naming the slices takes the place of the list at the right: the ring then sits in the middle.
+    const cx = named ? w / 2 : outer + 60 + push + (parts.length ? 80 : 0);
     const cy = h / 2;
     const circ = 2 * Math.PI * r;
     let start = -90 + (Number.isFinite(opts.angle) ? opts.angle : 0);
@@ -700,6 +709,28 @@
       svg.append(s("text", { class: "hs-val", x: cx, y: cy + 10, "text-anchor": "middle", style: { "font-size": "64px" } }, `${Math.round((values[top] / total) * 100)}%`));
       svg.append(s("text", { x: cx, y: cy + 52, "text-anchor": "middle", class: "hs-tick" }, labels[top] ?? ""));
     }
+    // Each slice's label outside it on a leader line: its name, value and share, a line each.
+    if (parts.length) {
+      let at = -90 + (Number.isFinite(opts.angle) ? opts.angle : 0);
+      const fix = (v) => Math.round(v * 10) / 10;
+      values.forEach((value, i) => {
+        const sweep = (value / total) * 360;
+        const th = ((at + sweep / 2) * Math.PI) / 180;
+        at += sweep;
+        if (!(value > 0)) return;
+        const d = push && values.length > 1 ? push : 0;
+        const [ux, uy] = [Math.cos(th), Math.sin(th)];
+        const toRight = ux >= 0;
+        const from = [cx + ux * (outerR + d), cy + uy * (outerR + d)];
+        const bend = [cx + ux * (outerR + d + 24), cy + uy * (outerR + d + 24)];
+        const end = [bend[0] + (toRight ? 16 : -16), bend[1]];
+        const lines = [named ? (labels[i].length > 12 ? `${labels[i].slice(0, 11)}…` : labels[i]) : "", parts.includes("value") ? fmt(value) : "", parts.includes("percent") ? `${Math.round((value / total) * 100)}%` : ""].filter(Boolean);
+        const tx = end[0] + (toRight ? 8 : -8);
+        svg.append(s("polyline", { class: "hs-leader", points: [from, bend, end].map((p) => `${fix(p[0])},${fix(p[1])}`).join(" "), fill: "none" }));
+        svg.append(s("text", { class: "hs-slice-label", x: fix(tx), y: fix(end[1] + 7 - ((lines.length - 1) * 26) / 2), "text-anchor": toRight ? "start" : "end" }, lines.map((line, k) => s("tspan", { x: fix(tx), dy: k ? 26 : 0 }, line))));
+      });
+    }
+    if (named) return;
     const lx = cx + outerR + push + 70;
     const rowH = Math.min(72, (h - 40) / Math.max(1, labels.length));
     const y0 = cy - (rowH * labels.length) / 2 + rowH / 2;
@@ -743,7 +774,13 @@
       const color = SERIES[si % SERIES.length];
       svg.append(s("path", { class: "hs-oarea", d: `M${pts[0][0]},${yOf(Math.max(lo, 0))} ${pts.map((p) => `L${p[0]},${p[1]}`).join(" ")} L${pts.at(-1)[0]},${yOf(Math.max(lo, 0))} Z`, fill: color, "fill-opacity": series.length > 1 ? 0.35 : 0.45 }));
       svg.append(s("polyline", { class: "hs-draw", points: pts.map((p) => p.join(",")).join(" "), fill: "none", stroke: color, "stroke-width": 4, "stroke-linejoin": "round", style: { "--len": pathLength(pts), "--i": si } }));
-      pts.forEach(([x, y], i) => svg.append(markTip(s("circle", { cx: x, cy: y, r: 6, fill: color }), `${labels[i]}・${serie.name}：${fmt(serie.values[i])}`, i)));
+      pts.forEach(([x, y], i) => {
+        svg.append(markTip(s("circle", { cx: x, cy: y, r: 6, fill: color }), `${labels[i]}・${serie.name}：${fmt(serie.values[i])}`, i));
+        if (opts.labelAll === true) {
+          const [lx, ly, anchor] = opts.labelPos === "below" ? [x, y + 34, "middle"] : opts.labelPos === "right" ? [x + 14, y + 7, "start"] : [x, y - 16, "middle"];
+          svg.append(s("text", { class: "hs-val", x: lx, y: ly, "text-anchor": anchor, style: { "font-size": "22px" } }, fmt(serie.values[i])));
+        }
+      });
     });
   }
 

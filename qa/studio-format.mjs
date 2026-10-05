@@ -1423,7 +1423,7 @@ await step("グラフの書式設定（折れ線の滑らかさ・マーカー�
   // A line: smooth, square marks, an exponential trendline with its equation, a scale every 5,000, the months turned round.
   await setData("line", [{ name: "売上", values: [12000, 15000, 24000, 41000] }]);
   await openFormat();
-  assert((await page.$$(`${cf} fieldset.cf-section`)).length === 3, "a line shows 折れ線・軸・近似曲線 (no bars, no pie)");
+  assert((await page.$$(`${cf} fieldset.cf-section`)).length === 4, "a line shows データ ラベル・折れ線・軸・近似曲線 (no bars, no pie)");
   assert(!(await page.$(`${cf} input[name="gap"]`)) && !(await page.$(`${cf} input[name="angle"]`)), "the other kinds' fields are not offered");
   await page.check(`${cf} input[name="smooth"]`);
   await page.selectOption(`${cf} select[name="marker"]`, "square");
@@ -1493,6 +1493,197 @@ await step("グラフの書式設定（折れ線の滑らかさ・マーカー�
   await tab("グラフのデザイン");
   await byTitle("データ ラベル・凡例・目盛線");
   assert(await page.locator('.rb-pop .rb-menu button:has-text("グラフの書式設定")').isDisabled(), "disabled for a waterfall");
+  await page.keyboard.press("Escape");
+});
+
+await step("グラフのデータ ラベル（すべての点・折れ線のラベル位置・円のスライスのラベル）", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="line"]');
+  await page.waitForTimeout(400);
+  if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
+  const id = (await slide()).elements.at(-1).id;
+  const setData = async (type, series) => {
+    await page.evaluate(({ id, type, series }) => {
+      const o = window.__hsej.slide().elements.find((x) => x.id === id);
+      o.chart.type = type;
+      o.chart.labels = ["4月", "5月", "6月", "7月"];
+      o.chart.series = series;
+    }, { id, type, series });
+    await redraw();
+    await pickInPane([id]);
+  };
+  const chartOf = async () => (await slide()).elements.find((o) => o.id === id).chart;
+  const q = (sel) => `#stageBody .slide-wrap .hs-obj[data-el="${id}"] ${sel}`;
+  const cf = ".cf-dialog[open]";
+  const openFormat = async () => {
+    await tab("グラフのデザイン");
+    await byTitle("データ ラベル・凡例・目盛線");
+    await page.locator('.rb-pop .rb-menu button:has-text("グラフの書式設定")').click();
+    await page.waitForSelector(cf);
+  };
+  // A line: only the last point and the highest are written; "すべての点" writes them all, here below the points.
+  await setData("line", [{ name: "売上", values: [12, 30, 22, 41] }]);
+  const written = async () => (await page.$$eval(q("text.hs-val"), (els) => els.map((t) => t.textContent)));
+  assert((await written()).length === 1, `the usual: ${await written()}`);
+  await openFormat();
+  await page.check(`${cf} input[name="labelAll"]`);
+  await page.selectOption(`${cf} select[name="labelPos"]`, "below");
+  await page.click(".cf-dialog .cf-ok");
+  await page.waitForTimeout(500);
+  let opts = (await chartOf()).opts;
+  assert(opts?.labelAll === true && opts.labelPos === "below", `kept: ${JSON.stringify(opts)}`);
+  assert((await written()).join() === "12,30,22,41", `every point: ${await written()}`);
+  const ys = await page.$$eval(q("text.hs-val"), (els) => els.map((t) => Number(t.getAttribute("y"))));
+  const dots = await page.$$eval(q("circle[fill]"), (els) => els.map((c) => Number(c.getAttribute("cy"))).filter(Boolean));
+  assert(ys.every((y, i) => y > dots[i]), `below the points: ${ys} vs ${dots}`);
+  await shot("chart-labels-line");
+
+  // A donut: names and shares on the slices, on leader lines; the list at the right gives way.
+  await setData("donut", [{ name: "構成比", values: [50, 30, 12, 8] }]);
+  assert((await page.$$(q("rect"))).length === 4, "the list at the right first");
+  await openFormat();
+  await page.check(`${cf} input[name="sl-category"]`);
+  await page.check(`${cf} input[name="sl-percent"]`);
+  await page.click(".cf-dialog .cf-ok");
+  await page.waitForTimeout(500);
+  opts = (await chartOf()).opts;
+  assert(JSON.stringify(opts?.sliceLabels) === JSON.stringify(["category", "percent"]), `kept: ${JSON.stringify(opts)}`);
+  const slices = await page.$$eval(q(".hs-slice-label"), (els) => els.map((t) => [...t.querySelectorAll("tspan")].map((s) => s.textContent).join("/")));
+  assert(slices.join() === "4月/50%,5月/30%,6月/12%,7月/8%", `a label each: ${slices}`);
+  assert((await page.$$(q(".hs-leader"))).length === 4 && (await page.$$(q("rect"))).length === 0, "leader lines, and no list");
+  await shot("chart-labels-donut");
+  // Values only: the names are not on the slices, so the list comes back.
+  await openFormat();
+  await page.uncheck(`${cf} input[name="sl-category"]`);
+  await page.uncheck(`${cf} input[name="sl-percent"]`);
+  await page.check(`${cf} input[name="sl-value"]`);
+  await page.click(".cf-dialog .cf-ok");
+  await page.waitForTimeout(500);
+  assert((await page.$$(q("rect"))).length === 4 && (await page.$$(q(".hs-slice-label"))).length === 4, "the list stays; the values on the slices");
+  await undo();
+  assert((await page.$$(q(".hs-slice-label"))).length === 4 && (await page.$$(q("rect"))).length === 0, "one undo goes back to the names");
+});
+
+await step("検索・置換（大文字小文字・全角半角・単語・このスライドだけ・見つかった場所の一覧・1回のUndo）", async () => {
+  await freshSlide();
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  await pasteClip(null, { text: "DXとＤＸとdxとADXの話" });
+  await page.waitForFunction(() => (window.__hsej.slide().elements || []).some((o) => o.kind === "text"), null, { timeout: 5000 });
+  await page.keyboard.press("Escape");
+  await redraw();
+  const here = await page.evaluate(() => window.__hsej.deck().slides.indexOf(window.__hsej.slide()));
+  const words = async () => ((await slide()).elements.find((o) => o.kind === "text")?.text || "").replace(/<[^>]+>/g, "");
+  const open = async () => {
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Control+f");
+    await page.waitForSelector("#replaceDialog[open]");
+  };
+  const found = async () => page.textContent("#findCount");
+  await open();
+  // The options are what they were last time in this browser; start from the usual ones.
+  for (const id of ["#findCase", "#findWord", "#findWidth"]) if (await page.isChecked(id)) await page.uncheck(id);
+  await page.selectOption("#findScope", "slide");
+  await page.fill("#findInput", "dx");
+  assert(/4か所見つかりました/.test(await found()), `case and width alike: ${await found()}`);
+  assert((await page.$$("#findHits .find-hit")).length >= 1, "the list of where");
+  const hit = await page.textContent("#findHits .find-hit");
+  assert(hit.includes(`${here + 1}枚目`) && hit.includes("DX") && hit.includes("4か所"), `the slide and the words round it: ${hit}`);
+  await page.check("#findCase");
+  assert(/1か所見つかりました/.test(await found()), `大文字と小文字を区別する: ${await found()}`);
+  await page.uncheck("#findCase");
+  await page.check("#findWidth");
+  assert(/3か所見つかりました/.test(await found()), `全角と半角を区別する (ＤＸ is not DX): ${await found()}`);
+  await page.uncheck("#findWidth");
+  await page.check("#findWord");
+  assert(/3か所見つかりました/.test(await found()), `完全に一致する単語だけ (ADX is not one): ${await found()}`);
+  // The options stay for next time.
+  await page.keyboard.press("Escape");
+  await open();
+  assert(await page.isChecked("#findWord"), "the option stays");
+  await page.uncheck("#findWord");
+  // Only this slide: another slide with the same word is left alone.
+  await page.selectOption("#findScope", "slide");
+  assert(/4か所見つかりました/.test(await found()), `このスライドだけ: ${await found()}`);
+  await page.fill("#replaceInput", "DX推進");
+  await page.click("#replaceAllBtn");
+  await page.waitForTimeout(400);
+  assert((await words()) === "DX推進とDX推進とDX推進とADX推進の話", `all four replaced as plain text: ${await words()}`);
+  await undo();
+  assert((await words()) === "DXとＤＸとdxとADXの話", `one undo: ${await words()}`);
+  // Clicking a hit goes to the slide.
+  await page.keyboard.press("Control+Home");
+  await page.waitForTimeout(300);
+  await open();
+  await page.selectOption("#findScope", "deck");
+  await page.fill("#findInput", "ＡＤＸ");
+  await page.click("#findHits .find-hit");
+  await page.waitForTimeout(400);
+  assert(!(await page.isVisible("#replaceDialog[open]")), "the dialog closes");
+  assert(await page.evaluate((n) => window.__hsej.slide() === window.__hsej.deck().slides[n], here), "and the slide with the words is on the stage");
+});
+
+await step("繰り返し（F4・やり直す操作がないときの ⌘Y）: 直前の書式を次に選んだ部品へ、1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  const place = async (x, y) => {
+    await tab("挿入");
+    await ribbonBtn("図形");
+    await page.locator('.rb-pop .rb-gallery button[data-shape="rect"]').last().click();
+    await page.mouse.click(...(await stageAt(x, y)));
+    await page.waitForTimeout(300);
+    return (await slide()).elements.at(-1).id;
+  };
+  const a = await place(500, 500);
+  const b = await place(1500, 500);
+  assert(a !== b, "two rectangles");
+  const look = async (id, key) => (await slide()).elements.find((o) => o.id === id)[key];
+  const before = await look(b, "fill");
+  // A's fill; then B takes it with F4.
+  await pickInPane([a]);
+  await tab("図形の書式");
+  await byTitle("図形の塗りつぶし");
+  await page.locator(".rb-pop .rb-sw").nth(3).click();
+  await page.waitForTimeout(300);
+  const picked = await look(a, "fill");
+  assert(picked && picked !== before, `A's new fill: ${picked} (B ${before})`);
+  await pickInPane([b]);
+  await page.keyboard.press("F4");
+  await page.waitForTimeout(300);
+  assert((await look(b, "fill")) === picked, `F4 gave B the same fill: ${await look(b, "fill")}`);
+  // A's outline colour; B again, this time with ⌘Y (nothing to redo).
+  await pickInPane([a]);
+  await tab("図形の書式");
+  await byTitle("図形の枠線");
+  await page.locator(".rb-pop .rb-sw").nth(2).click();
+  await page.waitForTimeout(300);
+  const line = await look(a, "stroke");
+  await pickInPane([b]);
+  await page.keyboard.press("Control+y");
+  await page.waitForTimeout(300);
+  assert((await look(b, "stroke")) === line, `⌘Y gave B the same outline: ${await look(b, "stroke")} / ${line}`);
+  assert((await look(b, "fill")) === picked, "and kept the fill");
+  await undo();
+  assert((await look(b, "stroke")) !== line && (await look(b, "fill")) === picked, "one ⌘Z takes back only the repeat");
+  // With something to redo, ⌘Y redoes.
+  await page.keyboard.press("Control+y");
+  await page.waitForTimeout(300);
+  assert((await look(b, "stroke")) === line, "⌘Y redoes what was undone");
+});
+
+await step("PowerPoint のファンクション キー: ⇧F9 でグリッド線、F7 で表記ゆれチェック", async () => {
+  await freshSlide();
+  await page.keyboard.press("Escape");
+  const grid = () => page.$$("#stageBody .ed-grid").then((l) => l.length);
+  const before = await grid();
+  await page.keyboard.press("Shift+F9");
+  await page.waitForTimeout(300);
+  assert((await grid()) !== before, `⇧F9 toggles the grid: ${before} → ${await grid()}`);
+  await page.keyboard.press("Shift+F9");
+  await page.waitForTimeout(300);
+  assert((await grid()) === before, "and back");
+  await page.keyboard.press("F7");
+  await page.waitForSelector(".proof-dialog[open]", { timeout: 4000 });
   await page.keyboard.press("Escape");
 });
 
