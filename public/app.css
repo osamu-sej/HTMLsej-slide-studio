@@ -897,6 +897,7 @@ body.is-final :is(#inspector, #formatPane, #animPane, #commentPane, #a11yPane, #
 body.is-final :is(#inspector, #formatPane, #animPane, #commentPane, #a11yPane, #chatForm, #notesInput) { opacity: .6; }
 body.is-final .film-item { -webkit-user-drag: none; }
 .callout-final { border-left: 4px solid var(--warn, #b7791f); }
+.callout-master { border-left: 4px solid var(--accent, #1f3864); }
 .fi-protect { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .fi-protect .btn { align-self: flex-start; }
 /* 音声読み上げ: PowerPoint's small bar over the slide, and the block being read lit (only here, never on the slide). */

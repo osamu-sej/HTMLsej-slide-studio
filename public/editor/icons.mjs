@@ -118,6 +118,7 @@ const P = {
   up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
   animPane: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M7 9h3M7 13h3M7 17h3M12 9h6M12 13h4M12 17h5"/>',
+  effects: '<rect x="4" y="4" width="11" height="11" rx="1.5"/><path d="M8 18.5h11.5V8" opacity=".5"/><path d="M10.5 20.5H21V10" opacity=".25"/>',
   effectOpts: '<path d="m10 4 1.8 3.8 4.2.6-3 2.9.7 4.1L10 13.4 6.3 15.4l.7-4.1-3-2.9 4.2-.6z"/><path d="M15 18h6M18 15v6" />',
   previewPlay: '<circle cx="12" cy="12" r="9"/><path d="m10 8.5 5.5 3.5-5.5 3.5z" fill="currentColor"/>',
   transition: '<rect x="2.5" y="6" width="12" height="9" rx="1"/><rect x="9.5" y="9" width="12" height="9" rx="1" fill="currentColor" fill-opacity=".2"/><path d="M12 3.5h3.5V6"/>',

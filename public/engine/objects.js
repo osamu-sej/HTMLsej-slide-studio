@@ -1577,6 +1577,20 @@
       if (color) o.shadow = { dx: num(raw.shadow.dx, -500, 500, 0), dy: num(raw.shadow.dy, -500, 500, 0),
         blur: num(raw.shadow.blur, 0, 500, 0), color, opacity: num(raw.shadow.opacity, 0, 1, 1) };
     }
+    // 図形の効果 besides 影: 反射 (reflect: the share of the object mirrored below it, how strong, and the gap), 光彩
+    // (glow: a halo of a colour) and ぼかし (soft: the edges fade out over so many px). Shapes, text boxes and pictures.
+    if (["shape", "text", "image"].includes(o.kind)) {
+      if (raw.reflect && typeof raw.reflect === "object") {
+        const size = Number(raw.reflect.size);
+        if (Number.isFinite(size) && size >= 0.05) o.reflect = { size: r2(Math.min(1, size)), opacity: r2(num(raw.reflect.opacity, 0, 1, 0.4)), gap: Math.round(num(raw.reflect.gap, 0, 100, 0)) };
+      }
+      if (raw.glow && typeof raw.glow === "object") {
+        const color = hexColor(raw.glow.color);
+        if (color) o.glow = { r: Math.round(num(raw.glow.r, 1, 200, 10)), color: color.toLowerCase(), opacity: r2(num(raw.glow.opacity, 0.05, 1, 0.6)) };
+      }
+      const soft = num(raw.soft, 0, 200);
+      if (soft != null && soft >= 1) o.soft = Math.round(soft);
+    }
     for (const key of ["locked", "hidden"]) if (raw[key] === true) o[key] = true;
     // 代替テキスト (what a screen reader says for the object) or 装飾用 (a screen reader skips it).
     if (raw.decorative === true) o.decorative = true;
@@ -2792,16 +2806,30 @@
     return tx;
   }
 
+  const rgbaOf = (hex, a) => `rgba(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(",")},${a})`;
+  /** 図形の効果: 影 and 光彩 are drop-shadow filters, 反射 a mirror below (the browser's box-reflect), on the object's own element. */
+  function applyEffects(o, rotEl) {
+    const filters = [];
+    if (o.shadow) filters.push(`drop-shadow(${o.shadow.dx}px ${o.shadow.dy}px ${o.shadow.blur}px ${rgbaOf(o.shadow.color, o.shadow.opacity)})`);
+    // The halo is drawn twice (wide, then close) so it reads on a light fill.
+    if (o.glow) filters.push(`drop-shadow(0 0 ${o.glow.r}px ${rgbaOf(o.glow.color, o.glow.opacity)})`, `drop-shadow(0 0 ${r2(o.glow.r / 3)}px ${rgbaOf(o.glow.color, o.glow.opacity)})`);
+    if (filters.length) rotEl.style.filter = filters.join(" ");
+    if (o.reflect) rotEl.style.setProperty("-webkit-box-reflect", `below ${o.reflect.gap}px linear-gradient(to bottom, transparent ${Math.round((1 - o.reflect.size) * 100)}%, rgba(0,0,0,${o.reflect.opacity}))`);
+  }
+  /** ぼかし: the edges of the shape (or picture) fade out — a mask fading on all four sides, `r` px wide. */
+  function softEdges(el, r) {
+    const fade = (dir) => `linear-gradient(to ${dir}, transparent, #000 ${r}px, #000 calc(100% - ${r}px), transparent)`;
+    const mask = `${fade("right")}, ${fade("bottom")}`;
+    for (const [key, value] of [["-webkit-mask-image", mask], ["mask-image", mask], ["-webkit-mask-composite", "source-in"], ["mask-composite", "intersect"]]) el.style.setProperty(key, value);
+  }
+
   function shapeBody(o, rotEl, scale, ctx = {}) {
     const g = geometry(o.shape, o.w, o.h, o.adj, o.path);
     const sw = o.stroke !== "none" ? o.strokeW : 0;
     const fill = g.open ? "none" : o.fill;
     const svg = s("svg", { class: "hs-obj-geom", width: r2(o.w), height: r2(o.h), viewBox: `0 0 ${r2(Math.max(1, o.w))} ${r2(Math.max(1, o.h))}`, overflow: "visible", "aria-hidden": "true" });
-    if (o.shadow) {
-      const c = o.shadow.color;
-      const rgb = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)).join(",");
-      rotEl.style.filter = `drop-shadow(${o.shadow.dx}px ${o.shadow.dy}px ${o.shadow.blur}px rgba(${rgb},${o.shadow.opacity}))`;
-    }
+    applyEffects(o, rotEl);
+    if (o.soft) softEdges(svg, o.soft);
     let paint = fill;
     if (!g.open && o.gradient?.stops?.length) {
       const id = newId();
@@ -3522,6 +3550,7 @@
   function imageBody(o, rotEl, ctx) {
     const url = E.resolveSrc(o.src, ctx);
     const frame = h("div", { class: "hs-obj-img" });
+    if (o.soft) softEdges(frame, o.soft);
     if (o.mask) {
       const g = geometry(o.mask, o.w, o.h, o.adj);
       frame.style.clipPath = `path(${g.rule === "evenodd" ? "evenodd, " : ""}'${g.paths.join(" ")}')`;
@@ -3599,6 +3628,7 @@
       class: ["hs-obj", `hs-obj-${o.kind}`], "data-el": o.id, "data-kind": o.kind,
       "data-fill": ["shape", "text"].includes(o.kind) && o.fill !== "none" && !(o.shape === "custom" ? !o.path?.closed : SHAPES[o.shape]?.open) ? o.fill : null,
       "data-stroke": ["shape", "text", "image"].includes(o.kind) && o.stroke !== "none" ? o.stroke : null,
+      "data-shadow": o.shadow && ["shape", "text", "image"].includes(o.kind) ? "1" : null,
       "data-autofit": o.autofit && o.autofit !== "none" ? o.autofit : null, "data-item": o.item || null,
       "data-bbox": Object.values(bounds(o)).map(r2).join(","),
       // Screen readers: a decorative object is skipped; a picture-like object says its alternative text.
@@ -3610,11 +3640,7 @@
     const move = h("div", { class: "hs-obj-move" });
     const fx = h("div", { class: "hs-obj-fx" });
     const rot = h("div", { class: "hs-obj-rot" });
-    if (o.kind === "image" && o.shadow) {
-      const c = o.shadow.color;
-      const rgb = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)).join(",");
-      rot.style.filter = `drop-shadow(${o.shadow.dx}px ${o.shadow.dy}px ${o.shadow.blur}px rgba(${rgb},${o.shadow.opacity}))`;
-    }
+    if (o.kind === "image") applyEffects(o, rot);
     const transform = [o.rot ? `rotate(${o.rot}deg)` : "", o.flipH || o.flipV ? `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1})` : ""].filter(Boolean).join(" ");
     if (transform) rot.style.transform = transform;
     if (o.kind === "shape" || o.kind === "text") {
@@ -3712,6 +3738,25 @@
     return layer;
   }
 
+  /**
+   * スライド マスター: the objects every slide shows (deck.masterObjects), under the layout and the slide's own
+   * objects (the SEJ master's marks stay above all of them). A slide can leave them out (slide.hideMaster).
+   * They are drawn, not interacted with: a screen reader skips them and a click goes through.
+   */
+  function masterLayer(deck, slide, ctx) {
+    const list = Array.isArray(deck?.masterObjects) ? deck.masterObjects : [];
+    if (!list.length || slide?.hideMaster === true) return null;
+    const layer = h("div", { class: "hs-master-layer", "aria-hidden": "true" });
+    for (const o of list) {
+      if (!o || o.hidden || !KINDS.includes(o.kind)) continue;
+      try {
+        const node = objectNode(o, { ...ctx, live: false }, list, undefined);
+        if (node) layer.append(node);
+      } catch { /* a broken object never takes the slide down */ }
+    }
+    return layer.childNodes.length ? layer : null;
+  }
+
   /** The slide's objects as one layer above the layout (the SEJ master stays on top of it). */
   function objectLayer(slide, ctx, opts = {}) {
     const list = Array.isArray(slide?.elements) ? slide.elements : [];
@@ -3804,7 +3849,7 @@
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
     LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
-    corners, bounds, sites, lineEnds, linePath, objectLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
+    corners, bounds, sites, lineEnds, linePath, objectLayer, masterLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,
     normalizeStrokes, inkPath, INK_COLORS, texToMathML,

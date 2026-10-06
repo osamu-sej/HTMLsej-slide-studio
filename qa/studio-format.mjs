@@ -1687,6 +1687,125 @@ await step("PowerPoint のファンクション キー: ⇧F9 でグリッド線
   await page.keyboard.press("Escape");
 });
 
+await step("図形の効果（影・反射・光彩・ぼかし）: メニューとオプション、影はブランドの指摘、1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.locator('.rb-pop .rb-gallery button[data-shape="rect"]').last().click();
+  await page.mouse.click(...(await stageAt(900, 500)));
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((o) => o.id === id), { w: 800, h: 300, x: 500, y: 400 }), id);
+  await redraw();
+  await pickInPane([id]);
+  const obj = () => page.evaluate((id) => { const o = window.__hsej.slide().elements.find((x) => x.id === id); return { shadow: o.shadow, reflect: o.reflect, glow: o.glow, soft: o.soft }; }, id);
+  const q = (sel) => `#stageBody .slide-wrap .hs-obj[data-el="${id}"] ${sel}`;
+  await tab("図形の書式");
+  // 影 → 右下 (ブランドの指摘が出る)
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("影：右下")').click();
+  await page.waitForTimeout(400);
+  let fx = await obj();
+  assert(fx.shadow && fx.shadow.dx === 8 && fx.shadow.dy === 8, `shadow kept: ${JSON.stringify(fx.shadow)}`);
+  assert(await page.getAttribute(q(""), "data-shadow") === "1", "marked for the brand check");
+  assert(/drop-shadow/.test((await page.getAttribute(q(".hs-obj-rot"), "style")) || ""), "drawn");
+  await page.waitForTimeout(800);
+  const brand = await page.evaluate(() => [...document.querySelectorAll("#issueSummary, .issue-chip")].map((e) => e.textContent).join(" "));
+  assert(/ブランド/.test(brand), `the chip names the brand finding: ${brand}`);
+  // 反射 中 + 光彩 8pt + ぼかし 5pt
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("反射：中")').click();
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("光彩：8 pt")').click();
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("ぼかし：5 pt")').click();
+  await page.waitForTimeout(400);
+  fx = await obj();
+  assert(fx.reflect?.size === 0.5 && fx.glow?.r === 16 && fx.soft === 10, `three more: ${JSON.stringify(fx)}`);
+  const style = (await page.getAttribute(q(".hs-obj-rot"), "style")) || "";
+  assert(/box-reflect/.test(style) && (style.match(/drop-shadow/g) || []).length === 3, `reflection and glow drawn: ${style}`);
+  assert(/mask-image/.test((await page.getAttribute(q("svg.hs-obj-geom"), "style")) || ""), "the soft edge masks the shape");
+  await shot("effects");
+  // 効果のオプション: 影の距離と角度、光彩の色
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("効果のオプション")').click();
+  await page.waitForSelector(".fx-dialog[open]");
+  await page.fill('.fx-dialog [name="shadowDistance"]', "5");
+  await page.fill('.fx-dialog [name="shadowAngle"]', "90");
+  await page.selectOption('.fx-dialog [name="glowColor"]', "#d6c9b8");
+  await page.uncheck('.fx-dialog [name="reflectOn"]');
+  await page.click(".fx-dialog .fmt-ok");
+  await page.waitForTimeout(400);
+  fx = await obj();
+  assert(fx.shadow.dx === 0 && fx.shadow.dy === 10 && fx.glow.color === "#d6c9b8" && !fx.reflect, `the dialog's numbers: ${JSON.stringify(fx)}`);
+  // 1回の⌘Zでダイアログの変更だけが戻る
+  await undo();
+  fx = await obj();
+  assert(fx.reflect && fx.shadow.dx === 8, `one undo: ${JSON.stringify(fx)}`);
+  // すべての効果をなくす
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("すべての効果をなくす")').click();
+  await page.waitForTimeout(300);
+  fx = await obj();
+  assert(!fx.shadow && !fx.reflect && !fx.glow && !fx.soft, `all gone: ${JSON.stringify(fx)}`);
+  assert(await page.getAttribute(q(""), "data-shadow") === null, "and the mark with them");
+});
+
+await step("スライド マスター表示: 全スライド共通の部品を置く・背景グラフィックを表示しない・検索・Undo（SEJのマスターは動かさない）", async () => {
+  await freshSlide();
+  const here = await page.evaluate(() => window.__hsej.deck().slides.indexOf(window.__hsej.slide()));
+  const count = async () => page.evaluate(() => (window.__hsej.deck().masterObjects || []).length);
+  const own = async () => page.evaluate(() => (window.__hsej.slide().elements || []).length);
+  const before = await own();
+  await tab("表示");
+  await byTitle("スライド マスター表示");
+  await page.waitForSelector(".callout-master");
+  assert(await page.evaluate(() => window.__hsej.master()), "the studio is in the master view");
+  assert(/すべてのスライド/.test(await page.textContent(".callout-master")) && /動かせません/.test(await page.textContent(".callout-master")), "the message says what it is and what stays");
+  // A text box pasted here goes to the master, not to the slide.
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  await pasteClip(null, { text: "マスターの文字Z" });
+  await page.waitForFunction(() => (window.__hsej.deck().masterObjects || []).length === 1, null, { timeout: 5000 });
+  assert((await own()) === before, "the slide's own objects are not touched");
+  assert(await page.evaluate(() => window.__hsej.deck().masterObjects[0].text.includes("マスターの文字Z")), "the words are in the master");
+  await shot("slide-master");
+  // Close; the words are on this slide and on the thumbnails of the others.
+  await page.click(".btn-master-close");
+  await page.waitForTimeout(500);
+  assert(!(await page.$(".callout-master")), "closed");
+  assert((await page.$$eval("#stageBody .hs-master-layer", (els) => els.map((e) => e.textContent).join(""))).includes("マスターの文字Z"), "drawn under this slide");
+  const thumbs = await page.$$eval("#filmstrip .hs-master-layer", (els) => els.length);
+  assert(thumbs >= 2, `the thumbnails of the other slides show it too: ${thumbs}`);
+  // 背景グラフィックを表示しない
+  await tab("デザイン");
+  await byTitle("スライド マスターに置いた図形");
+  await page.waitForTimeout(400);
+  assert(await page.evaluate(() => window.__hsej.slide().hideMaster === true) && !(await page.$("#stageBody .hs-master-layer")), "hidden on this slide");
+  await byTitle("スライド マスターに置いた図形");
+  await page.waitForTimeout(400);
+  assert(!(await page.evaluate(() => window.__hsej.slide().hideMaster)) && (await page.$("#stageBody .hs-master-layer")), "and back");
+  // 検索: the master's words are found, and a click takes you to the master.
+  await page.keyboard.press("Control+f");
+  await page.waitForSelector("#replaceDialog[open]");
+  await page.selectOption("#findScope", "deck");
+  await page.fill("#findInput", "マスターの文字Z");
+  assert(/1か所/.test(await page.textContent("#findCount")), `found: ${await page.textContent("#findCount")}`);
+  assert((await page.textContent("#findHits .find-hit")).includes("マスター"), "listed as the master");
+  await page.click("#findHits .find-hit");
+  await page.waitForSelector(".callout-master");
+  // Undo inside the master view takes the words away; opening another slide leaves the view.
+  // (the two 背景グラフィック toggles above are undo steps of their own, then the paste)
+  for (let i = 0; i < 4 && (await count()) > 0; i += 1) await undo();
+  assert((await count()) === 0, `undone: ${await count()}`);
+  assert(await page.evaluate(() => window.__hsej.master()), "still in the master view after undo");
+  for (let i = 0; i < 4 && (await count()) < 1; i += 1) { await page.keyboard.press("Control+y"); await page.waitForTimeout(300); }
+  assert((await count()) === 1, "redone");
+  await page.click("#filmstrip .film-item >> nth=0");
+  await page.waitForTimeout(400);
+  assert(!(await page.$(".callout-master")) && !(await page.evaluate(() => window.__hsej.master())), "choosing a slide leaves the master view");
+  assert(await page.evaluate((i) => window.__hsej.deck().slides.length > i, here), "the deck is whole");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

@@ -112,6 +112,11 @@ class SejDeckTest(unittest.TestCase):
         self.assertEqual(back.get("overAction"), {"type": "next"}, "マウスの通過")
         self.assertEqual((back.get("cap"), back.get("cmpd"), back.get("join")), ("round", "dbl", "bevel"), "線端・複合線・結合点")
         self.assertNotIn("cmpd", by_text(self.slides[3], "終わる"))
+        end = by_text(self.slides[3], "終わる")
+        self.assertEqual(end.get("glow"), {"r": 12, "color": "#b7c3da", "opacity": 0.6}, "光彩")
+        self.assertEqual(end.get("soft"), 10, "ぼかし")
+        self.assertEqual(end.get("reflect"), {"size": 0.3, "opacity": 0.4, "gap": 4}, "反射")
+        self.assertNotIn("glow", back)
         self.assertNotIn("overAction", by_text(self.slides[3], "終わる"))
 
     def test_animations_and_the_transition(self):

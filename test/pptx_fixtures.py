@@ -199,6 +199,17 @@ def sej_deck() -> bytes:
     end.text_frame.text = "終わる"
     cnv = end._element.nvSpPr.cNvPr
     cnv.append(cnv.makeelement(f"{A}hlinkClick", {"{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id": "", "action": "ppaction://hlinkshowjump?jump=endshow"}))
+    # 図形の効果: a 6 pt glow in pale blue (60% opaque), a 5 pt soft edge and a reflection covering 30% of the shape.
+    sp_pr = end._element.spPr
+    effects = sp_pr.makeelement(f"{A}effectLst", {})
+    glow = effects.makeelement(f"{A}glow", {"rad": "76200"})
+    glow_color = glow.makeelement(f"{A}srgbClr", {"val": "B7C3DA"})
+    glow_color.append(glow_color.makeelement(f"{A}alpha", {"val": "60000"}))
+    glow.append(glow_color)
+    effects.append(glow)
+    effects.append(effects.makeelement(f"{A}reflection", {"stA": "40000", "endPos": "30000", "dist": "25400"}))
+    effects.append(effects.makeelement(f"{A}softEdge", {"rad": "63500"}))
+    sp_pr.append(effects)
     return save(prs)
 
 

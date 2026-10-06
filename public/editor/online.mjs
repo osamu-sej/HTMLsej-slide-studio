@@ -30,7 +30,8 @@ export function createOnline(app) {
     return result;
   }
   async function uploadMedia(deck) {
-    for (const src of mediaIds(deck.slides)) {
+    // スライド マスター: its pictures go up with the slides.
+    for (const src of mediaIds(deck.masterObjects?.length ? [...deck.slides, { elements: deck.masterObjects }] : deck.slides)) {
       try {
         const blob = await app.mediaBlob(src);
         if (blob) await fetch(api(live.id, `/media/${encodeURIComponent(src.slice(4))}`), { method: "PUT", credentials: "same-origin", headers: { "content-type": blob.type || "application/octet-stream" }, body: blob });
@@ -234,7 +235,7 @@ export function createOnline(app) {
       fits = data.fits;
       state = data.show;
       votes = data.votes || {};
-      placeMedia(deck.slides);
+      placeMedia(deck.masterObjects?.length ? [...deck.slides, { elements: deck.masterObjects }] : deck.slides);
       if (!player) mount(); else { player.follow(state.index, state.step); for (const [poll, counts] of Object.entries(votes)) player.setVotes(poll, counts); }
       status();
     });
@@ -252,7 +253,7 @@ export function createOnline(app) {
       deck = data.deck;
       fits = data.fits;
       state = data.show || state;
-      placeMedia(deck.slides);
+      placeMedia(deck.masterObjects?.length ? [...deck.slides, { elements: deck.masterObjects }] : deck.slides);
       mount();
       status();
     });

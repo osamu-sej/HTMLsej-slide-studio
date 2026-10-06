@@ -108,6 +108,8 @@ const shared = {
   advance: z.number().min(0).max(600).optional(),
   // 読み取り順序 (校閲 → アクセシビリティ): the objects' ids in the order a screen reader reads them.
   readingOrder: z.array(z.string().max(32)).max(5000).optional(),
+  // 背景グラフィックを表示しない: the deck's master objects (deck.masterObjects) stay off this slide.
+  hideMaster: z.boolean().optional(),
   // 背景の書式設定: the slide's own background colour (an SEJ light one) and picture (its transparency, tiled or not).
   background: z.object({ color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), image: z.string().max(80_000_000).optional(), transparency: z.number().min(0).max(1).optional(), tile: z.boolean().optional() }).optional(),
 };
@@ -258,6 +260,8 @@ export const deckShape = z.object({
   guides: z.object({ x: z.array(z.number()).max(20).optional(), y: z.array(z.number()).max(20).optional() }).optional(),
   // 既定の図形・テキスト ボックス・線に設定 (checked by the studio: objectDefaultsOf in public/editor/ops.mjs).
   objectDefaults: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
+  // スライド マスター: the objects every slide shows (checked by the studio: normalizeObjects in public/engine/objects.js).
+  masterObjects: z.array(z.record(z.string(), z.unknown())).max(500).optional(),
   // スライド番号の開始番号 (デザイン → スライドのサイズ): the number the first page carries (1 when not set).
   firstNumber: z.number().int().min(0).max(9999).optional(),
   // スライド ショーの設定 and 目的別スライド ショー (checked again by the studio: public/editor/show.mjs).
@@ -314,7 +318,7 @@ export const chatResultSchema = z.object({
 });
 
 // Fields only people set (uploaded photos and videos, hand placement) are hidden from the AI's output schema.
-const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "hideTitle", "master", "sourceViewport", "hidden", "section", "comments", "readingOrder", "background"]);
+const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "hideTitle", "master", "sourceViewport", "hidden", "section", "comments", "readingOrder", "background", "hideMaster"]);
 function withoutUserFields(node) {
   if (Array.isArray(node)) return node.map(withoutUserFields);
   if (!node || typeof node !== "object") return node;

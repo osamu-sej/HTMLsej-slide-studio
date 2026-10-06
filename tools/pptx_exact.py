@@ -587,6 +587,29 @@ class SlideReader:
                 "blur": r2(self.deck.px(int(effect.get("blurRad", 0)))),
                 "color": hexc(color), "opacity": r2(clamp(color[1], 0, 1))}
 
+    def effects_of(self, sppr, ph_chain=()):
+        """The other effects of a shape (a:effectLst): 光彩 (glow), ぼかし (softEdge) and 反射 (reflection), as the studio keeps them."""
+        lst = next((s.find(f"{A}effectLst") for s in [sppr, *[n.find(P + "spPr") for n in ph_chain]]
+                    if s is not None and s.find(f"{A}effectLst") is not None), None)
+        out = {}
+        if lst is None:
+            return out
+        glow = lst.find(f"{A}glow")
+        if glow is not None:
+            color = self.color(glow, None)
+            if color:
+                out["glow"] = {"r": max(1, round(self.deck.px(int(glow.get("rad", 0))))), "color": hexc(color), "opacity": r2(clamp(color[1], 0.05, 1))}
+        soft = lst.find(f"{A}softEdge")
+        if soft is not None and int(soft.get("rad", 0)) > 0:
+            out["soft"] = max(1, round(self.deck.px(int(soft.get("rad", 0)))))
+        refl = lst.find(f"{A}reflection")
+        if refl is not None:
+            # endPos is how much of the object the reflection covers (per 1000 of a percent); stA its opacity at the top.
+            size = clamp(int(refl.get("endPos", 50000)) / 100000, 0.05, 1)
+            out["reflect"] = {"size": r2(size), "opacity": r2(clamp(int(refl.get("stA", 50000)) / 100000, 0, 1)),
+                              "gap": max(0, round(self.deck.px(int(refl.get("dist", 0)))))}
+        return out
+
     def line_of(self, sppr, el=None, ph_chain=()):
         """{color, alpha, w, dash, head, tail, headSize, tailSize} in pixels, or None for no line."""
         ln = None
@@ -1054,6 +1077,7 @@ class SlideReader:
         shadow = self.shadow_of(sppr, el, ph_chain)
         if shadow:
             o["shadow"] = shadow
+        o.update(self.effects_of(sppr, ph_chain))
         if text:
             o.update(self.text_settings(text, o))
             if fill in (None, "none") and not line and o["shape"] == "rect":
@@ -1196,6 +1220,7 @@ class SlideReader:
         shadow = self.shadow_of(sppr, el)
         if shadow:
             o["shadow"] = shadow
+        o.update(self.effects_of(sppr))
         if hidden:
             o["hidden"] = True
         self.add(o, spid, group)

@@ -52,6 +52,8 @@
 /* ------------------------------------------------------------------ objects placed by hand (objects.js)
    box (position, size) → motion-path layer → effect layer → rotated / flipped body (shape, text, picture…) */
 .hs-objects { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+/* スライド マスター: under the layout (z-index 2), over the background */
+.hs-master-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .hs-obj { position: absolute; }
 .hs-obj-move, .hs-obj-fx, .hs-obj-rot { position: absolute; inset: 0; }
 .hs-obj-rot { transform-origin: 50% 50%; }
