@@ -35,3 +35,8 @@ export function extractText(buffer, fileName, { rootDir, timeoutMs = 60_000 } = 
 export function importDeck(buffer, fileName, { rootDir, timeoutMs = 120_000, mode = "layout" } = {}) {
   return runScript("import_deck.py", [fileName, mode], buffer, { rootDir, timeoutMs, timeoutMessage: "取り込みがタイムアウトしました。" });
 }
+
+/** An Excel workbook's sheets as table cells (formulas, number formats, merged cells): { sheets: [{ name, rows, cols }] }. */
+export function importSheets(buffer, fileName, { rootDir, timeoutMs = 60_000 } = {}) {
+  return runScript("xlsx_table.py", [fileName], buffer, { rootDir, timeoutMs, timeoutMessage: "Excelの読み込みがタイムアウトしました。" });
+}

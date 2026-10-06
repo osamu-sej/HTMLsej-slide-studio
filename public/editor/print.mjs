@@ -1,7 +1,11 @@
 // 印刷 (PowerPoint's File → Print): which slides (all, this one, a range like "1,3,5-8", with or without hidden
 // slides), the layout (full-page slides, notes pages, the outline, handouts with 1/2/3/4/6/9 slides a page, in rows
 // or columns), colour or grayscale, frames, and the header and footer of notes and handouts — with a preview of the
-// pages. Printing (or saving as PDF) goes through the browser's print dialog.
+// pages. Printing (or saving as PDF) goes through the browser's print dialog. The page itself — its orientation, the places
+// of the header, footer, date, page number, slide and notes, and the words and pictures on every page — is the deck's
+// 配布資料マスター・ノート マスター (printmaster.mjs).
+
+import { pageOf, printDefaults, resolveMaster } from "./printmaster.mjs";
 
 export const LAYOUTS = {
   full: "フル ページ サイズのスライド",
@@ -49,12 +53,13 @@ export function paginate(list, layout) {
 }
 
 /** Where each slide goes on a handout page (CSS px from the page's corner) — in rows, or down the columns. */
-export function handoutBoxes(layout, count, { order = "rows" } = {}) {
-  const [cols, rows] = GRID[layout];
+export function handoutBoxes(layout, count, { order = "rows", page = PAGE } = {}) {
+  // On a landscape page the grid lies down too: 6 slides are 3 across and 2 down.
+  const [cols, rows] = page.w > page.h && layout !== "h1" && layout !== "h3" ? [...GRID[layout]].reverse() : GRID[layout];
   const top = PAGE.margin + 36;
-  const bottom = PAGE.h - PAGE.margin - 30;
+  const bottom = page.h - PAGE.margin - 30;
   const left = PAGE.margin;
-  const width = PAGE.w - PAGE.margin * 2;
+  const width = page.w - PAGE.margin * 2;
   const gap = 24;
   if (layout === "h3") {
     const w = Math.round(width * 0.46);
@@ -117,11 +122,26 @@ export function createPrinter(app) {
     el.style.transformOrigin = "0 0";
     return h("div", { class: ["pr-slide", frame ? "framed" : ""], style: { width: `${w}px`, height: `${Math.round(w * 9 / 16)}px` } }, el);
   }
-  function chrome(page, n, opts) {
+  /** The master a layout is printed on: notes pages use the ノート マスター, handouts and the outline the 配布資料マスター. */
+  const masterFor = (layout) => { const kind = layout === "notes" ? "notes" : "handout"; return resolveMaster(app.printMasters?.()?.[kind], kind); };
+  /** A page of the master's size (the master's pictures and words lie under everything else on it). */
+  function sheet(master, classes) {
+    const page = h("div", { class: classes, style: { width: `${master.page.w}px`, height: `${master.page.h}px` } });
+    if (master.objects.length) {
+      const layer = E.objectLayer({ elements: master.objects }, app.renderCtx?.() || {});
+      if (layer) page.append(h("div", { class: "hs-slide pr-objects", "data-theme": "sej", style: { width: `${master.page.w}px`, height: `${master.page.h}px` } }, layer));
+    }
+    return page;
+  }
+  /** ヘッダー・日付・フッター・ページ番号, each where the master puts it. */
+  function chrome(page, n, opts, master) {
     const deck = app.deck();
     const today = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
-    if (opts.header || opts.date) page.append(h("div", { class: "pr-head" }, h("span", {}, opts.header ? opts.headerText || deck.title : ""), h("span", {}, opts.date ? today : "")));
-    if (opts.pageNo || opts.footer) page.append(h("div", { class: "pr-foot" }, h("span", {}, opts.footer ? opts.footerText || "" : ""), h("span", {}, opts.pageNo ? String(n) : "")));
+    const place = (key, text) => { const p = master.ph[key]; page.append(h("div", { class: `pr-ph pr-ph-${key}`, style: { left: `${p.x}px`, top: `${p.y}px`, width: `${p.w}px`, textAlign: p.align, fontSize: `${master.fs}px` } }, text)); };
+    if (opts.header) place("header", opts.headerText || deck.title);
+    if (opts.date) place("date", master.ph.date.text || today);
+    if (opts.footer) place("footer", opts.footerText || "");
+    if (opts.pageNo) place("pageNo", String(n));
   }
   /** The outline of a slide: its title, then its words (key message, points, text of its parts). */
   function outlineOf(slide) {
@@ -143,7 +163,7 @@ export function createPrinter(app) {
         h("ul", {}, chunk.map((l) => h("li", { class: l.level ? "pr-cm-reply" : "" },
           h("div", { class: "pr-cm-meta" }, h("b", {}, l.by), l.at ? h("span", {}, l.at) : null, l.done ? h("span", {}, "解決済み") : null),
           h("div", { class: "pr-cm-text" }, l.text.split(/\n/).map((t) => h("p", {}, t || "\u00a0")))))));
-      if (!full) chrome(page, first + k, opts);
+      if (!full) chrome(page, first + k, opts, masterFor(opts.layout));
       return page;
     });
   }
@@ -163,10 +183,11 @@ export function createPrinter(app) {
       }
       return out;
     }
+    const master = masterFor(opts.layout);
     if (opts.layout === "outline") {
       let page = null;
       let used = 0;
-      const start = () => { page = h("div", { class: "pr-page pr-outline" }); out.push(page); chrome(page, out.length, opts); used = 0; };
+      const start = () => { page = sheet(master, "pr-page pr-outline"); out.push(page); chrome(page, out.length, opts, master); used = 0; };
       start();
       for (const i of list) {
         const slide = deck.slides[i];
@@ -181,21 +202,22 @@ export function createPrinter(app) {
     }
     if (opts.layout === "notes") {
       for (const i of list) {
-        const page = h("div", { class: "pr-page pr-notes" });
-        chrome(page, out.length + 1, opts);
-        const w = PAGE.w - PAGE.margin * 2 - 60;
-        const box = thumb(i, w, opts.frame);
+        const page = sheet(master, "pr-page pr-notes");
+        chrome(page, out.length + 1, opts, master);
+        const box = thumb(i, master.slide.w, opts.frame);
         box.classList.add("pr-notes-slide");
-        page.append(box, h("div", { class: "pr-notes-text" }, String(deck.slides[i].notes || "").split(/\n/).map((line) => h("p", {}, line || " "))));
+        Object.assign(box.style, { left: `${master.slide.x}px`, top: `${master.slide.y}px` });
+        const n = master.notes;
+        page.append(box, h("div", { class: "pr-notes-text", style: { left: `${n.x}px`, top: `${n.y}px`, width: `${n.w}px`, height: `${n.h}px`, right: "auto", bottom: "auto", fontSize: `${n.fs}px` } }, String(deck.slides[i].notes || "").split(/\n/).map((line) => h("p", {}, line || " "))));
         out.push(page);
         commentsAfter(i);
       }
       return out;
     }
     for (const group of paginate(list, opts.layout)) {
-      const page = h("div", { class: ["pr-page", "pr-handout", opts.layout] });
-      chrome(page, out.length + 1, opts);
-      handoutBoxes(opts.layout, group.length, { order: opts.order }).forEach((b, k) => {
+      const page = sheet(master, `pr-page pr-handout ${opts.layout}`);
+      chrome(page, out.length + 1, opts, master);
+      handoutBoxes(opts.layout, group.length, { order: opts.order, page: master.page }).forEach((b, k) => {
         const box = thumb(group[k], b.w, opts.frame);
         Object.assign(box.style, { position: "absolute", left: `${b.x}px`, top: `${b.y}px` });
         page.append(box);
@@ -215,7 +237,8 @@ export function createPrinter(app) {
     if (!list.length) { app.toast("印刷するスライドがありません（範囲を確かめてください）"); return; }
     root.replaceChildren(...list);
     root.className = ["print-root", opts.layout === "full" ? "pr-mode-full" : "pr-mode-page", opts.color === "gray" ? "pr-gray" : "", opts.color === "bw" ? "pr-bw" : ""].filter(Boolean).join(" ");
-    const style = h("style", { id: "printPageStyle" }, opts.layout === "full" ? "@media print { @page { size: 1920px 1080px; margin: 0; } }" : "@media print { @page { size: A4 portrait; margin: 0; } }");
+    const landscape = opts.layout !== "full" && masterFor(opts.layout).orientation === "landscape";
+    const style = h("style", { id: "printPageStyle" }, opts.layout === "full" ? "@media print { @page { size: 1920px 1080px; margin: 0; } }" : `@media print { @page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 0; } }`);
     document.getElementById("printPageStyle")?.remove();
     document.head.append(style);
     await Promise.all([...root.querySelectorAll("img")].map((img) => img.decode?.().catch(() => {})));
@@ -223,7 +246,7 @@ export function createPrinter(app) {
     await document.fonts?.ready;
     const cleanup = () => { E.stopLottie?.(root); root.replaceChildren(); root.className = "print-root"; style.remove(); window.removeEventListener("afterprint", cleanup); };
     window.addEventListener("afterprint", cleanup);
-    app.toast(opts.layout === "full" ? "印刷画面で「PDFとして保存」を選び、余白を「なし」にしてください" : "印刷画面で用紙をA4・縦、余白を「なし」にしてください（PDFとして保存もできます）");
+    app.toast(opts.layout === "full" ? "印刷画面で「PDFとして保存」を選び、余白を「なし」にしてください" : `印刷画面で用紙をA4・${landscape ? "横" : "縦"}、余白を「なし」にしてください（PDFとして保存もできます）`);
     setTimeout(() => window.print(), 80);
   }
 
@@ -232,10 +255,15 @@ export function createPrinter(app) {
     if (!deck) return;
     const saved = load();
     const opts = { range: "all", custom: "", hidden: false, layout: "full", order: "rows", frame: false, color: "color", header: true, date: true, pageNo: true, footer: false, headerText: "", footerText: "", comments: false, ...saved, ...(saved.range === "custom" ? {} : { custom: "" }) };
+    // 配布資料マスター・ノート マスター: the header, date, footer and page number start as the master has them (and a handout master's
+    // 1ページあたりのスライド数 is the layout when none was used before); they can be changed for one printing here.
+    if (!saved.layout && masterFor("h6").perPage) opts.layout = masterFor("h6").perPage;
+    Object.assign(opts, printDefaults(masterFor(opts.layout)));
+    let masterKind = opts.layout === "notes" ? "notes" : "handout";
     const preview = h("div", { class: "pr-preview", "aria-label": "印刷プレビュー" });
     const count = h("span", { class: "hint pr-count" });
     const sel = (name, entries, value) => h("select", { name }, entries.map(([v, label]) => h("option", { value: v, selected: v === value || null }, label)));
-    const form = h("form", { class: "pr-form", onsubmit: (e) => e.preventDefault(), oninput: () => refresh(), onchange: () => refresh() },
+    const form = h("form", { class: "pr-form", onsubmit: (e) => e.preventDefault(), oninput: () => refresh(), onchange: (event) => { if (event.target?.name === "layout") adoptMaster(event.target.value); refresh(); } },
       h("label", {}, "印刷範囲", sel("range", [["all", "すべてのスライドを印刷"], ["current", "現在のスライドを印刷"], ["custom", "ユーザー設定の範囲"]], opts.range)),
       h("label", {}, "スライド指定", h("input", { name: "custom", type: "text", value: opts.custom, placeholder: "例：1,3,5-8" })),
       h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "hidden", checked: opts.hidden || null }), h("span", {}, "非表示スライドを印刷する")),
@@ -249,6 +277,17 @@ export function createPrinter(app) {
         h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "date", checked: opts.date || null }), h("span", {}, "日付")),
         h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "pageNo", checked: opts.pageNo || null }), h("span", {}, "ページ番号")),
         h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name: "footer", checked: opts.footer || null }), h("span", {}, "フッター"), h("input", { type: "text", name: "footerText", value: opts.footerText, placeholder: "例：社内限り" }))));
+    /** Choosing another kind of page (notes ⇄ handouts) takes the header, date, footer and page number of that master. */
+    function adoptMaster(layout) {
+      const kind = layout === "notes" ? "notes" : "handout";
+      if (kind === masterKind || layout === "full") return;
+      masterKind = kind;
+      const d = printDefaults(masterFor(layout));
+      const f = (name) => form.elements.namedItem(name);
+      for (const key of ["header", "date", "pageNo", "footer"]) f(key).checked = d[key];
+      f("headerText").value = d.headerText;
+      f("footerText").value = d.footerText;
+    }
     // Read from the fields themselves: a field turned off for this layout (the header and footer of full pages) keeps
     // its setting for the next layout instead of reading as off.
     const read = () => {
@@ -266,11 +305,12 @@ export function createPrinter(app) {
         if (o.range === "custom" && !parseRange(o.custom, deck.slides.length)) { preview.replaceChildren(h("p", { class: "hint" }, `スライド番号を「1,3,5-8」の形で（1〜${deck.slides.length}）`)); count.textContent = ""; return; }
         const list = pages(o);
         count.textContent = `${printedSlides(deck, { ...o, current: app.index() }).length}枚のスライド・${list.length}ページ`;
-        const k = o.layout === "full" ? 300 / E.W : 300 / PAGE.w;
+        const pg = o.layout === "full" ? { w: E.W, h: E.H } : masterFor(o.layout).page;
+        const k = 300 / pg.w;
         preview.className = ["pr-preview", o.color === "gray" ? "pr-gray" : "", o.color === "bw" ? "pr-bw" : ""].filter(Boolean).join(" ");
         preview.replaceChildren(...list.slice(0, 12).map((p) => {
-          const w = o.layout === "full" ? E.W : PAGE.w;
-          const hh = o.layout === "full" ? E.H : PAGE.h;
+          const w = pg.w;
+          const hh = pg.h;
           p.style.transform = `scale(${k})`;
           p.style.transformOrigin = "0 0";
           return h("div", { class: "pr-sheet", style: { width: `${Math.round(w * k)}px`, height: `${Math.round(hh * k)}px` } }, p);

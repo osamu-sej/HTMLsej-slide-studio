@@ -262,6 +262,8 @@ export const deckShape = z.object({
   objectDefaults: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
   // スライド マスター: the objects every slide shows (checked by the studio: normalizeObjects in public/engine/objects.js).
   masterObjects: z.array(z.record(z.string(), z.unknown())).max(500).optional(),
+  // 配布資料マスター・ノート マスター (表示 → マスター表示; checked again by the studio: public/editor/printmaster.mjs).
+  printMasters: z.object({ handout: z.record(z.string(), z.unknown()).optional(), notes: z.record(z.string(), z.unknown()).optional() }).optional(),
   // スライド番号の開始番号 (デザイン → スライドのサイズ): the number the first page carries (1 when not set).
   firstNumber: z.number().int().min(0).max(9999).optional(),
   // スライド ショーの設定 and 目的別スライド ショー (checked again by the studio: public/editor/show.mjs).

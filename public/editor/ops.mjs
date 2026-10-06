@@ -2,6 +2,8 @@
 // snapping to guides, aligning, distributing, grouping, ordering, duplicating, and formatting the text inside.
 // Plain data in, plain data out (rich text helpers use the page's DOM through the engine).
 
+import { deleteRefs, insertRefs, mapFormulas } from "./sheet.mjs";
+
 export const W = 1920;
 export const H = 1080;
 export const PX_PER_CM = 144 / 2.54;
@@ -731,6 +733,8 @@ export function moveAnimations(timeline, ids, step) {
 // object in several positions: inserting, deleting, merging and splitting then keep merges right by themselves.
 
 const copyCell = (cell) => JSON.parse(JSON.stringify(cell || {}));
+/** A sheet's formulas follow its rows and columns (a table that is not a sheet keeps its words as they are). */
+const sheetRefs = (o, fn) => (o.sheet ? mapFormulas(o, fn) : o);
 function expand(cells) {
   const grid = cells.map((row) => row.map(() => null));
   cells.forEach((row, r) => row.forEach((cell, c) => {
@@ -981,7 +985,7 @@ export function tableInsertRow(o, at) {
   const heights = px(o.rows, o.h);
   const added = heights[Math.min(at, heights.length - 1)] || o.h / heights.length;
   heights.splice(at, 0, added);
-  return { ...o, cells: collapse(grid), rows: toShares(heights), h: o.h + added };
+  return sheetRefs({ ...o, cells: collapse(grid), rows: toShares(heights), h: o.h + added }, (f) => insertRefs(f, "row", at));
 }
 /** Insert a column before `at`; the table grows by that column's width. */
 export function tableInsertCol(o, at) {
@@ -991,7 +995,7 @@ export function tableInsertCol(o, at) {
   const widths = px(o.cols, o.w);
   const added = widths[Math.min(at, widths.length - 1)] || o.w / widths.length;
   widths.splice(at, 0, added);
-  return { ...o, cells: collapse(grid), cols: toShares(widths), w: o.w + added };
+  return sheetRefs({ ...o, cells: collapse(grid), cols: toShares(widths), w: o.w + added }, (f) => insertRefs(f, "col", at));
 }
 /** Delete rows r0…r1 (the table shrinks); null when nothing would be left. */
 export function tableDeleteRows(o, r0, r1) {
@@ -1000,7 +1004,7 @@ export function tableDeleteRows(o, r0, r1) {
   const grid = expand(o.cells).filter((_, r) => r < a || r > b);
   const heights = px(o.rows, o.h);
   const removed = heights.slice(a, b + 1).reduce((s, v) => s + v, 0);
-  return { ...o, cells: collapse(grid), rows: toShares(heights.filter((_, r) => r < a || r > b)), h: Math.max(20, o.h - removed) };
+  return sheetRefs({ ...o, cells: collapse(grid), rows: toShares(heights.filter((_, r) => r < a || r > b)), h: Math.max(20, o.h - removed) }, (f) => deleteRefs(f, "row", a, b));
 }
 /** Delete columns c0…c1 (the table narrows); null when nothing would be left. */
 export function tableDeleteCols(o, c0, c1) {
@@ -1009,7 +1013,7 @@ export function tableDeleteCols(o, c0, c1) {
   const grid = expand(o.cells).map((row) => row.filter((_, c) => c < a || c > b));
   const widths = px(o.cols, o.w);
   const removed = widths.slice(a, b + 1).reduce((s, v) => s + v, 0);
-  return { ...o, cells: collapse(grid), cols: toShares(widths.filter((_, c) => c < a || c > b)), w: Math.max(20, o.w - removed) };
+  return sheetRefs({ ...o, cells: collapse(grid), cols: toShares(widths.filter((_, c) => c < a || c > b)), w: Math.max(20, o.w - removed) }, (f) => deleteRefs(f, "col", a, b));
 }
 /** Merge a block of cells into one (the words of each come along, one paragraph after another). */
 export function tableMerge(o, r0, c0, r1, c1) {

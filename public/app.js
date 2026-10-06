@@ -17,6 +17,7 @@ import { createShowTools, customShowsOf, keptInk, playerOptions, showOf, showSli
 import { createA11y } from "./editor/a11y.mjs?v=__APP_VERSION__";
 import { createPrinter } from "./editor/print.mjs?v=__APP_VERSION__";
 import { matcher as findMatcher, snippet as findSnippet } from "./editor/find.mjs?v=__APP_VERSION__";
+import { createSynonyms } from "./editor/synonyms.mjs?v=__APP_VERSION__";
 import { createProofing } from "./editor/proof.mjs?v=__APP_VERSION__";
 import { createFileInfo, infoOf, isFinal, FINAL_STATUS, strip as stripDeckData } from "./editor/fileinfo.mjs?v=__APP_VERSION__";
 import { createSlideTools } from "./editor/slidetools.mjs?v=__APP_VERSION__";
@@ -30,6 +31,8 @@ import { createGifExport } from "./editor/gif.mjs?v=__APP_VERSION__";
 import { lockHtml } from "./editor/protect.mjs?v=__APP_VERSION__";
 import { createBackground } from "./editor/background.mjs?v=__APP_VERSION__";
 import { createAutoCorrect } from "./editor/autocorrect.mjs?v=__APP_VERSION__";
+import { recalc as sheetRecalc } from "./editor/sheet.mjs?v=__APP_VERSION__";
+import { createPrintMasters, masterSlides, normalizeMasters } from "./editor/printmaster.mjs?v=__APP_VERSION__";
 
 /*
  * HTML SEJ Slide Studio — the editor.
@@ -38,6 +41,8 @@ import { createAutoCorrect } from "./editor/autocorrect.mjs?v=__APP_VERSION__";
  */
 const $ = (id) => document.getElementById(id);
 const E = window.SlideEngine;
+// Excel スプレッドシート: a table with `sheet` has its formulas worked out whenever the engine normalizes it.
+E.sheetCalc = (table) => sheetRecalc(table, { inPlace: true });
 E.lottieUrl = "/vendor/lottie.js";
 const APP_VERSION = "__APP_VERSION__";
 const STORAGE = {
@@ -660,6 +665,8 @@ function normalizeDeck(value, base = null) {
     ...(guidesOf(meta.guides ?? base?.guides) ? { guides: guidesOf(meta.guides ?? base?.guides) } : {}),
     // スライド マスター: the objects every slide shows.
     ...(masterObjectsOf(meta.masterObjects ?? base?.masterObjects) ? { masterObjects: masterObjectsOf(meta.masterObjects ?? base?.masterObjects) } : {}),
+    // 配布資料マスター・ノート マスター.
+    ...(printMastersOf(meta.printMasters ?? base?.printMasters) ? { printMasters: printMastersOf(meta.printMasters ?? base?.printMasters) } : {}),
     // スライド番号の開始番号.
     ...(firstNumberOf(meta.firstNumber ?? base?.firstNumber) !== 1 ? { firstNumber: firstNumberOf(meta.firstNumber ?? base?.firstNumber) } : {}),
     // 既定の図形・テキスト ボックス・線.
@@ -686,7 +693,12 @@ function masterObjectsOf(value) {
   return list.length ? list : null;
 }
 /** The deck's slides and, when it has master objects, the master as one more "slide" (so media and text are found there too). */
-const withMaster = (deck) => (deck?.masterObjects?.length ? [...deck.slides, { elements: deck.masterObjects }] : deck?.slides || []);
+/** 配布資料マスター・ノート マスター (deck.printMasters): each master's page and the words and pictures on it, checked as the studio keeps them. */
+function printMastersOf(value) {
+  return normalizeMasters(value, { objects: (list) => E.normalizeObjects(list).slice(0, 30) });
+}
+// Pictures of the 配布資料マスター・ノート マスター are found and carried like the slide master's.
+const withMaster = (deck) => [...(deck?.slides || []), ...(deck?.masterObjects?.length ? [{ elements: deck.masterObjects }] : []), ...masterSlides(deck?.printMasters)];
 
 /** スライド番号の開始番号 (deck.firstNumber): a whole number from 0 to 9999; 1 unless set. */
 function firstNumberOf(value) {
@@ -2443,6 +2455,18 @@ const editorApp = {
   // デザイン: the deck's motion; スライド ショー; 校閲 (the ribbon's tabs around the slide).
   deckMotion: () => (state.deck ? { transition: state.deck.transition || "fade", ...normalizeMotion(state.deck.motion || DEFAULT_MOTION) } : null),
   setDeckDesign: (patch) => setDeckDesign(patch),
+  // 表示 → 配布資料マスター・ノート マスター (deck.printMasters; public/editor/printmaster.mjs).
+  printMasters: () => state.deck?.printMasters || {},
+  setPrintMaster: (kind, value) => {
+    if (!state.deck || isFinal(state.deck)) return;
+    const next = printMastersOf({ ...(state.deck.printMasters || {}), [kind]: value });
+    if (JSON.stringify(next || null) === JSON.stringify(state.deck.printMasters || null)) return;
+    pushUndo();
+    if (next) state.deck.printMasters = next; else delete state.deck.printMasters;
+    markChanged({ structural: true });
+  },
+  renderCtx: () => renderOptions(),
+  openPrintMaster: (kind) => printMasterUi.open(kind),
   // スライドのサイズ → スライド番号の開始番号 (deck.firstNumber).
   firstNumber: () => firstNumberOf(state.deck?.firstNumber),
   setFirstNumber: (value) => { if (!state.deck || isFinal(state.deck)) return; const n = firstNumberOf(value); if (n === firstNumberOf(state.deck.firstNumber)) return; pushUndo(); if (n === 1) delete state.deck.firstNumber; else state.deck.firstNumber = n; markChanged({ structural: true }); toast(`スライド番号は ${n} から始まります`); },
@@ -2522,6 +2546,13 @@ const editorApp = {
   spellcheck: () => spellcheckOn(),
   setSpellcheck: (on) => { try { localStorage.setItem("hsej-spellcheck", on ? "1" : "0"); } catch { /* private window */ } editorUi.renderRibbon(); toast(on ? "スペル チェック：オン（入力中の文字に赤い波線が出ます。ブラウザの辞書を使います）" : "スペル チェック：オフ"); },
   openProofing: () => proofing.open(),
+  openSynonyms: () => synonyms.open(),
+  // One AI job (a path and its request) as a promise of the finished job.
+  aiRun: (path, body) => new Promise((resolve, reject) => {
+    jsonFetch(path, { method: "POST", body: JSON.stringify(body) })
+      .then(({ jobId }) => watchJob(jobId, { onProgress: () => {}, onDone: resolve, onFail: (job) => reject(new Error(job.error || job.detail || "失敗しました")) }))
+      .catch(reject);
+  }),
   allTexts: () => { const out = []; if (state.deck) { eachText(state.deck.slides, (t) => { out.push(t); return t; }); eachObjectText(state.deck.slides, (t) => { out.push(t); return t; }); } return out; },
   transformAllText: (fn) => transformAllText(fn),
   openFileInfo: () => fileInfo.open(),
@@ -2589,6 +2620,8 @@ const editorApp = {
   beforePrint: () => measureAll(),
 };
 const converter = createConverter(editorApp);
+// 配布資料マスター・ノート マスター.
+const printMasterUi = createPrintMasters(editorApp);
 // スライド ショーの設定・目的別スライド ショー (public/editor/show.mjs).
 const showTools = createShowTools(editorApp);
 // 校閲 → アクセシビリティ チェック・読み取り順序・代替テキスト (public/editor/a11y.mjs).
@@ -2618,6 +2651,8 @@ const online = createOnline(editorApp);
 // スライド ショー → コーチによるリハーサル (public/editor/coach.mjs).
 const coach = createCoach(editorApp);
 const editor = createCanvas(editorApp);
+// 校閲 → 類義語 (public/editor/synonyms.mjs): looks up the words selected in the canvas and puts the pick in their place.
+const synonyms = createSynonyms(editorApp, editor);
 const editorUi = createEditorUi(editor, editorApp);
 // The window around the slide: splitters, notes, message bar, status bar (public/editor/window.mjs).
 const shell = createShell({
@@ -6006,7 +6041,9 @@ async function portableDeck() {
   const missing = [];
   // スライド マスター: its pictures travel too (the master is the last "slide" of the loop).
   const master = deck.masterObjects?.length ? { elements: deck.masterObjects } : null;
-  for (const [index, slide] of (master ? [...deck.slides, master] : deck.slides).entries()) {
+  // 配布資料マスター・ノート マスター: the pictures of their pages travel too.
+  const printed = Object.keys(deck.printMasters || {}).filter((kind) => deck.printMasters[kind]?.objects?.length).map((kind) => ({ kind, elements: deck.printMasters[kind].objects }));
+  for (const [index, slide] of [...deck.slides, ...(master ? [master] : []), ...printed].entries()) {
     if (slide.visualAsset && E.PHOTOS[slide.visualAsset]) await addAsset(slide.visualAsset);
     const src = slide.media?.src;
     if (src?.startsWith("asset:")) await addAsset(src.slice(6));
@@ -6046,6 +6083,7 @@ async function portableDeck() {
     }
   }
   if (master) { if (master.elements?.length) deck.masterObjects = master.elements; else delete deck.masterObjects; }
+  for (const { kind, elements } of printed) { if (elements.length) deck.printMasters[kind].objects = elements; else delete deck.printMasters[kind].objects; }
   return { deck, assets, bytes, missing };
 }
 

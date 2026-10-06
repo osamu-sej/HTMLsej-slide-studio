@@ -1848,6 +1848,8 @@
   }
   /** A table's cells (rich text, fill, colour, bold, alignment, merged spans), columns and rows, style options. */
   function normalizeTable(raw) {
+    // Excel スプレッドシート: a table with `sheet` lets cells hold formulas (`f`), whose words (`text`) the editor's sheet.mjs works out.
+    const sheet = raw.sheet === true;
     const rows = (Array.isArray(raw.cells) ? raw.cells : []).filter(Array.isArray).slice(0, 500);
     if (!rows.length) return null;
     const nCols = clamp(Math.max(...rows.map((row) => row.length), 1), 1, 100);
@@ -1869,6 +1871,13 @@
       if (ALIGN_ALL.has(src.align)) cell.align = src.align;
       if (["top", "middle", "bottom"].includes(src.valign)) cell.valign = src.valign;
       if (src.vertical === true) cell.vertical = true;
+      if (sheet && typeof src.f === "string" && src.f.trim().startsWith("=") && src.f.trim().length <= 500) cell.f = src.f.trim();
+      // How a formula's number is shown: decimals, thousands commas, a percentage, a ¥ or $ in front.
+      const dec = Math.round(Number(src.dec));
+      if (src.dec != null && Number.isFinite(dec) && dec >= 0 && dec <= 6) cell.dec = dec;
+      if (src.sep === true) cell.sep = true;
+      if (src.pct === true) cell.pct = true;
+      if (src.cur === "¥" || src.cur === "$") cell.cur = src.cur;
       const rs = Math.round(Number(src.rs) || 1);
       const cs = Math.round(Number(src.cs) || 1);
       if (rs > 1) cell.rs = rs;
@@ -1897,6 +1906,7 @@
     const out = { cells, cols: shares(raw.cols, nCols), rows: shares(raw.rows, cells.length) };
     if (TABLE_STYLES[raw.style] && raw.style !== "sej") out.style = raw.style;
     for (const key of ["header", "banded", "firstCol", "lastRow"]) if (typeof raw[key] === "boolean") out[key] = raw[key];
+    if (sheet) { out.sheet = true; E.sheetCalc?.(out); }
     return out;
   }
   // As many categories and series as a PowerPoint chart brought over may carry.

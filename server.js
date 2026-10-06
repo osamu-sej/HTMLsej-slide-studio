@@ -25,10 +25,11 @@ import { describeUnsourced, factRepairLines, unsourcedNumbers } from "./server/f
 import { LocalModel } from "./server/local-ai.mjs";
 import { reconcileChatVisuals, slideMeaning } from "./server/visual-relevance.mjs";
 import { imageBrief } from "./server/image-brief.mjs";
-import { extractText, importDeck } from "./server/extract.mjs";
+import { extractText, importDeck, importSheets } from "./server/extract.mjs";
 import { varietyIssues } from "./public/layout-looks.mjs";
 import { createRooms } from "./server/rooms.mjs";
 import { buildTranslatePrompt, checkTranslation, translateRequestSchema, translateResultSchema } from "./server/translate.mjs";
+import { buildSynonymsPrompt, checkSynonyms, synonymsRequestSchema, synonymsResultSchema } from "./server/synonyms.mjs";
 import {
   chatRequestSchema,
   chatResultSchema,
@@ -171,7 +172,7 @@ function clientErrorBudget() {
 }
 
 const APP_ORIGIN = process.env.APP_ORIGIN ?? process.env.RENDER_EXTERNAL_URL;
-const STATELESS_API = new Set(["/api/extract", "/api/import"]);
+const STATELESS_API = new Set(["/api/extract", "/api/import", "/api/tables/xlsx"]);
 const localAi = new LocalModel();
 const codex = new CodexSlideServer({ rootDir: here, fallback: localAi });
 // Team mode (opt-in): anyone with STUDIO_PASSCODE may use the shared Codex login,
@@ -584,6 +585,21 @@ function startTranslateJob(session, request) {
   return job;
 }
 
+function startSynonymsJob(session, request) {
+  const job = newJob("synonyms", session, { word: request.word });
+  codex.runJob(job, {
+    prompt: buildSynonymsPrompt(request),
+    outputSchema: toCodexSchema(synonymsResultSchema),
+    maxAttempts: 2,
+    effort: "low",
+    async finalize(candidate) {
+      const senses = checkSynonyms(request, omitNullObjectValues(candidate));
+      return { result: { senses }, detail: senses.length ? `${senses.reduce((n, s) => n + s.words.length, 0)}語見つかりました。` : "言い換えの語は見つかりませんでした。" };
+    },
+  }).catch((error) => codex.failJob(job.id, error));
+  return job;
+}
+
 function startNotesJob(session, request) {
   const job = newJob("notes", session, request);
   const total = request.deck.slides.length;
@@ -694,6 +710,18 @@ const httpServer = createServer(async (req, res) => {
       // "exact": a PowerPoint deck as it looks (objects on 白紙 pages); otherwise rebuilt into the studio's layouts.
       const mode = url.searchParams.get("mode") === "exact" && /\.pptx$/i.test(name) ? "exact" : "layout";
       return json(res, 200, await withExtractSlot(() => importDeck(buffer, name.toLowerCase(), { rootDir: here, mode })));
+    } catch (error) {
+      return json(res, 422, { error: error.message });
+    }
+  }
+
+  // 挿入 → 表 → Excel／CSV から: a workbook's sheets as table cells (formulas kept, numbers shown as Excel shows them).
+  if (url.pathname === "/api/tables/xlsx" && req.method === "POST") {
+    const name = String(url.searchParams.get("name") ?? "");
+    if (!/\.(xlsx|xlsm)$/i.test(name)) return json(res, 400, { error: "読み込めるのはExcel（.xlsx）です。古い形式（.xls）は「CSV UTF-8」か「Excelブック」で保存し直してください。" });
+    try {
+      const buffer = await readBody(req, 20_000_000, "ファイルが大きすぎます（20MBまで）。");
+      return json(res, 200, await withExtractSlot(() => importSheets(buffer, name.toLowerCase(), { rootDir: here })));
     } catch (error) {
       return json(res, 422, { error: error.message });
     }
@@ -824,6 +852,9 @@ const httpServer = createServer(async (req, res) => {
 
   if (url.pathname === "/api/decks/translate" && req.method === "POST") {
     return aiRoute((session, body) => startTranslateJob(session, translateRequestSchema.parse(body)));
+  }
+  if (url.pathname === "/api/decks/synonyms" && req.method === "POST") {
+    return aiRoute((session, body) => startSynonymsJob(session, synonymsRequestSchema.parse(body)));
   }
   if (url.pathname === "/api/decks/notes" && req.method === "POST") {
     return aiRoute((session, body) => startNotesJob(session, notesRequestSchema.parse(body)));
