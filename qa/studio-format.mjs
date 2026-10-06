@@ -621,6 +621,26 @@ await step("クイック レイアウト（グラフ）; 図形の塗りつぶ�
   assert(c.opts?.legend === "none" && c.opts.grid === false && c.opts.labels === false && !c.opts.axisX, `レイアウト 7: the chart alone: ${JSON.stringify(c.opts)}`);
   await undo();
   assert((await chartOf()).opts?.axisX, "⌘Z goes back to レイアウト 5 in one step");
+  // グラフ スタイル: the whole look at once (colours, elements, bar gap), the axis titles kept.
+  await byTitle("グラフのスタイル一覧");
+  assert(await page.locator(".rb-pop .tb-layout-row[data-style]").count() === 8, "eight styles, each with a picture");
+  assert(await page.locator(".rb-pop .tb-style-pic svg rect").count() > 20, "the pictures are drawn");
+  await shot("chart-styles");
+  await page.click('.rb-pop .tb-layout-row[data-style="style3"]');
+  await page.waitForTimeout(300);
+  c = await chartOf();
+  assert(c.colors === "blue" && c.opts?.gap === 20 && c.opts.axisX && c.opts.labels !== false, `スタイル 3: ${JSON.stringify({ colors: c.colors, opts: c.opts })}`);
+  assert(await page.locator('#stageBody .hs-obj-chart[data-colors="blue"]').count() === 1, "drawn in the blue set");
+  await byTitle("グラフのスタイル一覧");
+  assert(await page.locator('.rb-pop button.on .tb-layout-row[data-style="style3"]').count() === 1, "the style it matches is marked");
+  await page.click('.rb-pop .tb-layout-row[data-style="style4"]');
+  await page.waitForTimeout(300);
+  c = await chartOf();
+  assert(c.colors === "gray" && c.opts.gap === 200 && c.opts.labels === false && c.opts.legend === "bottom", `スタイル 4: ${JSON.stringify(c.opts)}`);
+  await undo();
+  assert((await chartOf()).colors === "blue", "⌘Z goes back to スタイル 3 in one step");
+  await undo();
+  assert(!(await chartOf()).colors, "and one more to the layout it was");
   // 図で塗りつぶし: a rectangle filled with the logo, then tiled, then a colour again.
   await page.keyboard.press("Escape");
   await tab("挿入");

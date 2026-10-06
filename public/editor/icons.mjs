@@ -96,6 +96,7 @@ const P = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
   table: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9h18M3 14.5h18M9 9v11M15 9v11"/>',
+  chartStyle: '<path d="M4 20h16"/><rect x="5.5" y="12" width="3" height="8" fill="currentColor" fill-opacity=".55"/><rect x="10.5" y="7" width="3" height="13" fill="currentColor" fill-opacity=".25"/><rect x="15.5" y="10" width="3" height="10" fill="currentColor" fill-opacity=".55"/><path d="M5 5.5h4M11 5.5h4"/>',
   chartBar: '<path d="M4 20h16"/><rect x="5.5" y="11" width="3" height="9"/><rect x="10.5" y="6" width="3" height="14" fill="currentColor" fill-opacity=".3"/><rect x="15.5" y="9" width="3" height="11"/>',
   chartStack: '<path d="M4 20h16"/><rect x="5.5" y="12" width="3.5" height="8"/><path d="M5.5 15.5h3.5"/><rect x="10.5" y="7" width="3.5" height="13"/><path d="M10.5 12h3.5"/><rect x="15.5" y="10" width="3.5" height="10"/><path d="M15.5 14h3.5"/>',
   chartLine: '<path d="M4 20h16M4 4v16"/><path d="m6 16 4-5 3 3 6-7"/>',

@@ -2961,6 +2961,55 @@
     if (Object.keys(opts).length) out.opts = opts; else delete out.opts;
     return out;
   }
+  /**
+   * グラフのデザイン → グラフ スタイル: a look for the whole chart at once — one of the SEJ's colour sets with the chart
+   * elements (data labels, the legend's place, gridlines) and the bars' gap or a line's curve and markers. The title, the unit,
+   * axis titles and bounds, a trendline, the filter and the data table stay as they are; what a chart's kind has no use for
+   * (a gap on a line, a curve on a bar) is left out of the choice.
+   */
+  const CHART_STYLES = {
+    style1: { label: "スタイル 1", desc: "SEJの配色・データ ラベル・凡例（上）・目盛線（標準）", colors: "", labels: true, legend: "top", grid: true },
+    style2: { label: "スタイル 2", desc: "青・データ ラベルだけ（すっきり）", colors: "blue", labels: true, legend: "none", grid: false, gap: 60 },
+    style3: { label: "スタイル 3", desc: "青・太い棒・データ ラベル・目盛線", colors: "blue", labels: true, legend: "top", grid: true, gap: 20 },
+    style4: { label: "スタイル 4", desc: "グレー・細い棒・凡例（下）・目盛線", colors: "gray", labels: false, legend: "bottom", grid: true, gap: 200 },
+    style5: { label: "スタイル 5", desc: "グレー・データ ラベル・凡例（右）・目盛線", colors: "gray", labels: true, legend: "right", grid: true, gap: 80 },
+    style6: { label: "スタイル 6", desc: "茶・データ ラベルだけ（やさしい）", colors: "brown", labels: true, legend: "none", grid: false, gap: 50 },
+    style7: { label: "スタイル 7", desc: "茶・凡例（下）・目盛線", colors: "brown", labels: false, legend: "bottom", grid: true, gap: 120 },
+    style8: { label: "スタイル 8", desc: "青・なめらかな線・ひし形のマーカー・凡例（下）", colors: "blue", labels: false, legend: "bottom", grid: true, gap: 100, smooth: true, marker: "diamond" },
+  };
+  /** The chart style a chart matches now (or ""): only what its kind can show is compared. */
+  function chartStyleOf(chart) {
+    if (!chart || chart.style) return "";
+    const o = chart.opts || {};
+    const bars = BAR_GAP_CHARTS.has(chart.type);
+    const lines = LINE_CHART_KINDS.has(chart.type);
+    return Object.keys(CHART_STYLES).find((k) => {
+      const s = CHART_STYLES[k];
+      if ((chart.colors || "") !== s.colors || (o.labels !== false) !== s.labels || (o.legend || "top") !== s.legend || (o.grid !== false) !== s.grid) return false;
+      if (bars && (o.gap ?? null) !== (s.gap ?? null)) return false;
+      if (lines && (Boolean(o.smooth) !== Boolean(s.smooth) || (o.marker || "circle") !== (s.marker || "circle"))) return false;
+      return true;
+    }) || "";
+  }
+  /** The chart in a style (what the style sets is replaced; everything else of the chart stays). */
+  function applyChartStyle(chart, key) {
+    const s = CHART_STYLES[key];
+    if (!chart || !s || chart.style) return chart;
+    const { labels: _l, legend: _g, grid: _d, gap: _p, smooth: _s, marker: _m, ...rest } = chart.opts || {};
+    const opts = { ...rest };
+    if (!s.labels) opts.labels = false;
+    if (s.legend !== "top") opts.legend = s.legend;
+    if (!s.grid) opts.grid = false;
+    if (BAR_GAP_CHARTS.has(chart.type) && s.gap != null) opts.gap = s.gap;
+    if (LINE_CHART_KINDS.has(chart.type)) {
+      if (s.smooth) opts.smooth = true;
+      if (s.marker && s.marker !== "circle") opts.marker = s.marker;
+    }
+    const out = { ...chart };
+    if (s.colors) out.colors = s.colors; else delete out.colors;
+    if (Object.keys(opts).length) out.opts = opts; else delete out.opts;
+    return out;
+  }
   /** A chart drawn by the engine's own charts (the same look as the layouts' charts), with an optional title. */
   // Kinds only the studio's own charts draw: an imported chart turned into one of them keeps its colours' order only.
   const STUDIO_ONLY_CHARTS = new Set(["hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst"]);
@@ -3906,7 +3955,7 @@
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
-    LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
+    LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, CHART_STYLES, chartStyleOf, applyChartStyle, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, masterLayer, morphPairs, MORPH_KINDS, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
