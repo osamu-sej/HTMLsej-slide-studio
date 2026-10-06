@@ -3256,7 +3256,7 @@ async function previewTransition() {
   const host = h("div", { class: "hs-player-stage transition-preview" });
   wrap.replaceChildren(host);
   state.motionPreview = { el: to, act: null, advance: () => 0, transition: true };
-  await E.transitionPreview(host, from, to, type, { dur: slide.transitionDur, dir: slide.transitionDir });
+  await E.transitionPreview(host, from, to, type, { dur: slide.transitionDur, dir: slide.transitionDir, pairs: type === "morph" && before !== index ? E.morphPairs(state.deck.slides[before].elements, slide.elements) : null });
   if (state.motionPreview?.el !== to) return;
   E.play(to, { step: 0 });
   state.motionPreview.timer = setTimeout(() => { if (state.motionPreview?.el === to) stopMotionPreview(); }, 1600);

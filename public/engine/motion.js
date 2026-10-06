@@ -764,7 +764,7 @@
   // ---------------------------------------------------------------- player
 
   const TRANSITIONS = new Set(Object.keys(E.TRANSITIONS));
-  const TRANSITION_MS = { wipe: 920, circle: 920, drill: 560, push: 680, flip: 940, dive: 860, blinds: 920, curtain: 920 };
+  const TRANSITION_MS = { wipe: 920, circle: 920, drill: 560, push: 680, flip: 940, dive: 860, blinds: 920, curtain: 920, morph: 900 };
   // These clip the incoming slide itself, so edges and click points share the slide's own coordinates.
   const CLIPPED = new Set(["wipe", "circle", "blinds", "curtain"]);
 
@@ -1259,7 +1259,17 @@
         else if (!hinted && slide.querySelector(".hs-obj[data-action]:not([data-action=\"url\"])")) { hinted = true; setTimeout(() => flash("光った部品はクリックできます"), 900); }
         setTimeout(() => ring(slide), atStep == null ? 1900 : 300);
       };
-      if (type === "morph" && doc.startViewTransition) {
+      // 変形: the parts the two slides share travel from one slide to the other (the titles of layout slides use the browser's own).
+      const morphed = type === "morph" ? E.morphPairs?.(slides[from]?.elements, slides[i]?.elements) || [] : [];
+      if (type === "morph" && morphed.length) {
+        stage.append(next);
+        E.scale(next);
+        current = next;
+        const finished = morphIn(prevSlide, slide, morphed, { dur: trMs || 900 });
+        prevScaler.remove();
+        enter();
+        busy = finished.then(() => { busy = null; });
+      } else if (type === "morph" && doc.startViewTransition) {
         nameShared(prevScaler, true);
         const vt = doc.startViewTransition(() => {
           nameShared(prevScaler, false);
@@ -1857,17 +1867,89 @@
     };
   }
 
+  // ---------------------------------------------------------------- 変形 (Morph)
+
+  /**
+   * 画面切り替え「変形」: the objects of the slide being left (`prevSlide`) that are the same as objects of the slide
+   * coming in (`slide`; `pairs` from E.morphPairs) move, resize and turn into them; what has no partner fades out where it
+   * was and fades in where it is. The old objects are taken over into a layer above the new slide, so call this before
+   * the old slide goes. Resolves when it is over.
+   */
+  function morphIn(prevSlide, slide, pairs, { dur = 900 } = {}) {
+    const layerA = prevSlide?.querySelector(":scope > .hs-objects");
+    const layerB = slide?.querySelector(":scope > .hs-objects");
+    if (!layerA || !layerB) return Promise.resolve();
+    const nodeOf = (layer, o) => [...layer.children].find((n) => n.dataset.el === o.id);
+    const box = (o) => (o.kind === "line" ? E.bounds(o) : { x: o.x, y: o.y, w: o.w, h: o.h });
+    const centre = (b) => [b.x + b.w / 2, b.y + b.h / 2];
+    const ease = "cubic-bezier(.65, 0, .35, 1)";
+    const ghosts = h("div", { class: "hs-morph-layer", "aria-hidden": "true" });
+    slide.append(ghosts);
+    const take = (node) => { node.removeAttribute("data-el"); node.style.pointerEvents = "none"; ghosts.append(node); return node; };
+    const move = (from, to) => {
+      const [ax, ay] = centre(box(from));
+      const [bx, by] = centre(box(to));
+      const a = box(from);
+      const b = box(to);
+      return { dx: bx - ax, dy: by - ay, sx: Math.min(30, Math.max(0.03, (b.w || 1) / (a.w || 1))), sy: Math.min(30, Math.max(0.03, (b.h || 1) / (a.h || 1))), rot: (to.rot || 0) - (from.rot || 0) };
+    };
+    const matchedFrom = new Set();
+    const matchedTo = new Set();
+    const animations = [];
+    const play = (node, keyframes, options) => { try { animations.push(node.animate(keyframes, { duration: dur, easing: ease, ...options })); } catch { /* detached */ } };
+    for (const [from, to] of pairs) {
+      const nodeA = nodeOf(layerA, from);
+      const nodeB = nodeOf(layerB, to);
+      if (!nodeA || !nodeB) continue;
+      matchedFrom.add(from);
+      matchedTo.add(to);
+      const m = move(from, to);
+      // The old part travels to where the new one is and gives way to it; the new one travels from where the old was.
+      take(nodeA);
+      play(nodeA, [
+        { transform: "none", opacity: 1, offset: 0 },
+        { opacity: 1, offset: 0.55 },
+        { transform: `translate(${m.dx}px, ${m.dy}px) rotate(${m.rot}deg) scale(${m.sx}, ${m.sy})`, opacity: 0, offset: 1 },
+      ], { fill: "forwards" });
+      play(nodeB, [
+        { transform: `translate(${-m.dx}px, ${-m.dy}px) rotate(${-m.rot}deg) scale(${1 / m.sx}, ${1 / m.sy})`, opacity: 0, offset: 0 },
+        { opacity: 1, offset: 0.45 },
+        { transform: "none", opacity: 1, offset: 1 },
+      ], { fill: "backwards" });
+    }
+    // Parts with no partner: the old ones fade out where they were, the new ones fade in.
+    for (const node of [...layerA.children]) {
+      if (!node.classList?.contains("hs-obj")) continue;
+      if (pairs.some(([from]) => matchedFrom.has(from) && node.dataset.el === from.id)) continue;
+      take(node);
+      play(node, [{ opacity: 1 }, { opacity: 0 }], { duration: dur * 0.5, easing: "ease-out", fill: "forwards" });
+    }
+    for (const node of layerB.children) {
+      if (!node.classList.contains("hs-obj") || pairs.some(([, to]) => matchedTo.has(to) && node.dataset.el === to.id)) continue;
+      play(node, [{ opacity: 0 }, { opacity: 1 }], { duration: dur * 0.6, delay: dur * 0.3, easing: "ease-in", fill: "backwards" });
+    }
+    return new Promise((resolve) => setTimeout(() => { for (const a of animations) { try { a.cancel(); } catch { /* done */ } } ghosts.remove(); resolve(); }, dur + 60));
+  }
+
   /**
    * Play one slide transition in a box (the studio's 画面切り替え「プレビュー」): `from` gives way to `to`, as the
    * player would show it. Resolves when it is over.
    */
-  function transitionPreview(host, fromEl, toEl, type, { dur = null, dir = null } = {}) {
+  function transitionPreview(host, fromEl, toEl, type, { dur = null, dir = null, pairs = null } = {}) {
     const kind = TRANSITIONS.has(type) && type !== "morph" ? type : type === "morph" ? "fade" : "none";
     host.replaceChildren();
     const prev = E.mount(fromEl, { contain: true, className: "hs-player-slide" });
     const next = E.mount(toEl, { contain: true, className: "hs-player-slide" });
     host.append(prev);
     E.scale(prev);
+    // 変形 with parts the two slides share: they travel from one to the other.
+    if (type === "morph" && pairs?.length) {
+      host.append(next);
+      E.scale(next);
+      const finished = morphIn(fromEl, toEl, pairs, { dur: dur >= 100 ? dur : 900 });
+      prev.remove();
+      return finished;
+    }
     if (kind === "none") { prev.remove(); host.append(next); E.scale(next); return Promise.resolve(); }
     host.append(next);
     E.scale(next);
@@ -1902,5 +1984,5 @@ html,body{margin:0;height:100%;background:#0d1017;color:#e8ecf4;font-family:"Not
   /** How long a transition takes when the slide does not say (ms). */
   const transitionMs = (type) => (type === "none" ? 0 : TRANSITION_MS[type] ?? 620);
 
-  Object.assign(E, { play, reveal, stepsOf, countUp, activate, playMedia, stopMedia, mountLottie, stopLottie, splitKinetic, createPlayer, engineCss, transitionPreview, transitionMs, playSound, stopSounds });
+  Object.assign(E, { play, reveal, stepsOf, countUp, activate, playMedia, stopMedia, mountLottie, stopLottie, splitKinetic, createPlayer, engineCss, transitionPreview, transitionMs, morphIn, playSound, stopSounds });
 })(typeof window !== "undefined" ? window : globalThis);

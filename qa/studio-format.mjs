@@ -2008,6 +2008,77 @@ await step("配布資料マスター・ノート マスター: 用紙の向き�
   assert(!(await page.evaluate(() => window.__hsej.deck().printMasters?.handout)), "one ⌘Z undoes the whole master");
 });
 
+await step("画面切り替え「変形」: 複製したスライドで動かした部品が、プレビューでも発表でも位置と大きさでつながって動く", async () => {
+  await freshSlide();
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  await pasteClip(null, { text: "つながる文字" });
+  await page.waitForFunction(() => (window.__hsej.slide().elements || []).some((o) => o.kind === "text"), null, { timeout: 5000 });
+  const first = await page.evaluate(() => window.__hsej.deck().slides.indexOf(window.__hsej.slide()));
+  const part = async () => (await slide()).elements.find((o) => o.kind === "text");
+  const x0 = (await part()).x;
+  // The slide is copied (the copy keeps the ids) and the text is moved on the copy.
+  await page.locator("#filmstrip .film-item").nth(first).click();
+  const count = await page.evaluate(() => window.__hsej.deck().slides.length);
+  await page.keyboard.press("Control+d");
+  await page.waitForFunction((n) => window.__hsej.deck().slides.length === n + 1, count, { timeout: 5000 });
+  await page.waitForTimeout(400);
+  const box = await page.locator('#stageBody .hs-obj[data-kind="text"]').first().boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  for (let i = 0; i < 16; i += 1) await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("Escape");
+  const moved = await part();
+  assert(moved.x > x0 + 100 && moved.id, `moved on the copy: ${x0} → ${moved.x}`);
+  // 画面切り替え → 変形: the message says one part travels, and the preview carries it.
+  await tab("画面切り替え");
+  await page.click('.an-tr[data-tr="morph"]');
+  await page.waitForFunction(() => /1 個がつながって動きます/.test(document.body.textContent), null, { timeout: 4000 });
+  await page.waitForSelector(".transition-preview .hs-morph-layer", { timeout: 3000 });
+  assert((await page.$$eval(".transition-preview .hs-morph-layer .hs-obj", (els) => els.length)) >= 1, "the old text travels in a layer over the new slide");
+  await shot("morph-preview");
+  await page.waitForSelector(".transition-preview .hs-morph-layer", { state: "detached", timeout: 4000 });
+  assert((await slide()).transition === "morph", "the slide's way in is 変形");
+  // Presenting: from the first slide, → plays it.
+  await page.keyboard.press("Escape");
+  await page.locator("#filmstrip .film-item").nth(first).click();
+  await page.keyboard.press("Shift+F5");
+  await page.waitForSelector(".hs-player .hs-slide", { timeout: 8000 });
+  await page.waitForTimeout(600);
+  await page.keyboard.press("ArrowRight");
+  await page.waitForSelector(".hs-player .hs-morph-layer", { timeout: 3000 });
+  const travelling = await page.evaluate(() => { const n = document.querySelector(".hs-player .hs-morph-layer .hs-obj"); return Boolean(n && n.getAnimations().length); });
+  assert(travelling, "the old text is being animated across");
+  await shot("morph-present");
+  await page.waitForSelector(".hs-player .hs-morph-layer", { state: "detached", timeout: 4000 });
+  assert(await page.evaluate(() => /つながる文字/.test(document.querySelector(".hs-player .hs-slide")?.textContent || "")), "and the new slide shows the text where it ends");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+});
+
+await step("挿入 → QR コード: アドレスは QR コードの図になりクリックで開く動作が付き、ただの文字はリンクなしの図になる", async () => {
+  await freshSlide();
+  const qr = async (words) => {
+    const count = (await slide()).elements?.filter((o) => o.kind === "image").length || 0;
+    await tab("挿入");
+    await ribbonBtn("QR");
+    await page.waitForSelector("#askDialog[open]");
+    await page.fill("#askInput", words);
+    await page.click("#askOk");
+    await page.waitForFunction((n) => (window.__hsej.slide().elements || []).filter((o) => o.kind === "image").length > n, count, { timeout: 8000 });
+    return (await slide()).elements.filter((o) => o.kind === "image").at(-1);
+  };
+  const link = await qr("https://example.com/sej");
+  assert(/^data:image\/svg\+xml/.test(link.src) && link.w === 360 && link.h === 360, `an SVG picture: ${link.src.slice(0, 40)}`);
+  assert(link.action?.type === "url" && link.action.href === "https://example.com/sej", `a link: ${JSON.stringify(link.action)}`);
+  assert(/https:\/\/example\.com\/sej/.test(link.alt), `its alternative text names it: ${link.alt}`);
+  await page.waitForFunction((id) => { const img = document.querySelector(`#stageBody .hs-obj[data-el="${id}"] img`); return Boolean(img && img.complete && img.naturalWidth > 0); }, link.id, { timeout: 5000 });
+  await shot("qr");
+  const plain = await qr("会議室 3F");
+  assert(!plain.action && /会議室 3F/.test(plain.alt), "words that are not an address are a picture only");
+  // The QR code of an address read back: the picture encodes the same bytes for the same words.
+  const again = await qr("https://example.com/sej");
+  assert(again.src === link.src, "the same words make the same picture");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

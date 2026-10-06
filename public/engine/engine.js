@@ -102,7 +102,7 @@
   const HOVERS = { lift: "項目が浮き上がる", focus: "乗せた項目以外を薄くする", tilt: "3Dで傾く", glow: "光で縁取る", zoom: "少し大きくなる" };
   const EMPHASES = { marker: "マーカーを引く", underline: "下線を引く", circle: "手書きの丸で囲む", box: "枠で囲む", glow: "光らせる", none: "色だけ（飾りなし）" };
   const TRANSITIONS = {
-    fade: "フェード", slide: "スライド（横に流れる）", zoom: "ズーム", morph: "モーフ（見出しがつながって動く）",
+    fade: "フェード", slide: "スライド（横に流れる）", zoom: "ズーム", morph: "変形（同じ部品・見出しがつながって動く）",
     wipe: "ワイプ（色の帯が横切る）", circle: "サークル（クリックした所から広がる）", push: "押し上げ（下から押し出す）",
     flip: "めくる（カードのように裏返る）", dive: "奥へ（飛び込むように進む）", blinds: "ブラインド（縞が開く）", curtain: "幕（中央から左右に開く）", none: "なし",
   };

@@ -454,6 +454,20 @@ export function createEditorUi(editor, app) {
     const url = await app.ask(kind === "image" ? "URLから画像を入れる" : "URLで動画（YouTube）・アニメーションを入れる", kind === "image" ? "画像のURL（https://…）" : "YouTubeのURL、動画（mp4）やLottie（.json）のURL", "");
     if (url) await app.insertUrl(url.trim(), kind);
   }
+  /** 挿入 → QR コード: the words (a web address, usually) as a QR code picture; an address is also a link, clicked while presenting. */
+  async function insertQr() {
+    const answer = await app.ask("QR コード", "QR コードにする文字（Webページのアドレスなど。300文字まで）", "https://");
+    const value = String(answer ?? "").trim();
+    if (!value || value === "https://") return;
+    if ([...value].length > 300) { app.toast("QR コードにできるのは300文字までです"); return; }
+    try {
+      const { qrSvg } = await import("./online.mjs");
+      const svg = await qrSvg(value);
+      const link = /^https?:\/\/\S+$/i.test(value);
+      const [o] = editor.insert([ops.makeObject("image", { x: 0, y: 0, w: 360, h: 360 }, { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, alt: `QR コード：${value.slice(0, 80)}`, ...(link ? { action: { type: "url", href: value } } : {}) })]);
+      if (o) showTab("picture");
+    } catch { app.toast("QR コードを作れませんでした"); }
+  }
   function insertIcon(key) {
     const [o] = editor.insert([ops.makeObject("icon", { x: 0, y: 0, w: 144, h: 144 }, { icon: key, color: "#1f3864" })]);
     if (o) showTab("shape");
@@ -1211,6 +1225,7 @@ export function createEditorUi(editor, app) {
         col(drop("symbol", "記号と特殊文字", "記号を入れる（文字の入力中はカーソルの位置に）", () => symbolGallery(), { keep: true }),
           drop("date", "日付と時刻", "今日の日付を入れる（文字の入力中はカーソルの位置に）", () => dateMenu(), { keep: true }))),
       group("リンク", zoomDrop(),
+        btn("qr", "QR|コード", "文字（Webページのアドレスなど）を QR コードの図にして入れる。アドレスなら発表中にクリックして開けます", () => insertQr(), { big: true }),
         h("span", { "data-rb": "link" }, btn("link", "リンク・|動作", "選んだ文字にリンク／図形をクリックしたときの動作（スライドへ移動・Webページを開く）", editLink, { big: true, keep: true, enabled: () => Boolean(one()) || editor.typing }))),
     ];
   }
