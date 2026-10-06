@@ -89,6 +89,8 @@ const shared = {
   // A deep-dive page: not part of the story, opened by clicking this item ("items[1]") of the slide above.
   drillOf: z.string().max(30).optional(),
   notes: notesSchema,
+  // ノートの書式: the notes with their bold words and lists (kept only while it says what `notes` says).
+  notesRich: z.string().max(200000).optional(),
   elements: z.array(objectSchema).max(5000).optional(),
   hidden: z.boolean().optional(),
   // PowerPoint's sections (the first slide of each carries its name) and review comments on a slide.
@@ -320,7 +322,7 @@ export const chatResultSchema = z.object({
 });
 
 // Fields only people set (uploaded photos and videos, hand placement) are hidden from the AI's output schema.
-const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "hideTitle", "master", "sourceViewport", "hidden", "section", "comments", "readingOrder", "background", "hideMaster"]);
+const USER_ONLY_FIELDS = new Set(["customImage", "imagePlacement", "media", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "hideTitle", "master", "sourceViewport", "hidden", "section", "comments", "readingOrder", "background", "hideMaster", "notesRich"]);
 function withoutUserFields(node) {
   if (Array.isArray(node)) return node.map(withoutUserFields);
   if (!node || typeof node !== "object") return node;

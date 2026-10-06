@@ -418,6 +418,45 @@ export function createEditorUi(editor, app) {
       setEffect(patch);
     });
   }
+  // ---------------------------------------------------------------- 文字の効果 (文字の影・光彩)
+  const textFxOf = (key) => editor.textState()?.[key];
+  const setTextFx = (patch) => editor.textFormat("tfx", { tshadow: textFxOf("tshadow"), tglow: textFxOf("tglow"), ...patch });
+  function textEffectsMenu() {
+    const [shadow, glow] = [textFxOf("tshadow"), textFxOf("tglow")];
+    const direction = ops.shadowDirection(shadow);
+    return menu([
+      { head: "文字の影（SEJテンプレートでは付けません。付けるとブランドの指摘が出ます）" },
+      ...ops.SHADOW_DIRECTIONS.map(([key, label]) => ({ label: `影：${label}`, on: direction === key, run: () => setTextFx({ tshadow: ops.textShadowPreset(key) }) })),
+      { label: "影なし", disabled: !shadow, run: () => setTextFx({ tshadow: undefined }) },
+      "-", { head: "光彩" },
+      ...ops.TEXT_GLOW_SIZES.map(([r, label]) => ({ label: `光彩：${label}`, on: glow?.r === r, run: () => setTextFx({ tglow: { r, color: glow?.color || ops.GLOW_COLORS[2][0], opacity: glow?.opacity ?? 0.7 } }) })),
+      { label: "光彩なし", disabled: !glow, run: () => setTextFx({ tglow: undefined }) },
+      "-", { label: "文字の効果のオプション…", icon: "effects", run: () => textEffectsDialog() },
+      { label: "すべての文字の効果をなくす", icon: "trash", disabled: !(shadow || glow), run: () => setTextFx({ tshadow: undefined, tglow: undefined }) },
+    ]);
+  }
+  /** 文字の効果のオプション: 影＝色・透明度・ぼかし・距離・角度、光彩＝大きさ・色・透明度 (pt, like the shape's). */
+  function textEffectsDialog() {
+    const polar = ops.shadowPolar(textFxOf("tshadow") || { dx: 3, dy: 3, blur: 4, color: "#000000", opacity: 0.4 });
+    const glow = textFxOf("tglow");
+    const input = (name, value, { min = 0, max = 100, step = 1 } = {}) => h("input", { type: "number", name, "aria-label": name, value: String(value), min: String(min), max: String(max), step: String(step) });
+    const on = (name, checked) => h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name, checked: checked || null }), h("span", {}, "付ける"));
+    const sColor = select("shadowColor", ops.SHADOW_COLORS, polar.color);
+    const gColor = select("glowColor", ops.GLOW_COLORS, glow?.color || ops.GLOW_COLORS[2][0]);
+    const body = h("div", { class: "fx-body" },
+      fieldset("文字の影", on("shadowOn", Boolean(textFxOf("tshadow"))), labeled("色", sColor), labeled("透明度（%）", input("shadowTransparency", Math.round((1 - polar.opacity) * 100))), labeled("ぼかし（pt）", input("shadowBlur", polar.blur, { max: 50, step: 0.5 })), labeled("距離（pt）", input("shadowDistance", polar.distance, { max: 50, step: 0.5 })), labeled("角度（°）", input("shadowAngle", polar.angle, { min: -180, max: 180 })),
+        h("p", { class: "hint" }, "SEJテンプレートでは影を付けません。付けるとブランドの指摘が出ます。")),
+      fieldset("文字の光彩", on("glowOn", Boolean(glow)), labeled("大きさ（pt）", input("glowSize", (glow?.r ?? 10) / 2, { min: 0.5, max: 50, step: 0.5 })), labeled("色", gColor), labeled("透明度（%）", input("glowTransparency", Math.round((1 - (glow?.opacity ?? 0.7)) * 100)))));
+    settingsDialog("tfx-dialog", "文字の効果のオプション", body, () => {
+      const dlg = document.querySelector(".tfx-dialog");
+      const f = (name) => dlg.querySelector(`[name="${name}"]`);
+      const n = (name, fallback = 0) => { const v = Number(f(name).value); return Number.isFinite(v) ? v : fallback; };
+      setTextFx({
+        tshadow: f("shadowOn").checked ? ops.shadowFromPolar({ distance: n("shadowDistance"), angle: n("shadowAngle"), blur: n("shadowBlur"), opacity: 1 - n("shadowTransparency") / 100, color: f("shadowColor").value }) : undefined,
+        tglow: f("glowOn").checked ? { r: Math.max(1, Math.round(n("glowSize", 5) * 2)), color: f("glowColor").value, opacity: 1 - n("glowTransparency", 30) / 100 } : undefined,
+      });
+    });
+  }
   /** 図形の塗りつぶし → 図: a picture from this device fills the selected shapes (cut to their outline). */
   async function pictureFill() {
     const [file] = await app.pickFiles("image/png,image/jpeg,image/webp,image/gif");
@@ -1000,6 +1039,7 @@ export function createEditorUi(editor, app) {
             { label: "二重取り消し線", on: editor.textState()?.sline === "double", run: () => editor.textFormat("sline", "double") },
           ]), { enabled: hasText }),
           btn("strike", "", "取り消し線", () => editor.textFormat("strike"), { enabled: hasText, pressed: tState("strike"), keep: true }),
+          btn("textShadow", "", "文字の影（SEJテンプレートでは付けません。付けるとブランドの指摘が出ます）", () => setTextFx({ tshadow: textFxOf("tshadow") ? undefined : ops.textShadowPreset("br") }), { enabled: hasText, pressed: () => Boolean(textFxOf("tshadow")), keep: true }),
           btn("sup", "", "上付き", () => editor.textFormat("sup"), { enabled: () => editor.typing, keep: true }),
           btn("sub", "", "下付き", () => editor.textFormat("sub"), { enabled: () => editor.typing, keep: true }),
           btn("grow", "", "フォントサイズの拡大（⇧⌘>）", () => editor.textFormat("grow"), { enabled: hasText, keep: true }),
@@ -1367,7 +1407,8 @@ export function createEditorUi(editor, app) {
           drop("line", "線の種類", "直線・カギ線・曲線", () => menu(Object.entries(E.ROUTES).map(([key, label]) => ({ label, run: () => editor.apply((o) => (o.kind === "line" ? { route: key === "straight" ? undefined : key } : null)) }))), { enabled: () => kinds().has("line") }))),
       group("ワードアートのスタイル",
         col(drop("fontColor", "文字の塗りつぶし", "文字の色（黒・濃紺・グレー）", () => colors(E.PALETTE.text, textColorOf(), (c) => editor.textFormat("color", c), { custom: false, note: "白抜き文字は使いません（SEJテンプレート）" }), { enabled: hasText, swatch: textColorOf, keep: true }),
-          drop("textbox", "文字の配置", "文字の配置と余白", () => menu([["top", "上揃え", "valignTop"], ["middle", "上下中央揃え", "valignMiddle"], ["bottom", "下揃え", "valignBottom"]].map(([v, label, icon]) => ({ label, icon, on: editor.textState()?.valign === v, run: () => editor.textFormat("valign", v) }))), { enabled: hasText }))),
+          drop("textbox", "文字の配置", "文字の配置と余白", () => menu([["top", "上揃え", "valignTop"], ["middle", "上下中央揃え", "valignMiddle"], ["bottom", "下揃え", "valignBottom"]].map(([v, label, icon]) => ({ label, icon, on: editor.textState()?.valign === v, run: () => editor.textFormat("valign", v) }))), { enabled: hasText }),
+          drop("textFx", "文字の効果", "文字の効果：文字の影・光彩（SEJテンプレートでは影を付けません）", () => textEffectsMenu(), { enabled: hasText }))),
       group("アクセシビリティ", btn("textbox", "代替|テキスト", "画面読み上げが読む図形の説明（装飾用にもできます）", () => { const o = one(); if (o) app.editAlt(o.id); }, { big: true, enabled: () => Boolean(one()) })),
       arrangeGroup(),
       group("サイズ", sizeFields()),

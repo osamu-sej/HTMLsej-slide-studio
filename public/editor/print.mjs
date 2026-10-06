@@ -6,6 +6,7 @@
 // 配布資料マスター・ノート マスター (printmaster.mjs).
 
 import { pageOf, printDefaults, resolveMaster } from "./printmaster.mjs";
+import { createNotesEditor } from "./notesedit.mjs";
 
 export const LAYOUTS = {
   full: "フル ページ サイズのスライド",
@@ -208,7 +209,7 @@ export function createPrinter(app) {
         box.classList.add("pr-notes-slide");
         Object.assign(box.style, { left: `${master.slide.x}px`, top: `${master.slide.y}px` });
         const n = master.notes;
-        page.append(box, h("div", { class: "pr-notes-text", style: { left: `${n.x}px`, top: `${n.y}px`, width: `${n.w}px`, height: `${n.h}px`, right: "auto", bottom: "auto", fontSize: `${n.fs}px` } }, String(deck.slides[i].notes || "").split(/\n/).map((line) => h("p", {}, line || " "))));
+        page.append(box, h("div", { class: "pr-notes-text", style: { left: `${n.x}px`, top: `${n.y}px`, width: `${n.w}px`, height: `${n.h}px`, right: "auto", bottom: "auto", fontSize: `${n.fs}px` } }, noteNodes(deck.slides[i])));
         out.push(page);
         commentsAfter(i);
       }
@@ -335,20 +336,30 @@ export function createPrinter(app) {
   }
 
   /** 表示 → ノート (the notes page view): the slide above its speaker notes, page by page; the notes can be typed in. */
+  /** A slide's notes for a page: the formatted words (bold, lists, links) as they were typed, or the plain lines. */
+  function noteNodes(slide) {
+    const note = E.noteOf(slide);
+    if (note.formatted) {
+      const box = h("div", { class: "pr-notes-rich" });
+      box.append(E.richFragment(note.rich));
+      return [box];
+    }
+    return String(slide.notes || "").split(/\n/).map((line) => h("p", {}, line || "\u00a0"));
+  }
   function notesView() {
     const deck = app.deck();
     if (!deck) return;
     let i = app.index();
     const pageBox = h("div", { class: "nv-page" });
     const count = h("span", { class: "nv-count" });
-    const text = h("textarea", { class: "nv-notes", "aria-label": "ノート", placeholder: "ここにノート（話す内容）を入力" });
-    text.addEventListener("input", () => app.setNotes(text.value));
+    const editorBox = createNotesEditor(app, { label: "ノート" });
+    editorBox.el.classList.add("nv-notes");
     const show = () => {
       app.select(i);
       const slide = app.deck().slides[i];
       const box = thumb(i, 640, true);
       pageBox.replaceChildren(box);
-      text.value = slide.notes || "";
+      editorBox.show(slide, { force: true });
       count.textContent = `${i + 1} / ${app.deck().slides.length}`;
     };
     const go = (d) => { const n = Math.max(0, Math.min(app.deck().slides.length - 1, i + d)); if (n !== i) { i = n; show(); } };
@@ -357,13 +368,13 @@ export function createPrinter(app) {
         h("button", { type: "button", class: "btn btn-sm", "aria-label": "前のスライド", onclick: () => go(-1) }, "◀"), count,
         h("button", { type: "button", class: "btn btn-sm", "aria-label": "次のスライド", onclick: () => go(1) }, "▶")),
       h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
-      h("div", { class: "dialog-body nv-body" }, h("div", { class: "nv-sheet" }, pageBox, text)));
-    dialog.addEventListener("keydown", (e) => { if (e.target === text) return; if (e.key === "ArrowRight" || e.key === "PageDown") go(1); if (e.key === "ArrowLeft" || e.key === "PageUp") go(-1); });
+      h("div", { class: "dialog-body nv-body" }, h("div", { class: "nv-sheet" }, pageBox, editorBox.el)));
+    dialog.addEventListener("keydown", (e) => { if (editorBox.el.contains(e.target)) return; if (e.key === "ArrowRight" || e.key === "PageDown") go(1); if (e.key === "ArrowLeft" || e.key === "PageUp") go(-1); });
     document.body.append(dialog);
     dialog.addEventListener("close", () => dialog.remove());
     dialog.showModal();
     show();
-    text.focus();
+    editorBox.focus();
   }
 
   return { openDialog, print, pages, notesView };

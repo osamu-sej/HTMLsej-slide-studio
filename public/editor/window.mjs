@@ -4,9 +4,10 @@
 // The sizes and what is open are remembered in this browser.
 
 import { createRulers } from "./rulers.mjs";
+import { createNotesEditor } from "./notesedit.mjs";
 
 const KEY = "hsej-window";
-const LIMITS = { film: [120, 420], side: [300, 760], notes: [36, 520] };
+const LIMITS = { film: [120, 420], side: [300, 760], notes: [60, 520] };
 
 export function createShell(app) {
   const { h, editor } = app;
@@ -101,14 +102,16 @@ export function createShell(app) {
 
   // ---------------------------------------------------------------- the notes under the slide
 
-  const notesInput = $("notesInput");
+  // ノートの書式: the box has a small toolbar (bold, italic, underline, strike, bullets, numbers, links).
+  const notesEditor = createNotesEditor(app, { id: "notesInput" });
+  $("notesPane").append(notesEditor.el);
   const notesShown = () => prefs.notesShown;
   function renderNotes() {
     const slide = app.slide();
     const shown = prefs.notesShown && app.view() === "single" && Boolean(slide);
     $("notesPane").hidden = !shown;
     notesSplit.hidden = !shown;
-    if (shown && document.activeElement !== notesInput) notesInput.value = slide.notes ?? "";
+    if (shown) notesEditor.show(slide);
     const toggle = $("notesToggle");
     toggle.setAttribute("aria-pressed", String(prefs.notesShown));
     toggle.classList.toggle("has-notes", Boolean(String(slide?.notes ?? "").trim()));
@@ -118,10 +121,9 @@ export function createShell(app) {
     prefs.notesShown = show;
     save();
     renderNotes();
-    if (show && app.view() === "single") requestAnimationFrame(() => notesInput.focus({ preventScroll: true }));
+    if (show && app.view() === "single") requestAnimationFrame(() => notesEditor.focus());
     app.ribbonChanged?.();
   }
-  notesInput.addEventListener("input", () => app.setNotes(notesInput.value));
   $("notesToggle").addEventListener("click", () => toggleNotes());
 
   // ---------------------------------------------------------------- the message bar

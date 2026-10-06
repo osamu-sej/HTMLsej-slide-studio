@@ -713,6 +713,7 @@ export function createTableUi(editor, app, kit) {
         col(btn("textbox", "タイトル…", "グラフの上に出す見出し", () => ask("title", "グラフのタイトル", "空にすると消えます"), { enabled: isChart }), btn("font", "単位…", "値の単位（例：億円）", () => ask("unit", "値の単位", "例：億円・%"), { enabled: isChart }),
           btn("rotate", "行/列の切り替え", "項目と系列を入れ替える（横軸の項目が凡例に、凡例が横軸に）", () => transpose(), { enabled: () => Boolean(chart()) && !chart().chart.style }))),
       group("グラフ スタイル",
+        drop("chartStyle", "グラフ|スタイル", "グラフのスタイル一覧：色・データ ラベル・凡例・目盛線・棒の太さ（線のなめらかさ）をまとめて変える（SEJの色だけ）", () => styleGallery(), { big: true, enabled: () => Boolean(chart()) && !chart().chart.style }),
         drop("fill", "色の|変更", "グラフの色（SEJの配色・青・グレー・茶。どれもSEJの色だけ）", () => colorSets(), { big: true, enabled: () => Boolean(chart()) && !chart().chart.style })),
     ];
   }
@@ -738,6 +739,61 @@ export function createTableUi(editor, app, kit) {
     return menu([{ head: "クイック レイアウト" },
       ...Object.entries(E.CHART_LAYOUTS).map(([key, l]) => ({ label: h("span", { class: "tb-layout-row", "data-layout": key }, pic(l), h("span", {}, h("b", {}, l.label), h("small", {}, l.desc))), on: now === key, run: () => apply(key) }))]);
   }
+  /** グラフ スタイル: the whole look at once, each drawn small in its own colours for the kind of chart that is selected. */
+  function styleGallery() {
+    const type = chart()?.chart.type || "bar";
+    const now = chart() ? E.chartStyleOf(chart().chart) : "";
+    const apply = (key) => { const o = chart(); if (o) editor.commit(editor.objects().map((x) => (x.id === o.id ? { ...x, chart: E.applyChartStyle(x.chart, key) } : x)), { select: [o.id] }); };
+    const theme = { "--c1": "#1f3864", "--c2": "#b7c3da", "--c3": "#d6c9b8", "--c4": "#808080" };
+    const pic = (s) => {
+      const vars = E.CHART_COLORS[s.colors]?.vars || theme;
+      const [c1, c2, c4] = [vars["--c1"], vars["--c2"], vars["--c4"]];
+      const box = h("span", { class: "tb-layout-pic tb-style-pic", "aria-hidden": "true" });
+      const parts = [];
+      const top = s.legend === "top" ? 6 : 2;
+      const bottom = s.legend === "bottom" ? 29 : 32;
+      const right = s.legend === "right" ? 38 : 50;
+      if (s.grid) for (let i = 0; i < 3; i += 1) parts.push(`<line x1="3" x2="${right}" y1="${top + 4 + i * ((bottom - top - 4) / 3)}" y2="${top + 4 + i * ((bottom - top - 4) / 3)}" stroke="#d9d9d9"/>`);
+      if (type === "pie" || type === "donut") {
+        const cx = (3 + right) / 2;
+        const r = Math.min((bottom - top) / 2, (right - 3) / 2) - 1;
+        const cy = (top + bottom) / 2;
+        const at = (a) => `${(cx + r * Math.cos(a)).toFixed(1)} ${(cy + r * Math.sin(a)).toFixed(1)}`;
+        [[-1.57, 0.5, c1], [0.5, 2.7, c2], [2.7, 4.71, c4]].forEach(([a, b, c]) => parts.push(`<path d="M${cx} ${cy}L${at(a)}A${r} ${r} 0 ${b - a > Math.PI ? 1 : 0} 1 ${at(b)}Z" fill="${c}"/>`));
+        if (type === "donut") parts.push(`<circle cx="${cx}" cy="${cy}" r="${r * 0.5}" fill="#fff"/>`);
+      } else if (LINE_KINDS.has(type)) {
+        const xs = [6, 18, 30, 42].map((x) => x * (right - 3) / 45 + 1);
+        const line = (ys, color) => {
+          const pts = xs.map((x, i) => [x, ys[i]]);
+          const d = s.smooth
+            ? `M${pts[0].join(" ")}${pts.slice(1).map(([x, y], i) => `Q${((pts[i][0] + x) / 2).toFixed(1)} ${pts[i][1] + (i % 2 ? -3 : 3)} ${x} ${y}`).join("")}`
+            : `M${pts.map((p) => p.join(" ")).join("L")}`;
+          parts.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="1.6"/>`);
+          if (s.marker !== "none") pts.forEach(([x, y]) => parts.push(s.marker === "diamond" ? `<path d="M${x} ${y - 2}l2 2-2 2-2-2z" fill="${color}"/>` : s.marker === "square" ? `<rect x="${x - 1.5}" y="${y - 1.5}" width="3" height="3" fill="${color}"/>` : `<circle cx="${x}" cy="${y}" r="1.6" fill="${color}"/>`));
+        };
+        line([22, 17, 19, 11].map((y) => Math.min(bottom - 2, Math.max(top + 4, y))), c1);
+        line([26, 24, 21, 19].map((y) => Math.min(bottom - 1, Math.max(top + 4, y))), c4);
+        if (s.labels) parts.push(`<rect x="${xs[3] - 3}" y="${top + 1}" width="6" height="2" fill="#1f3864"/>`);
+      } else {
+        const slot = (right - 5) / 3;
+        const bw = Math.max(1.5, slot / (2 + (s.gap ?? 100) / 100));
+        [[0, 14, 20], [1, 9, 14], [2, 5, 9]].forEach(([i, a, b]) => [[a, c1, 0], [b, c2, 1]].forEach(([y, c, j]) => {
+          const x = 4 + i * slot + (slot - bw * 2 - 0.6) / 2 + j * (bw + 0.6);
+          const yy = Math.max(top + 5, y + (top - 2));
+          parts.push(`<rect x="${x.toFixed(1)}" y="${yy}" width="${bw.toFixed(1)}" height="${bottom - yy}" fill="${c}"/>`);
+          if (s.labels) parts.push(`<rect x="${(x + bw / 2 - 1.2).toFixed(1)}" y="${yy - 3}" width="2.4" height="1.6" fill="#1f3864"/>`);
+        }));
+        parts.push(`<line x1="3" x2="${right}" y1="${bottom}" y2="${bottom}" stroke="#808080"/>`);
+      }
+      const legend = { top: '<rect x="14" y="1" width="24" height="3" fill="#808080"/>', bottom: '<rect x="14" y="31" width="24" height="3" fill="#808080"/>', right: '<rect x="42" y="10" width="8" height="12" fill="#808080"/>' }[s.legend];
+      if (legend) parts.push(legend);
+      box.innerHTML = `<svg viewBox="0 0 52 34" width="52" height="34">${parts.join("")}</svg>`;
+      return box;
+    };
+    return menu([{ head: "グラフ スタイル" },
+      ...Object.entries(E.CHART_STYLES).map(([key, s]) => ({ label: h("span", { class: "tb-layout-row", "data-style": key }, pic(s), h("span", {}, h("b", {}, s.label), h("small", {}, s.desc))), on: now === key, run: () => apply(key) }))]);
+  }
+  const LINE_KINDS = new Set(["line", "multi-line", "area", "stacked-area", "scatter", "radar"]);
   /** 色の変更: the chart's colour set, each shown with its first colours. */
   function colorSets() {
     const now = chart()?.chart.colors || "";

@@ -1173,13 +1173,20 @@
       return E.mount(el, { contain: true, className: "hs-player-slide" });
     };
 
+    /** ノート on the notes bar and in the presenter view: the formatted words (bold, lists, links) or the plain lines. */
+    function showNotes(box, slide, empty) {
+      const note = E.noteOf ? E.noteOf(slide) : null;
+      if (note?.rich) box.innerHTML = note.rich;
+      else box.textContent = E.strip(slide?.notes || "") || empty;
+    }
+
     function update() {
       const pos = place(index);
       counter.textContent = `${pos + 1} / ${order.length}${back ? " ・ 深掘り" : ""}`;
       progress.firstChild.style.width = `${((pos + 1) / order.length) * 100}%`;
       backBtn.hidden = !back;
       player.classList.toggle("in-drill", Boolean(back));
-      notes.textContent = E.strip(slides[index]?.notes || "") || "（ノートはありません）";
+      showNotes(notes, slides[index], "（ノートはありません）");
       opts.onChange?.({ index, step });
       syncPresenterView();
     }
@@ -1512,7 +1519,7 @@
       put(".pv-now", index, step);
       put(".pv-next", back ? back.index : order[place(index) + 1], back ? Infinity : null);
       d.querySelector(".pv-label").textContent = back ? "戻る先のスライド" : "次のスライド";
-      d.querySelector(".pv-notes").textContent = E.strip(slides[index]?.notes || "") || "（このスライドにノートはありません）";
+      showNotes(d.querySelector(".pv-notes"), slides[index], "（このスライドにノートはありません）");
       d.querySelector(".pv-count").textContent = `${place(index) + 1} / ${order.length}${back ? " ・ 深掘り" : ""}${stepsOf(current?.firstElementChild || d.body) ? `　（${step}/${stepsOf(current.firstElementChild)}）` : ""}`;
       layoutPresenterView();
     }
@@ -1979,6 +1986,7 @@ html,body{margin:0;height:100%;background:#0d1017;color:#e8ecf4;font-family:"Not
 .pv-clock{display:flex;align-items:baseline;gap:14px;margin-top:6px}.pv-timer{font-size:44px;font-variant-numeric:tabular-nums;font-weight:800}.pv-count{color:#9aa5b8;font-size:15px}
 .pv-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto}.pv-btns button{flex:1;min-width:90px;height:40px;border:1px solid #2c3446;border-radius:10px;background:#161b26;color:#e8ecf4;font:inherit;font-weight:700;cursor:pointer}
 .pv-notes{grid-row:2;grid-column:1/-1;overflow:auto;padding:16px 20px;border-radius:10px;background:#161b26;font-size:22px;line-height:1.75;white-space:pre-wrap}
+.pv-notes p{margin:0 0 .35em}.pv-notes ul,.pv-notes ol{margin:.1em 0 .35em;padding-left:1.5em}.pv-notes a{color:#9bb8ff}
 .pv .hs-slide{position:absolute;top:0;left:0}`;
 
   /** How long a transition takes when the slide does not say (ms). */

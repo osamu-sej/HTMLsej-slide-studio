@@ -571,6 +571,8 @@ function normalizeSlide(raw, index, total) {
   if (background) slide.background = background; else delete slide.background;
   // 背景グラフィックを表示しない: the deck's master objects stay off this slide.
   if (slide.hideMaster === true) slide.hideMaster = true; else delete slide.hideMaster;
+  // ノートの書式: the formatted notes stay only while they say what the plain notes say.
+  if (slide.notesRich != null) { if (E.noteOf(slide).formatted) slide.notesRich = E.noteHtml(slide.notesRich); else delete slide.notesRich; }
   // A page brought over from PowerPoint as it looked keeps its title as an object and may use the cover's master.
   if (type === "blank") {
     if (slide.hideTitle === true) slide.hideTitle = true; else delete slide.hideTitle;
@@ -869,7 +871,7 @@ function extractUnits(slide) {
 
 function convertSlide(slide, type) {
   const next = defaultSlide(type);
-  for (const key of ["title", "takeaway", "subhead", "source", "notes", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "hidden", "section", "comments", "background"]) {
+  for (const key of ["title", "takeaway", "subhead", "source", "notes", "notesRich", "visualAsset", "customImage", "imagePlacement", "media", "photoMotion", "kinetic", "backdrop", "entrance", "emphasis", "transition", "drillOf", "elements", "timeline", "sid", "transitionDur", "transitionSound", "transitionDir", "advance", "hidden", "section", "comments", "background"]) {
     if (slide[key] != null && slide[key] !== "" && (key !== "takeaway" || TITLED(type))) next[key] = clone(slide[key]);
   }
   if (type === "closing" && !next.message) next.message = slide.takeaway || slide.message || "";
@@ -2143,7 +2145,7 @@ function renderStage() {
   // 最終版: the slide and the panes take no edits; the message bar says so and offers 編集する.
   const final = isFinal(state.deck) && state.mode === "edit";
   document.body.classList.toggle("is-final", final);
-  for (const id of ["notesInput", "deckTitleInput", "chatInput", "memoInput"]) { const el = $(id); if (el) el.readOnly = final; }
+  for (const id of ["notesInput", "deckTitleInput", "chatInput", "memoInput"]) { const el = $(id); if (!el) continue; if (el.hasAttribute("contenteditable")) el.contentEditable = String(!final); else el.readOnly = final; }
   shell.renderMessage(masterCallout() || finalCallout() || importCallout());
   shell.renderStatus();
   if (state.view === "outline") return renderOutline(body);
@@ -2218,8 +2220,23 @@ function setNotes(value) {
   if (!slide) return;
   beginEdit();
   setPath(slide, ["notes"], value);
+  delete slide.notesRich;
   const field = document.querySelector('#inspector [data-path="notes"]');
   if (field && field !== document.activeElement) field.value = value;
+  markChanged();
+}
+
+/** ノートの書式: the notes typed with bold words, bullets and links. `notes` keeps the plain words (everything that reads the notes keeps working). */
+function setNotesRich(html) {
+  const slide = state.deck?.slides[state.selected];
+  if (!slide) return;
+  const fields = E.noteFields(html);
+  if (fields.notes === String(slide.notes ?? "") && (fields.notesRich ?? "") === (slide.notesRich ?? "")) return;
+  beginEdit();
+  slide.notes = fields.notes;
+  if (fields.notesRich) slide.notesRich = fields.notesRich; else delete slide.notesRich;
+  const field = document.querySelector('#inspector [data-path="notes"]');
+  if (field && field !== document.activeElement) field.value = fields.notes;
   markChanged();
 }
 
@@ -2541,6 +2558,7 @@ const editorApp = {
   printSlidesNow: () => printSlidesNow(),
   openNotesView: () => printer.notesView(),
   setNotes: (value) => setNotes(value),
+  setNotesRich: (html) => setNotesRich(html),
   version: APP_VERSION,
   // 校閲 → スペル チェック・表記ゆれ; ファイル → 情報・ドキュメント検査.
   spellcheck: () => spellcheckOn(),
@@ -2656,10 +2674,11 @@ const synonyms = createSynonyms(editorApp, editor);
 const editorUi = createEditorUi(editor, editorApp);
 // The window around the slide: splitters, notes, message bar, status bar (public/editor/window.mjs).
 const shell = createShell({
-  E, h, editor,
+  E, h, editor, toast, ask: askDialog,
   slide: () => editorApp.slide(),
   view: () => state.view,
   setNotes,
+  setNotesRich,
   slideStatus,
   openZoomMenu: (anchor) => editorUi.openPop(anchor, editorUi.zoomMenu()),
   ribbonChanged: () => editorUi.renderRibbon(),
@@ -3329,7 +3348,7 @@ function quickNotes(index) {
 
 function applyNotes(notes) {
   pushUndo();
-  for (const { slide, text } of notes) if (state.deck.slides[slide]) state.deck.slides[slide].notes = text.slice(0, 1200);
+  for (const { slide, text } of notes) if (state.deck.slides[slide]) { state.deck.slides[slide].notes = text.slice(0, 1200); delete state.deck.slides[slide].notesRich; }
   markChanged({ structural: true });
 }
 
@@ -4222,7 +4241,7 @@ function renderInspector() {
           h("span", { class: "btns" },
             h("button", { class: "btn btn-sm", type: "button", title: "スライドの内容から、すぐに読み上げ原稿を作ります", onclick: () => { applyNotes([{ slide: index, text: quickNotes(index) }]); toast("ノートを作成しました（⌘Zで元に戻せます）"); } }, "簡易作成"),
             h("button", { class: "btn btn-sm", type: "button", disabled: !canAi || state.aiBusy, title: canAi ? "AIで自然な読み上げ原稿を作ります" : "Codexに接続すると使えます", onclick: () => aiNotes([index], {}, (text) => { const el = document.getElementById("aiStatus"); if (el) el.textContent = text; }) }, "✦ AIで作成"))),
-        h("textarea", { rows: 4, placeholder: "発表時に話す内容（発表者ビュー・ノート欄に表示されます）", "data-path": "notes", oninput: (event) => { beginEdit(); setPath(slide, ["notes"], event.target.value); markChanged(); } }, slide.notes ?? ""))),
+        h("textarea", { rows: 4, placeholder: "発表時に話す内容（発表者ビュー・ノート欄に表示されます）", "data-path": "notes", oninput: (event) => { beginEdit(); setPath(slide, ["notes"], event.target.value); delete slide.notesRich; markChanged(); } }, slide.notes ?? ""))),
     h("div", { class: "inspector-foot" },
       h("button", { class: "btn", type: "button", onclick: () => openTypeDialog("insert") }, "＋ 後ろに追加"),
       h("button", { class: "btn", type: "button", disabled: locked, onclick: () => insertSlide(index + 1, copyOf(slide)) }, "複製"),

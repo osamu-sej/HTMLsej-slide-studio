@@ -253,6 +253,62 @@ test("クイック レイアウト: a set of chart elements at once; the title, 
   for (const key of Object.keys(E.CHART_LAYOUTS)) assert.equal(E.chartLayoutOf(norm(E.applyChartLayout(chart, key))), key, `${key} is found again`);
 });
 
+test("グラフ スタイル: colours, elements and the bars' gap or the line's curve at once; everything else of the chart stays", async () => {
+  const E = await loadEngine();
+  const norm = (c) => E.normalizeObject({ id: "c", kind: "chart", x: 0, y: 0, w: 960, h: 560, chart: c }).chart;
+  const bar = { type: "bar", title: "売上", unit: "億円", labels: ["4月", "5月"], series: [{ name: "売上", values: [3, 5] }, { name: "目標", values: [4, 4] }], opts: { axisMax: 10, axisX: "月", trend: "linear", gap: 33, hideSeries: [1] } };
+  assert.equal(E.chartStyleOf(norm(bar)), "", "a gap of its own is no style");
+  const three = norm(E.applyChartStyle(bar, "style3"));
+  assert.equal(three.colors, "blue");
+  assert.equal(three.opts.gap, 20);
+  assert.equal(three.opts.legend, undefined, "the legend on top is the default");
+  assert.equal(three.title, "売上");
+  assert.equal(three.unit, "億円");
+  assert.equal(three.opts.axisMax, 10, "the axis bounds stay");
+  assert.equal(three.opts.axisX, "月", "the axis titles stay");
+  assert.equal(three.opts.trend, "linear", "the trendline stays");
+  assert.equal(JSON.stringify(three.opts.hideSeries), "[1]", "the filter stays");
+  assert.equal(E.chartStyleOf(three), "style3");
+  const four = norm(E.applyChartStyle(three, "style4"));
+  assert.equal(four.colors, "gray");
+  assert.equal(four.opts.labels, false);
+  assert.equal(four.opts.legend, "bottom");
+  assert.equal(four.opts.gap, 200);
+  const one = norm(E.applyChartStyle(four, "style1"));
+  assert.equal(one.colors, undefined, "the SEJ's own mix again");
+  assert.equal(one.opts.gap, undefined, "the standard gap again");
+  assert.equal(one.opts.labels, undefined);
+  assert.equal(E.chartStyleOf(one), "style1");
+  for (const key of Object.keys(E.CHART_STYLES)) assert.equal(E.chartStyleOf(norm(E.applyChartStyle(bar, key))), key, `${key} is found again on bars`);
+  // A line has no gap but a curve and markers; a pie has neither.
+  const line = { type: "multi-line", labels: ["a", "b", "c"], series: [{ name: "s", values: [1, 3, 2] }, { name: "t", values: [2, 1, 4] }] };
+  const eight = norm(E.applyChartStyle(line, "style8"));
+  assert.equal(eight.opts.smooth, true);
+  assert.equal(eight.opts.marker, "diamond");
+  assert.equal(eight.opts.gap, undefined, "no gap on a line");
+  assert.equal(E.chartStyleOf(eight), "style8");
+  const two = norm(E.applyChartStyle(eight, "style2"));
+  assert.equal(two.opts.smooth, undefined, "a style without the curve takes it away");
+  assert.equal(two.opts.marker, undefined);
+  for (const key of Object.keys(E.CHART_STYLES)) assert.equal(E.chartStyleOf(norm(E.applyChartStyle(line, key))), key, `${key} is found again on lines`);
+  const pie = norm(E.applyChartStyle({ type: "pie", labels: ["a", "b"], series: [{ name: "s", values: [1, 2] }] }, "style5"));
+  assert.equal(pie.colors, "gray");
+  assert.equal(pie.opts.legend, "right");
+  assert.equal(pie.opts.gap, undefined);
+  // An imported chart keeps its own formatting; an unknown style changes nothing.
+  const office = { ...bar, style: { x: 1 } };
+  assert.equal(E.applyChartStyle(office, "style2"), office);
+  assert.equal(E.chartStyleOf(office), "");
+  assert.equal(E.applyChartStyle(bar, "nope"), bar);
+  // Every colour set a style names exists, and every legend place is one the chart knows.
+  for (const s of Object.values(E.CHART_STYLES)) {
+    assert.ok(s.colors === "" || E.CHART_COLORS[s.colors], s.label);
+    assert.ok(["top", "bottom", "right", "none"].includes(s.legend), s.label);
+    assert.ok(s.gap == null || (s.gap >= 0 && s.gap <= 500), s.label);
+    assert.ok(!s.marker || E.MARKER_SHAPES.includes(s.marker), s.label);
+  }
+});
+
 test("グラフ フィルター hides series and categories without losing them; データ テーブル shows the values under the chart", async () => {
   const E = await loadEngine();
   const chart = { type: "waterfall", labels: ["期首", "増", "減", "期末"], series: [{ name: "売上", values: [10, 5, -3, 12] }, { name: "目標", values: [9, 4, -2, 11] }],

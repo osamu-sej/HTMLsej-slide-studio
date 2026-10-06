@@ -120,7 +120,7 @@ await step("speaker notes (quick) for every slide", async () => {
   // The notes show under the slide (the status bar's ノート), as in PowerPoint.
   if ((await page.getAttribute("#notesToggle", "aria-pressed")) !== "true") await page.click("#notesToggle");
   await page.waitForSelector("#notesPane:not([hidden])");
-  const notes = await page.inputValue("#notesInput");
+  const notes = await page.innerText("#notesInput");
   if (!notes || notes.length < 20) throw new Error("no notes");
 });
 

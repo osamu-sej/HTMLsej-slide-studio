@@ -587,6 +587,29 @@ class SlideReader:
                 "blur": r2(self.deck.px(int(effect.get("blurRad", 0)))),
                 "color": hexc(color), "opacity": r2(clamp(color[1], 0, 1))}
 
+    def text_effects(self, rpr):
+        """文字の効果: a run's shadow and glow (a:rPr/a:effectLst), as the studio keeps them on the text box (tshadow, tglow)."""
+        lst = rpr.find(f"{A}effectLst") if rpr is not None else None
+        out = {}
+        if lst is None:
+            return out
+        shadow = lst.find(f"{A}outerShdw")
+        if shadow is not None:
+            color = self.color(shadow, None)
+            if color:
+                distance = self.deck.px(int(shadow.get("dist", 0)))
+                angle = math.radians(int(shadow.get("dir", 0)) / 60000)
+                blur = r2(self.deck.px(int(shadow.get("blurRad", 0))))
+                dx, dy = r2(distance * math.cos(angle)), r2(distance * math.sin(angle))
+                if dx or dy or blur:
+                    out["tshadow"] = {"dx": dx, "dy": dy, "blur": blur, "color": hexc(color), "opacity": r2(clamp(color[1], 0, 1))}
+        glow = lst.find(f"{A}glow")
+        if glow is not None:
+            color = self.color(glow, None)
+            if color:
+                out["tglow"] = {"r": max(1, round(self.deck.px(int(glow.get("rad", 0))))), "color": hexc(color), "opacity": r2(clamp(color[1], 0.05, 1))}
+        return out
+
     def effects_of(self, sppr, ph_chain=()):
         """The other effects of a shape (a:effectLst): 光彩 (glow), ぼかし (softEdge) and 反射 (reflection), as the studio keeps them."""
         lst = next((s.find(f"{A}effectLst") for s in [sppr, *[n.find(P + "spPr") for n in ph_chain]]
@@ -868,7 +891,8 @@ class SlideReader:
                 line_sizes.append(size)
                 sizes.append((size, len(text)))
                 run = {"size": size, "bold": bold, "italic": italic, "under": under, "strike": strike, "color": color,
-                       "font": font, "spc": int(spc_attr) / 100 if spc_attr else 0.0, "baseline": baseline}
+                       "font": font, "spc": int(spc_attr) / 100 if spc_attr else 0.0, "baseline": baseline,
+                       "fx": self.text_effects(rpr)}
                 if first is None:
                     first = {**run, "align": align, "line": line, "space": spc, "bullet": bullet}
                 link = None
@@ -891,7 +915,7 @@ class SlideReader:
         # The box's own settings are those of its most used size; runs say what differs.
         base_size = max(set(s for s, _ in sizes), key=lambda s: sum(n for z, n in sizes if z == s)) if sizes else first["size"]
         base = {"size": base_size, "bold": first["bold"], "italic": first["italic"], "color": first["color"], "font": first["font"],
-                "under": first["under"], "strike": first["strike"]}
+                "under": first["under"], "strike": first["strike"], "fx": first.get("fx") or {}}
         out = []
         for para in html:
             parts = []
@@ -949,6 +973,7 @@ class SlideReader:
             **({"underline": True} if base["under"] else {}), **({"strike": True} if base["strike"] else {}),
             **({"psp": r2(clamp(psp, 0, 4))} if psp > 0.01 else {}),
             **({"ls": r2(clamp(ls, -0.2, 1))} if abs(ls) > 0.005 else {}),
+            **base["fx"],
         }
         font = base["font"] or ""
         if font and re.fullmatch(r"[\w\s.+\-]{1,100}", font):

@@ -492,6 +492,48 @@ test("図形の効果: the presets are plain numbers (a direction, a polar shado
   assert.ok(ops.GLOW_COLORS.every(([c]) => /^#[0-9a-f]{6}$/.test(c)) && ops.SHADOW_COLORS.length === 3);
 });
 
+test("文字の効果: 文字の影・光彩 are kept in range and drawn on the letters (not the box); a text shadow is flagged for the brand", async () => {
+  const { E } = await loadEngine();
+  const text = (o, kind = "text") => E.normalizeObject({ id: "t", kind, x: 100, y: 100, w: 600, h: 120, text: "<p>文字</p>", fs: 40, ...(kind === "shape" ? { shape: "rect", fill: "#dce4f2", stroke: "none" } : {}), ...o });
+  const full = text({ tshadow: { dx: 3, dy: 3, blur: 4, color: "#000000", opacity: 0.4 }, tglow: { r: 10, color: "#B7C3DA", opacity: 0.7 } });
+  assert.deepEqual(plainJson(full.tshadow), { dx: 3, dy: 3, blur: 4, color: "#000000", opacity: 0.4 });
+  assert.deepEqual(plainJson(full.tglow), { r: 10, color: "#b7c3da", opacity: 0.7 });
+  // Out of range or without any effect: tidied or dropped.
+  const odd = text({ tshadow: { dx: 0, dy: 0, blur: 0, color: "#000000" }, tglow: { r: 5000, color: "nonsense" } });
+  assert.equal(odd.tshadow, undefined, "a shadow that moves nothing and blurs nothing is no shadow");
+  assert.equal(odd.tglow, undefined, "no colour, no glow");
+  assert.equal(text({ tshadow: { dx: 900, dy: -900, blur: 900, color: "#808080" } }).tshadow.dx, 100, "a shadow stays near its letters");
+  assert.equal(text({ tglow: { r: 5000, color: "#808080" } }).tglow.r, 100);
+  assert.equal(text({ tshadow: { dx: 3, dy: 3, color: "#000000", opacity: 0 } }).tshadow, undefined, "an invisible shadow is dropped");
+  assert.equal(E.normalizeObject({ id: "i", kind: "icon", name: "check", x: 0, y: 0, w: 80, h: 80, tshadow: { dx: 3, dy: 3, blur: 4, color: "#000000" } })?.tshadow, undefined, "only text takes them");
+  // Drawn on the words, with the halo twice; a box with a shadow on its letters is flagged, one with a glow is not.
+  const draw = (o, kind) => { const slide = { type: "blank", elements: [text(o, kind)] }; return E.render(slide, { mode: "present", index: 1, deck: { slides: [slide], theme: "sej" } }); };
+  for (const kind of ["text", "shape"]) {
+    const el = draw({ tshadow: full.tshadow, tglow: full.tglow }, kind);
+    const style = el.querySelector(".hs-obj-tx").getAttribute("style");
+    assert.ok(/text-shadow:\s*3px 3px 4px rgba\(0,0,0,0.4\), 0px 0px 10px rgba\(183,195,218,0.7\)|text-shadow:\s*3px 3px 4px rgba\(0,0,0,0.4\), 0 0 10px rgba\(183,195,218,0.7\)/.test(style), `${kind}: ${style}`);
+    assert.equal((style.match(/rgba\(183,195,218/g) || []).length, 2, "the halo twice, wide then close");
+    assert.equal(el.querySelector(".hs-obj").getAttribute("data-tshadow"), "1", "the brand check looks for it");
+    assert.ok(!(el.querySelector(".hs-obj-rot").getAttribute("style") || "").includes("drop-shadow"), "the box itself has no effect");
+  }
+  const glowOnly = draw({ tglow: full.tglow });
+  assert.equal(glowOnly.querySelector(".hs-obj").getAttribute("data-tshadow"), null, "a glow is not a shadow");
+  assert.ok(/text-shadow/.test(glowOnly.querySelector(".hs-obj-tx").getAttribute("style")));
+  const plain = draw({});
+  assert.ok(!/text-shadow/.test(plain.querySelector(".hs-obj-tx").getAttribute("style") || ""));
+  assert.equal(plain.querySelector(".hs-obj").getAttribute("data-tshadow"), null);
+  // The choices on the ribbon.
+  const br = ops.textShadowPreset("br");
+  assert.deepEqual(plainJson(br), { dx: 3, dy: 3, blur: 4, color: "#000000", opacity: 0.4 });
+  assert.equal(ops.shadowDirection(br), "br");
+  assert.ok(ops.TEXT_GLOW_SIZES.every(([r]) => r >= 1 && r <= 100));
+  assert.equal(ops.textEffectsWords({ tshadow: {}, tglow: {} }), "影・光彩");
+  assert.equal(ops.textEffectsWords({}), "");
+  // A look copied or kept as the default carries them too.
+  for (const kind of ["shape", "text"]) assert.ok(ops.DEFAULT_STYLE_KEYS[kind].includes("tshadow") && ops.DEFAULT_STYLE_KEYS[kind].includes("tglow"), kind);
+  assert.deepEqual(plainJson(ops.defaultStyleOf("text", full)).tshadow, plainJson(full.tshadow));
+});
+
 test("スライド マスター: the deck's master objects lie under every slide's own layer; a slide can leave them out", async () => {
   const { E } = await loadEngine();
   const master = E.normalizeObjects([{ id: "m1", kind: "text", x: 100, y: 900, w: 600, h: 60, text: "<p>プロジェクト名</p>" }, { id: "m2", kind: "shape", shape: "rect", x: 0, y: 0, w: 50, h: 50, fill: "#dce4f2" }, { id: "bad", kind: "nothing" }]);

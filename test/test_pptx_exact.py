@@ -244,6 +244,35 @@ class SourceEffectsTest(unittest.TestCase):
         self.assertEqual(imported["gradient"]["angle"], 90)
         self.assertAlmostEqual(imported["shadow"]["opacity"], 0.5)
 
+    def test_text_shadow_and_glow_on_the_letters_become_text_effects(self):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+        box.text = "光る文字"
+        rpr = box.text_frame.paragraphs[0].runs[0]._r.get_or_add_rPr()
+        rpr.append(etree.fromstring('''<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+          <a:glow rad="76200"><a:srgbClr val="B7C3DA"><a:alpha val="60000"/></a:srgbClr></a:glow>
+          <a:outerShdw blurRad="38100" dist="38100" dir="2700000"><a:srgbClr val="000000"><a:alpha val="40000"/></a:srgbClr></a:outerShdw>
+          </a:effectLst>'''))
+        plain = slide.shapes.add_textbox(Inches(1), Inches(3), Inches(4), Inches(1))
+        plain.text = "ふつうの文字"
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        fx = by_text(deck["slideData"][0], "光る文字")
+        self.assertEqual(fx["tglow"]["color"], "#b7c3da")
+        self.assertEqual(fx["tglow"]["opacity"], 0.6)
+        self.assertGreater(fx["tglow"]["r"], 5)
+        self.assertEqual(fx["tshadow"]["color"], "#000000")
+        self.assertEqual(fx["tshadow"]["opacity"], 0.4)
+        self.assertGreater(fx["tshadow"]["dx"], 0)
+        self.assertGreater(fx["tshadow"]["dy"], 0)
+        self.assertGreater(fx["tshadow"]["blur"], 0)
+        self.assertNotIn("shadow", fx, "the shape's own shadow is another thing")
+        ordinary = by_text(deck["slideData"][0], "ふつうの文字")
+        self.assertNotIn("tshadow", ordinary)
+        self.assertNotIn("tglow", ordinary)
+
 
 if __name__ == "__main__":
     unittest.main()

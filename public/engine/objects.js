@@ -1252,6 +1252,84 @@
     return lines.join("\n");
   }
 
+  // ---------------------------------------------------------------- ノートの書式 (the speaker notes' own rich text)
+  /**
+   * The notes as rich text for the notes pane, the presenter view and the notes pages: words, bold / italic / underline /
+   * strike, bullets and numbers, links and line breaks. Colours, sizes, alignment and indents are left out — the notes keep
+   * each screen's own look (the presenter view has its own colours).
+   */
+  function noteHtml(html) {
+    const box = root.document.createElement("div");
+    box.append(richFragment(String(html ?? "").slice(0, 60_000)));
+    const doc = root.document;
+    for (const el of [...box.querySelectorAll("*")]) {
+      if (el.nodeName === "SPAN") {
+        // Words made bold, italic, underlined or struck with a style (an editor's way) become the tags that mean it.
+        const st = el.getAttribute("style") || "";
+        let inner = [...el.childNodes];
+        const wrap = (tag) => { const t = doc.createElement(tag); t.append(...inner); inner = [t]; };
+        if (/font-weight:\s*(bold|[6-9]00)/i.test(st)) wrap("b");
+        if (/font-style:\s*italic/i.test(st)) wrap("i");
+        if (/text-decoration[^;]*underline/i.test(st)) wrap("u");
+        if (/text-decoration[^;]*line-through/i.test(st)) wrap("s");
+        el.replaceWith(...inner);
+        continue;
+      }
+      for (const attr of [...el.attributes]) {
+        const keep = (el.nodeName === "A" && ["href", "target", "rel"].includes(attr.name)) || (el.nodeName === "OL" && attr.name === "start");
+        if (!keep) el.removeAttribute(attr.name);
+      }
+    }
+    return box.innerHTML;
+  }
+  /** Notes (rich) → the plain words the studio keeps in `notes`: a line per paragraph, "・" before a bullet, "1. " before a number. */
+  function noteToText(html) {
+    const box = root.document.createElement("div");
+    box.append(richFragment(html));
+    const lines = [];
+    const isList = (node) => node.nodeType === 1 && (node.nodeName === "UL" || node.nodeName === "OL");
+    const textOf = (el) => {
+      let out = "";
+      for (const node of el.childNodes) out += node.nodeType === 3 ? node.data : node.nodeName === "BR" ? "\n" : node.nodeType === 1 && !isList(node) ? textOf(node) : "";
+      return out;
+    };
+    const walk = (node, depth = 0) => {
+      for (const child of node.childNodes) {
+        if (child.nodeType !== 1) continue;
+        if (child.nodeName === "P") lines.push(textOf(child).replace(/\n$/, ""));
+        else if (isList(child)) {
+          let n = Math.max(1, Math.round(Number(child.getAttribute("start")) || 1));
+          for (const li of child.childNodes) {
+            if (li.nodeType !== 1 || li.nodeName !== "LI") continue;
+            lines.push(`${"  ".repeat(depth)}${child.nodeName === "OL" ? `${n++}. ` : "・"}${textOf(li).replace(/\n$/, "")}`);
+            for (const sub of li.childNodes) if (isList(sub)) walk({ childNodes: [sub] }, depth + 1);
+          }
+        } else walk(child, depth);
+      }
+    };
+    walk(box);
+    return lines.join("\n");
+  }
+  const sameNotes = (a, b) => String(a ?? "").replace(/[ \t]+(\n|$)/g, "$1").replace(/\s+$/g, "") === String(b ?? "").replace(/[ \t]+(\n|$)/g, "$1").replace(/\s+$/g, "");
+  /** Whether the formatting is worth keeping: anything beyond plain paragraphs (a bold word, a list, a link). */
+  const noteFormatted = (html) => /<(b|i|u|s|a|ul|ol|sup|sub)[ >]/.test(html);
+  /**
+   * What a slide's notes are, for every place that shows them: `rich` (HTML — the slide's `notesRich` when it still says what
+   * `notes` says, else the plain lines as paragraphs), `text` (the plain words) and whether the formatting is in use.
+   */
+  function noteOf(slide) {
+    const text = String(slide?.notes ?? "");
+    const rich = typeof slide?.notesRich === "string" ? noteHtml(slide.notesRich) : "";
+    if (rich && noteFormatted(rich) && sameNotes(noteToText(rich), text)) return { rich, text, formatted: true };
+    return { rich: text.trim() ? textToRich(text) : "", text, formatted: false };
+  }
+  /** Notes typed in the pane: the formatted words and the plain words they make (the formatting kept only when it matters). */
+  function noteFields(html) {
+    const rich = noteHtml(html);
+    const text = noteToText(rich);
+    return { notes: text, notesRich: noteFormatted(rich) && text.trim() ? rich.slice(0, 120_000) : undefined };
+  }
+
   // ---------------------------------------------------------------- objects: kinds, defaults, normalization
 
   const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart", "ink", "zoom", "camera", "equation", "model", "poll"];
@@ -1663,6 +1741,16 @@
       if (psp) o.psp = psp;
       // フォント → 文字飾り: すべて大文字 / 小型英大文字 (Latin letters only change).
       if (raw.caps === "all" || raw.caps === "small") o.caps = raw.caps;
+      // 文字の効果 (図形の書式 → 文字の効果): 影 (tshadow: how far, how blurred, colour, strength) and 光彩 (tglow: a halo) on the letters themselves.
+      if (raw.tshadow && typeof raw.tshadow === "object") {
+        const color = hexColor(raw.tshadow.color);
+        const shadow = color ? { dx: r2(num(raw.tshadow.dx, -100, 100, 0)), dy: r2(num(raw.tshadow.dy, -100, 100, 0)), blur: r2(num(raw.tshadow.blur, 0, 100, 0)), color: color.toLowerCase(), opacity: r2(num(raw.tshadow.opacity, 0, 1, 1)) } : null;
+        if (shadow && (shadow.dx || shadow.dy || shadow.blur) && shadow.opacity > 0) o.tshadow = shadow;
+      }
+      if (raw.tglow && typeof raw.tglow === "object") {
+        const color = hexColor(raw.tglow.color);
+        if (color) o.tglow = { r: Math.round(num(raw.tglow.r, 1, 100, 8)), color: color.toLowerCase(), opacity: r2(num(raw.tglow.opacity, 0.05, 1, 0.6)) };
+      }
       if (Array.isArray(raw.pad) && raw.pad.length === 4) o.pad = raw.pad.map((v) => num(v, 0, 400, 0));
       if (AUTOFIT[raw.autofit]) o.autofit = raw.autofit;
       // 段組み: the words run in two to four columns.
@@ -2809,6 +2897,7 @@
       "text-decoration-thickness": o.underline && o.uline === "thick" ? ".12em" : null,
       "letter-spacing": o.ls ? `${o.ls}em` : null, "--psp": o.psp ? `${o.psp}em` : null,
       "text-transform": o.caps === "all" ? "uppercase" : null, "font-variant": o.caps === "small" ? "small-caps" : null,
+      "text-shadow": textShadowOf(o),
       "font-family": o.fontFace ? `"${o.fontFace}", sans-serif` : o.font ? FONTS[o.font][1] : null, "white-space": o.wrap === false ? "pre" : null,
     };
     for (const [k, v] of Object.entries(style)) if (v != null) tx.style.setProperty(k, String(v));
@@ -2817,6 +2906,13 @@
   }
 
   const rgbaOf = (hex, a) => `rgba(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(",")},${a})`;
+  /** 文字の効果: the letters' 影 and 光彩 as a CSS text-shadow (the halo is drawn twice, wide then close, so it reads on a light fill). */
+  function textShadowOf(o) {
+    const layers = [];
+    if (o.tshadow) layers.push(`${o.tshadow.dx}px ${o.tshadow.dy}px ${o.tshadow.blur}px ${rgbaOf(o.tshadow.color, o.tshadow.opacity)}`);
+    if (o.tglow) layers.push(`0 0 ${o.tglow.r}px ${rgbaOf(o.tglow.color, o.tglow.opacity)}`, `0 0 ${r2(o.tglow.r / 3)}px ${rgbaOf(o.tglow.color, o.tglow.opacity)}`);
+    return layers.join(", ") || null;
+  }
   /** 図形の効果: 影 and 光彩 are drop-shadow filters, 反射 a mirror below (the browser's box-reflect), on the object's own element. */
   function applyEffects(o, rotEl) {
     const filters = [];
@@ -2958,6 +3054,55 @@
     if (!l.grid) opts.grid = false;
     if (l.axes) { opts.axisX = axisX || "項目"; opts.axisY = axisY || chart.unit || "値"; }
     const out = { ...chart };
+    if (Object.keys(opts).length) out.opts = opts; else delete out.opts;
+    return out;
+  }
+  /**
+   * グラフのデザイン → グラフ スタイル: a look for the whole chart at once — one of the SEJ's colour sets with the chart
+   * elements (data labels, the legend's place, gridlines) and the bars' gap or a line's curve and markers. The title, the unit,
+   * axis titles and bounds, a trendline, the filter and the data table stay as they are; what a chart's kind has no use for
+   * (a gap on a line, a curve on a bar) is left out of the choice.
+   */
+  const CHART_STYLES = {
+    style1: { label: "スタイル 1", desc: "SEJの配色・データ ラベル・凡例（上）・目盛線（標準）", colors: "", labels: true, legend: "top", grid: true },
+    style2: { label: "スタイル 2", desc: "青・データ ラベルだけ（すっきり）", colors: "blue", labels: true, legend: "none", grid: false, gap: 60 },
+    style3: { label: "スタイル 3", desc: "青・太い棒・データ ラベル・目盛線", colors: "blue", labels: true, legend: "top", grid: true, gap: 20 },
+    style4: { label: "スタイル 4", desc: "グレー・細い棒・凡例（下）・目盛線", colors: "gray", labels: false, legend: "bottom", grid: true, gap: 200 },
+    style5: { label: "スタイル 5", desc: "グレー・データ ラベル・凡例（右）・目盛線", colors: "gray", labels: true, legend: "right", grid: true, gap: 80 },
+    style6: { label: "スタイル 6", desc: "茶・データ ラベルだけ（やさしい）", colors: "brown", labels: true, legend: "none", grid: false, gap: 50 },
+    style7: { label: "スタイル 7", desc: "茶・凡例（下）・目盛線", colors: "brown", labels: false, legend: "bottom", grid: true, gap: 120 },
+    style8: { label: "スタイル 8", desc: "青・なめらかな線・ひし形のマーカー・凡例（下）", colors: "blue", labels: false, legend: "bottom", grid: true, gap: 100, smooth: true, marker: "diamond" },
+  };
+  /** The chart style a chart matches now (or ""): only what its kind can show is compared. */
+  function chartStyleOf(chart) {
+    if (!chart || chart.style) return "";
+    const o = chart.opts || {};
+    const bars = BAR_GAP_CHARTS.has(chart.type);
+    const lines = LINE_CHART_KINDS.has(chart.type);
+    return Object.keys(CHART_STYLES).find((k) => {
+      const s = CHART_STYLES[k];
+      if ((chart.colors || "") !== s.colors || (o.labels !== false) !== s.labels || (o.legend || "top") !== s.legend || (o.grid !== false) !== s.grid) return false;
+      if (bars && (o.gap ?? null) !== (s.gap ?? null)) return false;
+      if (lines && (Boolean(o.smooth) !== Boolean(s.smooth) || (o.marker || "circle") !== (s.marker || "circle"))) return false;
+      return true;
+    }) || "";
+  }
+  /** The chart in a style (what the style sets is replaced; everything else of the chart stays). */
+  function applyChartStyle(chart, key) {
+    const s = CHART_STYLES[key];
+    if (!chart || !s || chart.style) return chart;
+    const { labels: _l, legend: _g, grid: _d, gap: _p, smooth: _s, marker: _m, ...rest } = chart.opts || {};
+    const opts = { ...rest };
+    if (!s.labels) opts.labels = false;
+    if (s.legend !== "top") opts.legend = s.legend;
+    if (!s.grid) opts.grid = false;
+    if (BAR_GAP_CHARTS.has(chart.type) && s.gap != null) opts.gap = s.gap;
+    if (LINE_CHART_KINDS.has(chart.type)) {
+      if (s.smooth) opts.smooth = true;
+      if (s.marker && s.marker !== "circle") opts.marker = s.marker;
+    }
+    const out = { ...chart };
+    if (s.colors) out.colors = s.colors; else delete out.colors;
     if (Object.keys(opts).length) out.opts = opts; else delete out.opts;
     return out;
   }
@@ -3639,6 +3784,7 @@
       "data-fill": ["shape", "text"].includes(o.kind) && o.fill !== "none" && !(o.shape === "custom" ? !o.path?.closed : SHAPES[o.shape]?.open) ? o.fill : null,
       "data-stroke": ["shape", "text", "image"].includes(o.kind) && o.stroke !== "none" ? o.stroke : null,
       "data-shadow": o.shadow && ["shape", "text", "image"].includes(o.kind) ? "1" : null,
+      "data-tshadow": o.tshadow && ["shape", "text"].includes(o.kind) ? "1" : null,
       "data-autofit": o.autofit && o.autofit !== "none" ? o.autofit : null, "data-item": o.item || null,
       "data-bbox": Object.values(bounds(o)).map(r2).join(","),
       // Screen readers: a decorative object is skipped; a picture-like object says its alternative text.
@@ -3906,8 +4052,8 @@
 
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
-    LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
-    geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
+    LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, CHART_STYLES, chartStyleOf, applyChartStyle, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
+    geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, noteHtml, noteToText, noteOf, noteFields, noteFormatted, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, masterLayer, morphPairs, MORPH_KINDS, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,

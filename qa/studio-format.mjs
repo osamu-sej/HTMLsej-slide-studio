@@ -621,6 +621,26 @@ await step("クイック レイアウト（グラフ）; 図形の塗りつぶ�
   assert(c.opts?.legend === "none" && c.opts.grid === false && c.opts.labels === false && !c.opts.axisX, `レイアウト 7: the chart alone: ${JSON.stringify(c.opts)}`);
   await undo();
   assert((await chartOf()).opts?.axisX, "⌘Z goes back to レイアウト 5 in one step");
+  // グラフ スタイル: the whole look at once (colours, elements, bar gap), the axis titles kept.
+  await byTitle("グラフのスタイル一覧");
+  assert(await page.locator(".rb-pop .tb-layout-row[data-style]").count() === 8, "eight styles, each with a picture");
+  assert(await page.locator(".rb-pop .tb-style-pic svg rect").count() > 20, "the pictures are drawn");
+  await shot("chart-styles");
+  await page.click('.rb-pop .tb-layout-row[data-style="style3"]');
+  await page.waitForTimeout(300);
+  c = await chartOf();
+  assert(c.colors === "blue" && c.opts?.gap === 20 && c.opts.axisX && c.opts.labels !== false, `スタイル 3: ${JSON.stringify({ colors: c.colors, opts: c.opts })}`);
+  assert(await page.locator('#stageBody .hs-obj-chart[data-colors="blue"]').count() === 1, "drawn in the blue set");
+  await byTitle("グラフのスタイル一覧");
+  assert(await page.locator('.rb-pop button.on .tb-layout-row[data-style="style3"]').count() === 1, "the style it matches is marked");
+  await page.click('.rb-pop .tb-layout-row[data-style="style4"]');
+  await page.waitForTimeout(300);
+  c = await chartOf();
+  assert(c.colors === "gray" && c.opts.gap === 200 && c.opts.labels === false && c.opts.legend === "bottom", `スタイル 4: ${JSON.stringify(c.opts)}`);
+  await undo();
+  assert((await chartOf()).colors === "blue", "⌘Z goes back to スタイル 3 in one step");
+  await undo();
+  assert(!(await chartOf()).colors, "and one more to the layout it was");
   // 図で塗りつぶし: a rectangle filled with the logo, then tiled, then a colour again.
   await page.keyboard.press("Escape");
   await tab("挿入");
@@ -1749,6 +1769,74 @@ await step("図形の効果（影・反射・光彩・ぼかし）: メニュー
   fx = await obj();
   assert(!fx.shadow && !fx.reflect && !fx.glow && !fx.soft, `all gone: ${JSON.stringify(fx)}`);
   assert(await page.getAttribute(q(""), "data-shadow") === null, "and the mark with them");
+});
+
+await step("文字の効果（文字の影・光彩）: ホームの「文字の影」・図形の書式の文字の効果・オプション、影はブランドの指摘、1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("テキスト ボックス");
+  await menuItem("横書きテキスト ボックス");
+  await page.mouse.click(...(await stageAt(500, 400)));
+  await page.waitForTimeout(250);
+  await page.keyboard.type("Shadow and Glow");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  const obj = () => page.evaluate((id) => { const o = window.__hsej.slide().elements.find((x) => x.id === id); return { tshadow: o.tshadow, tglow: o.tglow, shadow: o.shadow, glow: o.glow }; }, id);
+  const q = (sel) => `#stageBody .slide-wrap .hs-obj[data-el="${id}"] ${sel}`;
+  const textStyle = async () => (await page.getAttribute(q(".hs-obj-tx"), "style")) || "";
+  // ホーム → 文字の影: on, then off.
+  await tab("ホーム");
+  await byTitle("文字の影");
+  await page.waitForTimeout(400);
+  let fx = await obj();
+  assert(fx.tshadow && fx.tshadow.dx === 3 && fx.tshadow.dy === 3 && !fx.shadow, `the letters' shadow, not the box's: ${JSON.stringify(fx)}`);
+  assert(await page.getAttribute(q(""), "data-tshadow") === "1", "marked for the brand check");
+  assert(/text-shadow:[^;]*3px 3px 4px/.test(await textStyle()), `drawn on the words: ${await textStyle()}`);
+  assert(!/drop-shadow/.test((await page.getAttribute(q(".hs-obj-rot"), "style")) || ""), "the box has no shadow");
+  await page.waitForTimeout(800);
+  const brand = await page.evaluate(() => [...document.querySelectorAll("#issueSummary, .issue-chip")].map((e) => e.textContent).join(" "));
+  assert(/ブランド/.test(brand), `the chip names the brand finding: ${brand}`);
+  assert(await page.locator('.rb-btn[title^="文字の影"][aria-pressed="true"]').count() === 1, "the button shows it is on");
+  await byTitle("文字の影");
+  await page.waitForTimeout(300);
+  assert(!(await obj()).tshadow && await page.getAttribute(q(""), "data-tshadow") === null, "off again, and the mark with it");
+  // 図形の書式 → 文字の効果: 光彩 5 pt and 影 下.
+  await tab("図形の書式");
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("光彩：5 pt")').click();
+  await page.waitForTimeout(300);
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("影：下")').click();
+  await page.waitForTimeout(400);
+  fx = await obj();
+  assert(fx.tglow?.r === 10 && fx.tshadow?.dx === 0 && fx.tshadow?.dy === 3, `a glow and a shadow: ${JSON.stringify(fx)}`);
+  assert((await textStyle()).match(/rgba\(183, ?195, ?218/g)?.length === 2, `the halo twice: ${await textStyle()}`);
+  await shot("text-effects");
+  // 文字の効果のオプション: 影の距離と角度、光彩の色。
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("文字の効果のオプション")').click();
+  await page.waitForSelector(".tfx-dialog[open]");
+  await page.fill('.tfx-dialog [name="shadowDistance"]', "5");
+  await page.fill('.tfx-dialog [name="shadowAngle"]', "90");
+  await page.selectOption('.tfx-dialog [name="glowColor"]', "#d6c9b8");
+  await page.click(".tfx-dialog .fmt-ok");
+  await page.waitForTimeout(400);
+  fx = await obj();
+  assert(fx.tshadow.dx === 0 && fx.tshadow.dy === 10 && fx.tglow.color === "#d6c9b8", `the dialog's numbers: ${JSON.stringify(fx)}`);
+  await undo();
+  fx = await obj();
+  assert(fx.tshadow.dy === 3 && fx.tglow.color === "#b7c3da", `one undo: ${JSON.stringify(fx)}`);
+  // 光彩だけならブランドの指摘は出ない。すべての文字の効果をなくす。
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("影なし")').click();
+  await page.waitForTimeout(300);
+  assert(!(await obj()).tshadow && await page.getAttribute(q(""), "data-tshadow") === null, "a glow alone is no brand finding");
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("すべての文字の効果をなくす")').click();
+  await page.waitForTimeout(300);
+  fx = await obj();
+  assert(!fx.tshadow && !fx.tglow && !/text-shadow/.test(await textStyle()), `all gone: ${JSON.stringify(fx)}`);
 });
 
 await step("スライド マスター表示: 全スライド共通の部品を置く・背景グラフィックを表示しない・検索・Undo（SEJのマスターは動かさない）", async () => {
