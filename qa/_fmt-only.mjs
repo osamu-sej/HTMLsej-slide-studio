@@ -12,7 +12,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 process.env.PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK = "1";
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "/opt/node22/lib/node_modules/playwright");
-const root = fileURLToPath(new URL("..", import.meta.url));
+const root = "/home/user/HTMLsej-slide-studio/";
 const args = Object.fromEntries(process.argv.slice(2).map((arg) => arg.replace(/^--/, "").split("=")));
 const base = args.base || "http://127.0.0.1:8787";
 const outDir = join(root, "qa", "out");
@@ -38,6 +38,7 @@ page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL
 page.on("dialog", (dialog) => dialog.accept());
 const shot = async (name) => { const file = join(outDir, `format-${name}.png`); await page.screenshot({ path: file }); console.log("saved", file); };
 const step = async (label, fn) => {
+  if (process.env.QA_ONLY && !process.env.QA_ONLY.split("|").some((k) => label.includes(k))) return;
   try { await page.waitForTimeout(150); await fn(); console.log("ok  ", label); } catch (error) { errors.push(`${label}: ${error.message}`); console.log("FAIL", label, error.message); await shot(`fail-${errors.length}`); }
   if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
   if (await page.isVisible(".rb-pop")) await page.keyboard.press("Escape");

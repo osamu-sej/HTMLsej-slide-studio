@@ -1134,6 +1134,7 @@ export function createEditorUi(editor, app) {
       group("文章校正",
         btn("spell", "スペル|チェック", "入力中の文字のスペルを確かめる（ブラウザの辞書。間違いに赤い波線）", () => app.setSpellcheck(!app.spellcheck()), { big: true, pressed: () => app.spellcheck() }),
         btn("count", "文字|カウント", "資料全体のスライド数・段落・文字数（スペースあり・なし）・英数字の単語を数える（スピーカー ノートや非表示スライドを含めるかも選べます）", () => app.openWordCount(), { big: true }),
+        btn("thesaurus", "類義語", "選んだ言葉の言い換えを探して入れ替える（⇧F7。辞書にない言葉はAIで探せます）", () => app.openSynonyms(), { big: true }),
         btn("textCase", "表記ゆれ|チェック", "全角・半角（ＡＩ／AI）、長音（ユーザ／ユーザー）、送り仮名（行う／行なう）のゆれを見つけて統一する", () => app.openProofing(), { big: true }),
         btn("check", "オートコレクトの|オプション", "入力中に (c) を © に、「・ 」「1. 」で始めると箇条書き・段落番号に。種類ごとにオン・オフ", () => app.openAutoCorrect(), { big: true })),
       group("音声",

@@ -29,6 +29,7 @@ import { extractText, importDeck } from "./server/extract.mjs";
 import { varietyIssues } from "./public/layout-looks.mjs";
 import { createRooms } from "./server/rooms.mjs";
 import { buildTranslatePrompt, checkTranslation, translateRequestSchema, translateResultSchema } from "./server/translate.mjs";
+import { buildSynonymsPrompt, checkSynonyms, synonymsRequestSchema, synonymsResultSchema } from "./server/synonyms.mjs";
 import {
   chatRequestSchema,
   chatResultSchema,
@@ -584,6 +585,21 @@ function startTranslateJob(session, request) {
   return job;
 }
 
+function startSynonymsJob(session, request) {
+  const job = newJob("synonyms", session, { word: request.word });
+  codex.runJob(job, {
+    prompt: buildSynonymsPrompt(request),
+    outputSchema: toCodexSchema(synonymsResultSchema),
+    maxAttempts: 2,
+    effort: "low",
+    async finalize(candidate) {
+      const senses = checkSynonyms(request, omitNullObjectValues(candidate));
+      return { result: { senses }, detail: senses.length ? `${senses.reduce((n, s) => n + s.words.length, 0)}語見つかりました。` : "言い換えの語は見つかりませんでした。" };
+    },
+  }).catch((error) => codex.failJob(job.id, error));
+  return job;
+}
+
 function startNotesJob(session, request) {
   const job = newJob("notes", session, request);
   const total = request.deck.slides.length;
@@ -824,6 +840,9 @@ const httpServer = createServer(async (req, res) => {
 
   if (url.pathname === "/api/decks/translate" && req.method === "POST") {
     return aiRoute((session, body) => startTranslateJob(session, translateRequestSchema.parse(body)));
+  }
+  if (url.pathname === "/api/decks/synonyms" && req.method === "POST") {
+    return aiRoute((session, body) => startSynonymsJob(session, synonymsRequestSchema.parse(body)));
   }
   if (url.pathname === "/api/decks/notes" && req.method === "POST") {
     return aiRoute((session, body) => startNotesJob(session, notesRequestSchema.parse(body)));

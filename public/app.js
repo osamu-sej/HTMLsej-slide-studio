@@ -17,6 +17,7 @@ import { createShowTools, customShowsOf, keptInk, playerOptions, showOf, showSli
 import { createA11y } from "./editor/a11y.mjs?v=__APP_VERSION__";
 import { createPrinter } from "./editor/print.mjs?v=__APP_VERSION__";
 import { matcher as findMatcher, snippet as findSnippet } from "./editor/find.mjs?v=__APP_VERSION__";
+import { createSynonyms } from "./editor/synonyms.mjs?v=__APP_VERSION__";
 import { createProofing } from "./editor/proof.mjs?v=__APP_VERSION__";
 import { createFileInfo, infoOf, isFinal, FINAL_STATUS, strip as stripDeckData } from "./editor/fileinfo.mjs?v=__APP_VERSION__";
 import { createSlideTools } from "./editor/slidetools.mjs?v=__APP_VERSION__";
@@ -2522,6 +2523,13 @@ const editorApp = {
   spellcheck: () => spellcheckOn(),
   setSpellcheck: (on) => { try { localStorage.setItem("hsej-spellcheck", on ? "1" : "0"); } catch { /* private window */ } editorUi.renderRibbon(); toast(on ? "スペル チェック：オン（入力中の文字に赤い波線が出ます。ブラウザの辞書を使います）" : "スペル チェック：オフ"); },
   openProofing: () => proofing.open(),
+  openSynonyms: () => synonyms.open(),
+  // One AI job (a path and its request) as a promise of the finished job.
+  aiRun: (path, body) => new Promise((resolve, reject) => {
+    jsonFetch(path, { method: "POST", body: JSON.stringify(body) })
+      .then(({ jobId }) => watchJob(jobId, { onProgress: () => {}, onDone: resolve, onFail: (job) => reject(new Error(job.error || job.detail || "失敗しました")) }))
+      .catch(reject);
+  }),
   allTexts: () => { const out = []; if (state.deck) { eachText(state.deck.slides, (t) => { out.push(t); return t; }); eachObjectText(state.deck.slides, (t) => { out.push(t); return t; }); } return out; },
   transformAllText: (fn) => transformAllText(fn),
   openFileInfo: () => fileInfo.open(),
@@ -2618,6 +2626,8 @@ const online = createOnline(editorApp);
 // スライド ショー → コーチによるリハーサル (public/editor/coach.mjs).
 const coach = createCoach(editorApp);
 const editor = createCanvas(editorApp);
+// 校閲 → 類義語 (public/editor/synonyms.mjs): looks up the words selected in the canvas and puts the pick in their place.
+const synonyms = createSynonyms(editorApp, editor);
 const editorUi = createEditorUi(editor, editorApp);
 // The window around the slide: splitters, notes, message bar, status bar (public/editor/window.mjs).
 const shell = createShell({

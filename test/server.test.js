@@ -479,6 +479,21 @@ test("translation returns one string per string, keeps empty ones, and asks agai
   });
 });
 
+test("類義語: the AI's senses come back tidied (the word itself, repeats and long phrases out), and the request is checked", async () => {
+  await withFakeCodex([{ senses: [{ label: "問題・課題", words: ["課題", "論点", " 懸案 ", "論点", ""] }, { label: "空", words: ["課題"] }, { label: "", words: ["障壁", "とても長い言い回しで言い換えているところです"] }] }], async (server, prompts) => {
+    const response = await server.postJson("/api/decks/synonyms", { word: "課題", context: "最大の課題は人手不足です" });
+    assert.equal(response.status, 202);
+    const job = await waitForJob(server, (await response.json()).jobId);
+    assert.equal(job.status, "completed", job.error);
+    assert.deepEqual(job.senses, [{ label: "問題・課題", words: ["論点", "懸案"] }, { label: "類義語", words: ["障壁"] }]);
+    const [prompt] = await prompts();
+    assert.match(prompt, /語: 課題/);
+    assert.match(prompt, /最大の課題は人手不足です/);
+    assert.equal((await server.postJson("/api/decks/synonyms", { word: "" })).status, 400, "a word is needed");
+    assert.equal((await server.postJson("/api/decks/synonyms", { word: "あ".repeat(41) })).status, 400, "and a short one");
+  });
+});
+
 test("chat proposes operations on the original numbering, keeps photos and videos, repairs overflow, and never switches off the SEJ template", async () => {
   const photo = `data:image/jpeg;base64,${(await readFile(PHOTO)).toString("base64")}`;
   const long = "とても長い説明文".repeat(13);

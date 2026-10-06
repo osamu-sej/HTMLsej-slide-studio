@@ -1148,6 +1148,8 @@ export function createCanvas(app) {
     if (!app.canEdit()) return false;
     const meta = event.ctrlKey || event.metaKey;
     const key = event.key;
+    // ⇧F7: 類義語 (also while typing: the words selected are looked up, and the pick takes their place).
+    if (key === "F7" && event.shiftKey && !meta && !event.altKey) { event.preventDefault(); app.openSynonyms?.(); return true; }
     // F4: 繰り返し (also while typing: the format goes to the words selected now).
     if (key === "F4" && !meta && !event.altKey && !event.shiftKey) { event.preventDefault(); repeat(); return true; }
     if (ed.typing) return false;
@@ -1818,6 +1820,10 @@ export function createCanvas(app) {
     startTyping, stopTyping, restoreRange,
     keydown, onCopy, onPaste, consumeClick,
     insert, pasteObjects, pasteFromMemory, commit, apply, textFormat, textState, repeat, canRepeat: () => Boolean(lastAction),
+    // 類義語: the words selected while typing, the text round them, and a pick that takes their place.
+    selectedWords: () => (ed.typing && ed.range ? ed.range.toString() : ""),
+    typingText: () => ed.typing?.tx.textContent || "",
+    replaceWords(text) { if (!restoreRange()) return false; document.execCommand("insertText", false, text); return true; },
     removeSelection, duplicateSelection, groupSelection, ungroupSelection, order, alignSelection, distributeSelection, rotateSelection, flipSelection,
     setLocked, setHidden, rename, moveInOrder, copyFormat, pasteFormat,
     get painter() { return ed.painter; },

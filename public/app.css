@@ -1744,3 +1744,11 @@ audio.trim-media { background: transparent; }
 .find-hit:hover, .find-hit:focus-visible { background: var(--accent-soft); }
 .find-hit b { margin-right: 6px; color: var(--accent-ink); }
 .find-hit small { margin-left: 6px; color: var(--muted); }
+/* 類義語 */
+.syn-dialog { width: min(520px, calc(100vw - 32px)); }
+.syn-body { display: flex; flex-direction: column; gap: 10px; max-height: min(70vh, 520px); overflow: auto; }
+.syn-search { display: flex; gap: 8px; }
+.syn-search input { flex: 1; min-width: 0; }
+.syn-sense h4 { margin: 8px 0 4px; font-size: 13px; color: var(--ink-2); }
+.syn-sense h4 small { margin-left: 8px; padding: 0 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+.syn-words { display: flex; flex-wrap: wrap; gap: 6px; }
