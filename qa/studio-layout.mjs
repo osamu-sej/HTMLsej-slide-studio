@@ -226,7 +226,7 @@ await step("ノート: the notes under the slide, typed into the slide, resized;
   await page.waitForTimeout(400);
   await page.click("#notesToggle");
   await page.waitForSelector("#notesPane:not([hidden])");
-  assert((await page.inputValue("#notesInput")).includes("全体像"), "the slide's own notes");
+  assert((await page.innerText("#notesInput")).includes("全体像"), "the slide's own notes");
   await page.fill("#notesInput", "ノート欄から書いた話す内容");
   await page.waitForTimeout(300);
   assert((await deck()).slides[1].notes === "ノート欄から書いた話す内容", "typed into the slide");

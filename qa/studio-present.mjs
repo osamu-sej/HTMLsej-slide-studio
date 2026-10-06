@@ -154,13 +154,68 @@ await step("ノート表示: the slide above its notes; typing writes the notes;
   await page.waitForSelector(".notes-view[open] .nv-notes");
   assert((await page.textContent(".notes-view .nv-count")).startsWith("2 /"), "opens on the slide shown");
   assert(await page.isVisible(".notes-view .nv-page .hs-slide"), "the slide is on the page");
-  await page.fill(".notes-view .nv-notes", "ノート表示で書いたメモ");
+  await page.fill(".notes-view .nv-notes .notes-input", "ノート表示で書いたメモ");
   await page.locator('.notes-view button[aria-label="次のスライド"]').click();
   await page.waitForTimeout(250);
   assert((await page.textContent(".notes-view .nv-count")).startsWith("3 /"), "the next slide");
   await shot("notes-view");
   await page.keyboard.press("Escape");
   assert((await deck()).slides[1].notes === "ノート表示で書いたメモ", "the notes are kept");
+});
+
+await step("ノートの書式: 太字・箇条書きを付ける→ノート表示・発表者のノート・印刷に出る; 文字だけの編集では書式が外れる", async () => {
+  await page.locator(".film-item").nth(1).click();
+  await page.waitForTimeout(300);
+  if ((await page.getAttribute("#notesToggle", "aria-pressed")) !== "true") await page.click("#notesToggle");
+  await page.waitForSelector("#notesPane:not([hidden]) .notes-tools");
+  assert(await page.locator("#notesPane .notes-tool").count() === 8, "a toolbar with eight tools");
+  // Typed words with a bullet list under them; the first line made bold.
+  await page.fill("#notesInput", "要点を落ち着いて話す");
+  await page.click("#notesInput");
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await page.click("#notesPane .tool-bullet");
+  await page.keyboard.type("一つ目");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("二つ目");
+  await page.waitForTimeout(300);
+  let slide = (await deck()).slides[1];
+  assert((slide.notesRich || "").includes("<ul><li>一つ目</li><li>二つ目</li></ul>"), `a bullet list: ${slide.notesRich}`);
+  assert(/^要点を落ち着いて話す\n\n?・一つ目\n・二つ目/.test(slide.notes), `the plain words with the bullets: ${JSON.stringify(slide.notes)}`);
+  await page.evaluate(() => { const box = document.getElementById("notesInput"); const first = box.firstChild; const r = document.createRange(); r.selectNodeContents(first.nodeType === 3 ? first : first.firstChild || first); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); box.focus(); });
+  await page.click("#notesPane .tool-bold");
+  await page.waitForTimeout(300);
+  slide = (await deck()).slides[1];
+  assert((slide.notesRich || "").includes("<b>要点を落ち着いて話す</b>") && (slide.notesRich || "").includes("<li>一つ目</li>"), `bold on the first line only: ${JSON.stringify({ rich: slide.notesRich, html: await page.evaluate(() => document.getElementById("notesInput").innerHTML) })}`);
+  assert(/^要点を落ち着いて話す\n\n?・一つ目\n・二つ目/.test(slide.notes), `the plain words do not change with the bold: ${JSON.stringify(slide.notes)}`);
+  await shot("notes-rich");
+  // The formatting is still there on coming back to the slide.
+  await page.locator(".film-item").nth(2).click();
+  await page.waitForTimeout(300);
+  await page.locator(".film-item").nth(1).click();
+  await page.waitForTimeout(300);
+  assert(await page.locator("#notesInput b, #notesInput ul li").count() >= 3, "the bold and the list come back");
+  // ノート表示 shows the same.
+  await tab("表示");
+  await page.locator('.rb-body .rb-btn[title^="スライドとノートを1ページにした表示"]').click();
+  await page.waitForSelector(".notes-view[open] .nv-notes .notes-input");
+  assert(await page.locator(".notes-view .notes-input b").count() === 1 && await page.locator(".notes-view .notes-input li").count() === 2, "the notes page shows the formatting");
+  await page.keyboard.press("Escape");
+  // The presenter's notes bar (N) shows it too.
+  await tab("スライド ショー");
+  await ribbonBtn("このスライド");
+  await page.waitForSelector("#presenter .hs-player");
+  await page.keyboard.press("n");
+  await page.waitForTimeout(300);
+  assert(await page.locator("#presenter .hs-player-notes b").count() === 1 && await page.locator("#presenter .hs-player-notes li").count() === 2, "the notes bar shows the bold words and the list");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+  // The AI's (or any plain) rewrite of the words drops the old formatting from view.
+  await page.evaluate(() => { const s = window.__hsej.slide(); s.notes = "AI が書き直した"; });
+  await page.locator(".film-item").nth(2).click();
+  await page.locator(".film-item").nth(1).click();
+  await page.waitForTimeout(300);
+  assert(!(await page.locator("#notesInput b").count()) && (await page.innerText("#notesInput")).includes("AI が書き直した"), "the plain words win over stale formatting");
 });
 
 await step("画面切り替え → サウンド: chosen (and heard), rung as the show arrives, applied to all (one ⌘Z)", async () => {

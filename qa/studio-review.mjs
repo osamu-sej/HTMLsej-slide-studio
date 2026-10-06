@@ -340,7 +340,7 @@ await step("ファイル → 情報 → 最終版にする: the message bar says
   assert(!(await page.locator(".rb-body > .rb-group.rb-off").count()), "the スライド ショー tab still works");
   // The notes, the panes and the search's commands take nothing either.
   const notes = (await deck()).slides[1].notes || "";
-  assert(await page.evaluate(() => document.getElementById("notesInput").readOnly), "the notes are read-only");
+  assert(await page.evaluate(() => document.getElementById("notesInput").isContentEditable === false), "the notes are read-only");
   await page.evaluate(() => document.getElementById("notesInput").focus());
   await page.keyboard.type("書き足し");
   assert(((await deck()).slides[1].notes || "") === notes, "nothing typed into the notes");

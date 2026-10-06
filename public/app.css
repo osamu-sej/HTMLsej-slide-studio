@@ -319,9 +319,21 @@ body.resizing iframe, body.resizing .stage-body { pointer-events: none; }
 /* The notes under the slide (PowerPoint's ノート pane). */
 .notes-split { flex: none; height: 5px; cursor: row-resize; background: var(--surface); border-top: 1px solid var(--line); touch-action: none; }
 .notes-split:hover, .notes-split.dragging { background: var(--accent-soft); border-top-color: var(--accent); }
-.notes-pane { flex: none; height: var(--notes-h, 96px); min-height: 36px; background: var(--surface); }
-.notes-pane textarea { display: block; width: 100%; height: 100%; padding: 8px 16px; border: 0; border-radius: 0; resize: none; background: transparent; font-size: 13px; line-height: 1.7; box-shadow: none; }
-.notes-pane textarea:focus { box-shadow: none; }
+.notes-pane { flex: none; height: var(--notes-h, 96px); min-height: 60px; background: var(--surface); }
+.notes-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.notes-tools { flex: none; display: flex; align-items: center; gap: 2px; padding: 2px 12px; border-bottom: 1px solid var(--line); }
+.notes-tool { min-width: 26px; height: 22px; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: 600 12px/1 inherit; cursor: pointer; }
+.notes-tool:hover { background: var(--accent-soft); }
+.notes-tool[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.notes-tool.tool-italic { font-style: italic; }
+.notes-tool.tool-underline { text-decoration: underline; }
+.notes-tool.tool-strike { text-decoration: line-through; }
+.notes-tools-sep { width: 1px; height: 14px; margin: 0 4px; background: var(--line); }
+.notes-input { display: block; flex: 1; min-height: 0; overflow: auto; padding: 8px 16px; outline: none; font-size: 13px; line-height: 1.7; }
+.notes-input:empty::before { content: attr(data-placeholder); color: var(--muted); pointer-events: none; }
+.notes-input p { margin: 0 0 .3em; }
+.notes-input ul, .notes-input ol { margin: .1em 0 .3em; padding-left: 1.5em; }
+.notes-input a { color: var(--accent); }
 .swatch-dots { display: inline-flex; }
 .swatch-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; margin-left: -5px; box-shadow: 0 0 0 1px rgba(20, 22, 28, .12); }
 .swatch-dots i:first-child { margin-left: 0; }
@@ -745,6 +757,8 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 .pr-notes .pr-notes-slide { position: absolute; left: 78px; top: 70px; }
 .pr-notes-text { position: absolute; left: 78px; right: 78px; top: 470px; bottom: 60px; overflow: hidden; font-size: 14px; line-height: 1.7; }
 .pr-notes-text p { margin: 0 0 4px; }
+.pr-notes-rich p { margin: 0 0 4px; }
+.pr-notes-rich ul, .pr-notes-rich ol { margin: 0 0 4px; padding-left: 1.4em; }
 .pr-comments { padding: 64px 56px 48px; box-sizing: border-box; color: #1a1a1a; }
 .pr-full.pr-comments { padding: 96px 140px; font-size: 32px; }
 .pr-comments h2 { margin: 0 0 16px; font-size: 1.15em; color: #1f3864; }
@@ -1638,7 +1652,8 @@ audio.trim-media { background: transparent; }
 .nv-body { background: var(--canvas); }
 .nv-sheet { display: flex; flex-direction: column; align-items: center; gap: 16px; width: min(720px, 100%); margin: 0 auto; padding: 28px 40px; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .15); }
 .nv-page { width: 640px; max-width: 100%; }
-.nv-notes { width: 100%; min-height: 240px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; font: 14px/1.7 inherit; resize: vertical; box-sizing: border-box; }
+.nv-notes { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box; }
+.nv-notes .notes-input { min-height: 220px; font-size: 14px; }
 /* オンライン プレゼンテーション (public/editor/online.mjs) */
 .online-dialog { width: min(660px, calc(100vw - 32px)); }
 .op-body { display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.6; }

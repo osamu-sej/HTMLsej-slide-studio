@@ -1252,6 +1252,84 @@
     return lines.join("\n");
   }
 
+  // ---------------------------------------------------------------- ノートの書式 (the speaker notes' own rich text)
+  /**
+   * The notes as rich text for the notes pane, the presenter view and the notes pages: words, bold / italic / underline /
+   * strike, bullets and numbers, links and line breaks. Colours, sizes, alignment and indents are left out — the notes keep
+   * each screen's own look (the presenter view has its own colours).
+   */
+  function noteHtml(html) {
+    const box = root.document.createElement("div");
+    box.append(richFragment(String(html ?? "").slice(0, 60_000)));
+    const doc = root.document;
+    for (const el of [...box.querySelectorAll("*")]) {
+      if (el.nodeName === "SPAN") {
+        // Words made bold, italic, underlined or struck with a style (an editor's way) become the tags that mean it.
+        const st = el.getAttribute("style") || "";
+        let inner = [...el.childNodes];
+        const wrap = (tag) => { const t = doc.createElement(tag); t.append(...inner); inner = [t]; };
+        if (/font-weight:\s*(bold|[6-9]00)/i.test(st)) wrap("b");
+        if (/font-style:\s*italic/i.test(st)) wrap("i");
+        if (/text-decoration[^;]*underline/i.test(st)) wrap("u");
+        if (/text-decoration[^;]*line-through/i.test(st)) wrap("s");
+        el.replaceWith(...inner);
+        continue;
+      }
+      for (const attr of [...el.attributes]) {
+        const keep = (el.nodeName === "A" && ["href", "target", "rel"].includes(attr.name)) || (el.nodeName === "OL" && attr.name === "start");
+        if (!keep) el.removeAttribute(attr.name);
+      }
+    }
+    return box.innerHTML;
+  }
+  /** Notes (rich) → the plain words the studio keeps in `notes`: a line per paragraph, "・" before a bullet, "1. " before a number. */
+  function noteToText(html) {
+    const box = root.document.createElement("div");
+    box.append(richFragment(html));
+    const lines = [];
+    const isList = (node) => node.nodeType === 1 && (node.nodeName === "UL" || node.nodeName === "OL");
+    const textOf = (el) => {
+      let out = "";
+      for (const node of el.childNodes) out += node.nodeType === 3 ? node.data : node.nodeName === "BR" ? "\n" : node.nodeType === 1 && !isList(node) ? textOf(node) : "";
+      return out;
+    };
+    const walk = (node, depth = 0) => {
+      for (const child of node.childNodes) {
+        if (child.nodeType !== 1) continue;
+        if (child.nodeName === "P") lines.push(textOf(child).replace(/\n$/, ""));
+        else if (isList(child)) {
+          let n = Math.max(1, Math.round(Number(child.getAttribute("start")) || 1));
+          for (const li of child.childNodes) {
+            if (li.nodeType !== 1 || li.nodeName !== "LI") continue;
+            lines.push(`${"  ".repeat(depth)}${child.nodeName === "OL" ? `${n++}. ` : "・"}${textOf(li).replace(/\n$/, "")}`);
+            for (const sub of li.childNodes) if (isList(sub)) walk({ childNodes: [sub] }, depth + 1);
+          }
+        } else walk(child, depth);
+      }
+    };
+    walk(box);
+    return lines.join("\n");
+  }
+  const sameNotes = (a, b) => String(a ?? "").replace(/[ \t]+(\n|$)/g, "$1").replace(/\s+$/g, "") === String(b ?? "").replace(/[ \t]+(\n|$)/g, "$1").replace(/\s+$/g, "");
+  /** Whether the formatting is worth keeping: anything beyond plain paragraphs (a bold word, a list, a link). */
+  const noteFormatted = (html) => /<(b|i|u|s|a|ul|ol|sup|sub)[ >]/.test(html);
+  /**
+   * What a slide's notes are, for every place that shows them: `rich` (HTML — the slide's `notesRich` when it still says what
+   * `notes` says, else the plain lines as paragraphs), `text` (the plain words) and whether the formatting is in use.
+   */
+  function noteOf(slide) {
+    const text = String(slide?.notes ?? "");
+    const rich = typeof slide?.notesRich === "string" ? noteHtml(slide.notesRich) : "";
+    if (rich && noteFormatted(rich) && sameNotes(noteToText(rich), text)) return { rich, text, formatted: true };
+    return { rich: text.trim() ? textToRich(text) : "", text, formatted: false };
+  }
+  /** Notes typed in the pane: the formatted words and the plain words they make (the formatting kept only when it matters). */
+  function noteFields(html) {
+    const rich = noteHtml(html);
+    const text = noteToText(rich);
+    return { notes: text, notesRich: noteFormatted(rich) && text.trim() ? rich.slice(0, 120_000) : undefined };
+  }
+
   // ---------------------------------------------------------------- objects: kinds, defaults, normalization
 
   const KINDS = ["shape", "text", "image", "line", "icon", "video", "audio", "lottie", "table", "chart", "smartart", "ink", "zoom", "camera", "equation", "model", "poll"];
@@ -3975,7 +4053,7 @@
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
     LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, CHART_STYLES, chartStyleOf, applyChartStyle, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
-    geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
+    geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, noteHtml, noteToText, noteOf, noteFields, noteFormatted, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, masterLayer, morphPairs, MORPH_KINDS, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,
