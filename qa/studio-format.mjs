@@ -1985,6 +1985,12 @@ await step("配布資料マスター・ノート マスター: 用紙の向き�
   assert((await page.textContent(".pr-preview .pr-ph-header")).includes("社内限りの配布資料") && (await page.textContent(".pr-preview .pr-ph-footer")).includes("SEJ"), "the header and footer are on the page");
   assert((await page.textContent(".pr-preview .pr-objects")).includes("全ページの注記"), "and the words every page carries");
   await shot("print-master-page");
+  // The notes pages are drawn on the ノート マスター (one page for each slide, with the slide and the notes on it).
+  await page.selectOption('.print-dialog select[name="layout"]', "notes");
+  await page.selectOption('.print-dialog select[name="range"]', "current");
+  await page.waitForTimeout(500);
+  assert((await page.textContent(".pr-count")).includes("1ページ"), `a notes page: ${await page.textContent(".pr-count")}`);
+  assert((await page.$$(".pr-preview .pr-notes .pr-notes-slide")).length === 1 && (await page.$$(".pr-preview .pr-notes .pr-notes-text")).length === 1, "the slide and the notes are on it");
   await page.keyboard.press("Escape");
   // ノート マスター: the slide and the notes can each be moved; no change keeps nothing.
   await tab("表示");

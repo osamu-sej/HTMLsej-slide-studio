@@ -209,6 +209,7 @@ export function createPrinter(app) {
         Object.assign(box.style, { left: `${master.slide.x}px`, top: `${master.slide.y}px` });
         const n = master.notes;
         page.append(box, h("div", { class: "pr-notes-text", style: { left: `${n.x}px`, top: `${n.y}px`, width: `${n.w}px`, height: `${n.h}px`, right: "auto", bottom: "auto", fontSize: `${n.fs}px` } }, String(deck.slides[i].notes || "").split(/\n/).map((line) => h("p", {}, line || " "))));
+        out.push(page);
         commentsAfter(i);
       }
       return out;
