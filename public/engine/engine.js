@@ -2931,6 +2931,7 @@
       if (stroke && Engine.BRAND_LINES && !Engine.BRAND_LINES.has(stroke)) flag(`線の色 #${stroke} はSEJの線の色（濃紺・黒・グレー）ではありません`);
       if (fill && fill !== "ffffff" && stroke) flag("色の付いた図形に枠線を付けません（SEJテンプレート）");
       if (obj.dataset.shadow) flag("影は付けません（SEJテンプレート）");
+      if (obj.dataset.tshadow) flag("文字に影は付けません（SEJテンプレート）");
       // A table's cells are filled from the same palette.
       for (const td of obj.querySelectorAll("td[data-fill]")) {
         const cellFill = td.dataset.fill.slice(1).toLowerCase();

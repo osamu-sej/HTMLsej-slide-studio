@@ -36,8 +36,8 @@ export function newId() {
 // 既定の図形に設定・既定のテキスト ボックスに設定・既定の線に設定 (kept on the deck as deck.objectDefaults): which
 // parts of an object's look a new shape, text box or line starts with — never its words, place or size.
 export const DEFAULT_STYLE_KEYS = {
-  shape: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
-  text: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
+  shape: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
+  text: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
   line: ["stroke", "strokeW", "dash", "head", "tail", "headSize", "tailSize", "route", "opacity"],
 };
 
@@ -1175,6 +1175,16 @@ export function shadowFromPolar({ distance, angle, blur, opacity, color }) {
 export function reflectionPreset(key) {
   const r = REFLECTIONS.find(([k]) => k === key);
   return r ? { size: r[2], opacity: 0.4, gap: 2 } : null;
+}
+// 文字の効果 (図形の書式 → ワードアートのスタイル → 文字の効果): the same 影 and 光彩, on the letters (smaller than a shape's).
+export const TEXT_GLOW_SIZES = [[6, "3 pt"], [10, "5 pt"], [16, "8 pt"], [24, "12 pt"]];
+/** A gentle shadow of the letters towards one of the eight directions. */
+export function textShadowPreset(key) {
+  return shadowPreset(key, { distance: 3, blur: 4, color: "#000000", opacity: 0.4 });
+}
+/** The text effects an object has, as words ("影・光彩"), or "". */
+export function textEffectsWords(o) {
+  return [o?.tshadow ? "影" : "", o?.tglow ? "光彩" : ""].filter(Boolean).join("・");
 }
 /** The effects an object has, as one line for a button's hint ("影・反射"), or "" when it has none. */
 export function effectsWords(o) {

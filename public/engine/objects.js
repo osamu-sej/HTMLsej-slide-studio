@@ -1663,6 +1663,16 @@
       if (psp) o.psp = psp;
       // フォント → 文字飾り: すべて大文字 / 小型英大文字 (Latin letters only change).
       if (raw.caps === "all" || raw.caps === "small") o.caps = raw.caps;
+      // 文字の効果 (図形の書式 → 文字の効果): 影 (tshadow: how far, how blurred, colour, strength) and 光彩 (tglow: a halo) on the letters themselves.
+      if (raw.tshadow && typeof raw.tshadow === "object") {
+        const color = hexColor(raw.tshadow.color);
+        const shadow = color ? { dx: r2(num(raw.tshadow.dx, -100, 100, 0)), dy: r2(num(raw.tshadow.dy, -100, 100, 0)), blur: r2(num(raw.tshadow.blur, 0, 100, 0)), color: color.toLowerCase(), opacity: r2(num(raw.tshadow.opacity, 0, 1, 1)) } : null;
+        if (shadow && (shadow.dx || shadow.dy || shadow.blur) && shadow.opacity > 0) o.tshadow = shadow;
+      }
+      if (raw.tglow && typeof raw.tglow === "object") {
+        const color = hexColor(raw.tglow.color);
+        if (color) o.tglow = { r: Math.round(num(raw.tglow.r, 1, 100, 8)), color: color.toLowerCase(), opacity: r2(num(raw.tglow.opacity, 0.05, 1, 0.6)) };
+      }
       if (Array.isArray(raw.pad) && raw.pad.length === 4) o.pad = raw.pad.map((v) => num(v, 0, 400, 0));
       if (AUTOFIT[raw.autofit]) o.autofit = raw.autofit;
       // 段組み: the words run in two to four columns.
@@ -2809,6 +2819,7 @@
       "text-decoration-thickness": o.underline && o.uline === "thick" ? ".12em" : null,
       "letter-spacing": o.ls ? `${o.ls}em` : null, "--psp": o.psp ? `${o.psp}em` : null,
       "text-transform": o.caps === "all" ? "uppercase" : null, "font-variant": o.caps === "small" ? "small-caps" : null,
+      "text-shadow": textShadowOf(o),
       "font-family": o.fontFace ? `"${o.fontFace}", sans-serif` : o.font ? FONTS[o.font][1] : null, "white-space": o.wrap === false ? "pre" : null,
     };
     for (const [k, v] of Object.entries(style)) if (v != null) tx.style.setProperty(k, String(v));
@@ -2817,6 +2828,13 @@
   }
 
   const rgbaOf = (hex, a) => `rgba(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(",")},${a})`;
+  /** 文字の効果: the letters' 影 and 光彩 as a CSS text-shadow (the halo is drawn twice, wide then close, so it reads on a light fill). */
+  function textShadowOf(o) {
+    const layers = [];
+    if (o.tshadow) layers.push(`${o.tshadow.dx}px ${o.tshadow.dy}px ${o.tshadow.blur}px ${rgbaOf(o.tshadow.color, o.tshadow.opacity)}`);
+    if (o.tglow) layers.push(`0 0 ${o.tglow.r}px ${rgbaOf(o.tglow.color, o.tglow.opacity)}`, `0 0 ${r2(o.tglow.r / 3)}px ${rgbaOf(o.tglow.color, o.tglow.opacity)}`);
+    return layers.join(", ") || null;
+  }
   /** 図形の効果: 影 and 光彩 are drop-shadow filters, 反射 a mirror below (the browser's box-reflect), on the object's own element. */
   function applyEffects(o, rotEl) {
     const filters = [];
@@ -3688,6 +3706,7 @@
       "data-fill": ["shape", "text"].includes(o.kind) && o.fill !== "none" && !(o.shape === "custom" ? !o.path?.closed : SHAPES[o.shape]?.open) ? o.fill : null,
       "data-stroke": ["shape", "text", "image"].includes(o.kind) && o.stroke !== "none" ? o.stroke : null,
       "data-shadow": o.shadow && ["shape", "text", "image"].includes(o.kind) ? "1" : null,
+      "data-tshadow": o.tshadow && ["shape", "text"].includes(o.kind) ? "1" : null,
       "data-autofit": o.autofit && o.autofit !== "none" ? o.autofit : null, "data-item": o.item || null,
       "data-bbox": Object.values(bounds(o)).map(r2).join(","),
       // Screen readers: a decorative object is skipped; a picture-like object says its alternative text.
