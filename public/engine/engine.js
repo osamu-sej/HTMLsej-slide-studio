@@ -2587,6 +2587,9 @@
     const ownBackground = Engine.backgroundLayer?.(slide, ctx);
     if (ownBackground) root.append(ownBackground);
     root.append(decor);
+    // スライド マスター: what every slide shows (deck.masterObjects) lies under the layout.
+    const masterObjects = Engine.masterLayer?.(deck, slide, ctx);
+    if (masterObjects) root.append(masterObjects);
     const parts = { root, decor, frame, overlay };
     if (!slide) {
       frame.append(h("div", { class: "hs-body", style: { "align-items": "center", "justify-content": "center", color: "var(--muted)" } }, "スライドがありません"));
@@ -2898,7 +2901,7 @@
       return fillOf.get(el);
     };
     for (const el of slideEl.querySelectorAll("*")) {
-      if (el.closest(".hs-sej, .hs-media, .hs-placed, .hs-detail-badge, .hs-drill-badge, .hs-control, .hs-obj-img, .hs-obj-media")) continue;
+      if (el.closest(".hs-sej, .hs-media, .hs-placed, .hs-detail-badge, .hs-drill-badge, .hs-control, .hs-obj-img, .hs-obj-media, .hs-master-layer")) continue;
       const style = root.getComputedStyle(el);
       if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
       if (dropShadow(style.boxShadow)) add(el, "影は付けません（SEJテンプレート）");
@@ -2918,6 +2921,8 @@
     const master = SEJ_MASTER[slideEl.dataset.master] || SEJ_MASTER.content;
     const marks = [SEJ_BOX.logo, SEJ_BOX.secret, SEJ_BOX.internal, SEJ_BOX.copyright, master.slogan, master.rule, master.page ? SEJ_BOX.page : null].filter(Boolean);
     for (const obj of slideEl.querySelectorAll(".hs-obj")) {
+      // The master's objects are checked once, in the master view, not on every slide.
+      if (obj.closest(".hs-master-layer")) continue;
       const field = `obj:${obj.dataset.el}`;
       const flag = (message) => { const key = `${field}|${message}`; if (seen.has(key)) return; seen.add(key); issues.push({ kind: "brand", severity: "warning", field, message }); };
       const fill = obj.dataset.fill ? obj.dataset.fill.slice(1).toLowerCase() : null;

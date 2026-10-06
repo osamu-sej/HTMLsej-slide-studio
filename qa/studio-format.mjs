@@ -1751,6 +1751,61 @@ await step("図形の効果（影・反射・光彩・ぼかし）: メニュー
   assert(await page.getAttribute(q(""), "data-shadow") === null, "and the mark with them");
 });
 
+await step("スライド マスター表示: 全スライド共通の部品を置く・背景グラフィックを表示しない・検索・Undo（SEJのマスターは動かさない）", async () => {
+  await freshSlide();
+  const here = await page.evaluate(() => window.__hsej.deck().slides.indexOf(window.__hsej.slide()));
+  const count = async () => page.evaluate(() => (window.__hsej.deck().masterObjects || []).length);
+  const own = async () => page.evaluate(() => (window.__hsej.slide().elements || []).length);
+  const before = await own();
+  await tab("表示");
+  await byTitle("スライド マスター表示");
+  await page.waitForSelector(".callout-master");
+  assert(await page.evaluate(() => window.__hsej.master()), "the studio is in the master view");
+  assert(/すべてのスライド/.test(await page.textContent(".callout-master")) && /動かせません/.test(await page.textContent(".callout-master")), "the message says what it is and what stays");
+  // A text box pasted here goes to the master, not to the slide.
+  await page.mouse.click(...(await stageAt(1700, 1000)));
+  await pasteClip(null, { text: "マスターの文字Z" });
+  await page.waitForFunction(() => (window.__hsej.deck().masterObjects || []).length === 1, null, { timeout: 5000 });
+  assert((await own()) === before, "the slide's own objects are not touched");
+  assert(await page.evaluate(() => window.__hsej.deck().masterObjects[0].text.includes("マスターの文字Z")), "the words are in the master");
+  await shot("slide-master");
+  // Close; the words are on this slide and on the thumbnails of the others.
+  await page.click(".btn-master-close");
+  await page.waitForTimeout(500);
+  assert(!(await page.$(".callout-master")), "closed");
+  assert((await page.$$eval("#stageBody .hs-master-layer", (els) => els.map((e) => e.textContent).join(""))).includes("マスターの文字Z"), "drawn under this slide");
+  const thumbs = await page.$$eval("#filmstrip .hs-master-layer", (els) => els.length);
+  assert(thumbs >= 2, `the thumbnails of the other slides show it too: ${thumbs}`);
+  // 背景グラフィックを表示しない
+  await tab("デザイン");
+  await byTitle("スライド マスターに置いた図形");
+  await page.waitForTimeout(400);
+  assert(await page.evaluate(() => window.__hsej.slide().hideMaster === true) && !(await page.$("#stageBody .hs-master-layer")), "hidden on this slide");
+  await byTitle("スライド マスターに置いた図形");
+  await page.waitForTimeout(400);
+  assert(!(await page.evaluate(() => window.__hsej.slide().hideMaster)) && (await page.$("#stageBody .hs-master-layer")), "and back");
+  // 検索: the master's words are found, and a click takes you to the master.
+  await page.keyboard.press("Control+f");
+  await page.waitForSelector("#replaceDialog[open]");
+  await page.selectOption("#findScope", "deck");
+  await page.fill("#findInput", "マスターの文字Z");
+  assert(/1か所/.test(await page.textContent("#findCount")), `found: ${await page.textContent("#findCount")}`);
+  assert((await page.textContent("#findHits .find-hit")).includes("マスター"), "listed as the master");
+  await page.click("#findHits .find-hit");
+  await page.waitForSelector(".callout-master");
+  // Undo inside the master view takes the words away; opening another slide leaves the view.
+  // (the two 背景グラフィック toggles above are undo steps of their own, then the paste)
+  for (let i = 0; i < 4 && (await count()) > 0; i += 1) await undo();
+  assert((await count()) === 0, `undone: ${await count()}`);
+  assert(await page.evaluate(() => window.__hsej.master()), "still in the master view after undo");
+  for (let i = 0; i < 4 && (await count()) < 1; i += 1) { await page.keyboard.press("Control+y"); await page.waitForTimeout(300); }
+  assert((await count()) === 1, "redone");
+  await page.click("#filmstrip .film-item >> nth=0");
+  await page.waitForTimeout(400);
+  assert(!(await page.$(".callout-master")) && !(await page.evaluate(() => window.__hsej.master())), "choosing a slide leaves the master view");
+  assert(await page.evaluate((i) => window.__hsej.deck().slides.length > i, here), "the deck is whole");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

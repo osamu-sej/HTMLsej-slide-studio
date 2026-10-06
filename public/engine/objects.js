@@ -3738,6 +3738,25 @@
     return layer;
   }
 
+  /**
+   * スライド マスター: the objects every slide shows (deck.masterObjects), under the layout and the slide's own
+   * objects (the SEJ master's marks stay above all of them). A slide can leave them out (slide.hideMaster).
+   * They are drawn, not interacted with: a screen reader skips them and a click goes through.
+   */
+  function masterLayer(deck, slide, ctx) {
+    const list = Array.isArray(deck?.masterObjects) ? deck.masterObjects : [];
+    if (!list.length || slide?.hideMaster === true) return null;
+    const layer = h("div", { class: "hs-master-layer", "aria-hidden": "true" });
+    for (const o of list) {
+      if (!o || o.hidden || !KINDS.includes(o.kind)) continue;
+      try {
+        const node = objectNode(o, { ...ctx, live: false }, list, undefined);
+        if (node) layer.append(node);
+      } catch { /* a broken object never takes the slide down */ }
+    }
+    return layer.childNodes.length ? layer : null;
+  }
+
   /** The slide's objects as one layer above the layout (the SEJ master stays on top of it). */
   function objectLayer(slide, ctx, opts = {}) {
     const list = Array.isArray(slide?.elements) ? slide.elements : [];
@@ -3830,7 +3849,7 @@
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
     LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
-    corners, bounds, sites, lineEnds, linePath, objectLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
+    corners, bounds, sites, lineEnds, linePath, objectLayer, masterLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,
     normalizeStrokes, inkPath, INK_COLORS, texToMathML,

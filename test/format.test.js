@@ -491,3 +491,33 @@ test("図形の効果: the presets are plain numbers (a direction, a polar shado
   assert.equal(ops.effectsWords({}), "");
   assert.ok(ops.GLOW_COLORS.every(([c]) => /^#[0-9a-f]{6}$/.test(c)) && ops.SHADOW_COLORS.length === 3);
 });
+
+test("スライド マスター: the deck's master objects lie under every slide's own layer; a slide can leave them out", async () => {
+  const { E } = await loadEngine();
+  const master = E.normalizeObjects([{ id: "m1", kind: "text", x: 100, y: 900, w: 600, h: 60, text: "<p>プロジェクト名</p>" }, { id: "m2", kind: "shape", shape: "rect", x: 0, y: 0, w: 50, h: 50, fill: "#dce4f2" }, { id: "bad", kind: "nothing" }]);
+  assert.equal(master.length, 2, "an unknown kind is dropped");
+  const deck = { slides: [], theme: "sej", masterObjects: master };
+  const own = E.normalizeObjects([{ id: "s1", kind: "shape", shape: "rect", x: 300, y: 300, w: 100, h: 100 }]);
+  const slide = { type: "blank", hideTitle: true, elements: own };
+  const draw = (s) => E.render(s, { mode: "present", index: 1, deck: { ...deck, slides: [s] } });
+  const el = draw(slide);
+  const layer = el.querySelector(".hs-master-layer");
+  assert.ok(layer, "the master layer");
+  assert.equal(layer.getAttribute("aria-hidden"), "true", "a screen reader skips what repeats on every slide");
+  assert.equal(layer.querySelectorAll(".hs-obj").length, 2);
+  assert.ok(layer.textContent.includes("プロジェクト名"));
+  // Under the layout (frame) and the slide's own objects in the page, so it is built before them.
+  const kids = [...el.children].map((c) => c.getAttribute("class") || "");
+  const at = (name) => kids.findIndex((c) => c.includes(name));
+  assert.ok(at("hs-master-layer") > -1 && at("hs-master-layer") < at("hs-frame") && at("hs-frame") < at("hs-objects"), kids.join(" | "));
+  assert.equal(el.querySelectorAll(".hs-objects > .hs-obj").length, 1, "the slide's own layer holds only its own objects");
+  // 背景グラフィックを表示しない
+  assert.equal(draw({ ...slide, hideMaster: true }).querySelector(".hs-master-layer"), null);
+  // No master objects, no layer.
+  assert.equal(E.render(slide, { mode: "present", index: 1, deck: { slides: [slide], theme: "sej" } }).querySelector(".hs-master-layer"), null);
+  // Hidden master objects are not drawn.
+  const hidden = draw({ ...slide });
+  assert.ok(hidden);
+  const withHidden = E.render(slide, { mode: "present", index: 1, deck: { slides: [slide], theme: "sej", masterObjects: E.normalizeObjects([{ id: "h", kind: "shape", shape: "rect", x: 0, y: 0, w: 10, h: 10, hidden: true }]) } });
+  assert.equal(withHidden.querySelector(".hs-master-layer"), null, "only hidden objects: no layer");
+});

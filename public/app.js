@@ -564,6 +564,8 @@ function normalizeSlide(raw, index, total) {
   // 背景の書式設定: the slide's own background (an SEJ light colour, a picture).
   const background = E.normalizeBackground?.(slide.background);
   if (background) slide.background = background; else delete slide.background;
+  // 背景グラフィックを表示しない: the deck's master objects stay off this slide.
+  if (slide.hideMaster === true) slide.hideMaster = true; else delete slide.hideMaster;
   // A page brought over from PowerPoint as it looked keeps its title as an object and may use the cover's master.
   if (type === "blank") {
     if (slide.hideTitle === true) slide.hideTitle = true; else delete slide.hideTitle;
@@ -656,6 +658,8 @@ function normalizeDeck(value, base = null) {
     motion: normalizeMotion(meta.motion ?? base?.motion ?? DEFAULT_MOTION),
     memo: String(meta.memo ?? base?.memo ?? "").slice(0, 2000),
     ...(guidesOf(meta.guides ?? base?.guides) ? { guides: guidesOf(meta.guides ?? base?.guides) } : {}),
+    // スライド マスター: the objects every slide shows.
+    ...(masterObjectsOf(meta.masterObjects ?? base?.masterObjects) ? { masterObjects: masterObjectsOf(meta.masterObjects ?? base?.masterObjects) } : {}),
     // スライド番号の開始番号.
     ...(firstNumberOf(meta.firstNumber ?? base?.firstNumber) !== 1 ? { firstNumber: firstNumberOf(meta.firstNumber ?? base?.firstNumber) } : {}),
     // 既定の図形・テキスト ボックス・線.
@@ -675,6 +679,14 @@ function guidesOf(value) {
   const guides = { x: list("x", E.W), y: list("y", E.H) };
   return guides.x.length || guides.y.length ? guides : null;
 }
+
+/** スライド マスター (deck.masterObjects): objects checked as a slide's are, up to 500. */
+function masterObjectsOf(value) {
+  const list = E.normalizeObjects(Array.isArray(value) ? value : []).slice(0, 500);
+  return list.length ? list : null;
+}
+/** The deck's slides and, when it has master objects, the master as one more "slide" (so media and text are found there too). */
+const withMaster = (deck) => (deck?.masterObjects?.length ? [...deck.slides, { elements: deck.masterObjects }] : deck?.slides || []);
 
 /** スライド番号の開始番号 (deck.firstNumber): a whole number from 0 to 9999; 1 unless set. */
 function firstNumberOf(value) {
@@ -953,7 +965,7 @@ let mediaEpoch = 0;
 async function ensureMedia(deck = state.deck) {
   if (!deck) return false;
   let added = false;
-  for (const slide of deck.slides) {
+  for (const slide of withMaster(deck)) {
     for (const src of mediaSources(slide)) {
       if (!src.startsWith("idb:") || mediaUrls[src]) continue;
       try {
@@ -968,7 +980,7 @@ async function ensureMedia(deck = state.deck) {
 
 /** Pictures pasted into JSON (data: URLs) move into the browser store so the deck itself stays small. */
 async function storeInlineMedia(deck) {
-  for (const slide of deck.slides) {
+  for (const slide of withMaster(deck)) {
     if (slide.media?.src?.startsWith("data:")) {
       try { slide.media.src = await putMedia(await dataUrlToBlob(slide.media.src), slide.media.name || ""); } catch { /* keep the data URL */ }
     }
@@ -1109,9 +1121,11 @@ document.fonts?.addEventListener?.("loadingdone", () => {
 
 // Rendered thumbnails are reused until the slide (or its design) changes.
 const thumbCache = new Map();
+/** The master's objects as a string, so a change to them draws every thumbnail again. */
+const masterStamp = () => (state.deck?.masterObjects?.length ? JSON.stringify(state.deck.masterObjects) : "");
 function thumb(index, variant = "film") {
   const fit = fitFor(index);
-  const key = `${variant}|${slideKey(index)}|${fit ? `${fit.fs},${fit.ts},${JSON.stringify(fit.objs ?? "")}` : "-"}|${mediaSources(state.deck.slides[index] || {}).filter((src) => mediaUrls[src]).length}|${mediaEpoch}`;
+  const key = `${variant}|${slideKey(index)}|${masterStamp()}|${fit ? `${fit.fs},${fit.ts},${JSON.stringify(fit.objs ?? "")}` : "-"}|${mediaSources(state.deck.slides[index] || {}).filter((src) => mediaUrls[src]).length}|${mediaEpoch}`;
   const cached = thumbCache.get(key);
   if (cached) return cached;
   const el = E.render(state.deck.slides[index], renderOptions({ index, mode: "thumb", fit: fit ?? undefined }));
@@ -1130,6 +1144,7 @@ function slidePicture(slide, index, deck = state.deck) {
 // ---------------------------------------------------------------- deck lifecycle
 
 function loadDeck(deck, { source = "", keepUndo = false, imported = null, savedDeckId = null, selected = 0 } = {}) {
+  state.masterEdit = false;
   // Opening another deck leaves a shared one (its room keeps the shared deck for the others).
   if (coedit?.active && source !== "共同編集") coedit.disconnect();
   if (autoImageRun) autoImageRun.cancelled = true;
@@ -1320,6 +1335,7 @@ function copyOf(slide) {
 
 function select(index) {
   if (!state.deck) return;
+  state.masterEdit = false;
   stopMotionPreview({ render: false });
   if (state.inline) finishInlineEdit(true);
   if (editor.typing) editor.stopTyping(true);
@@ -2116,7 +2132,7 @@ function renderStage() {
   const final = isFinal(state.deck) && state.mode === "edit";
   document.body.classList.toggle("is-final", final);
   for (const id of ["notesInput", "deckTitleInput", "chatInput", "memoInput"]) { const el = $(id); if (el) el.readOnly = final; }
-  shell.renderMessage(finalCallout() || importCallout());
+  shell.renderMessage(masterCallout() || finalCallout() || importCallout());
   shell.renderStatus();
   if (state.view === "outline") return renderOutline(body);
   if (state.view === "grid") {
@@ -2145,14 +2161,15 @@ function renderStage() {
     return;
   }
   const index = state.selected;
-  const slide = deck.slides[index];
-  const el = E.render(slide, renderOptions({ index, mode: "edit", fit: fitFor(index) ?? undefined }));
+  const master = state.masterEdit;
+  const slide = master ? masterSlide() : deck.slides[index];
+  const el = E.render(slide, renderOptions({ index, mode: "edit", fit: master ? undefined : fitFor(index) ?? undefined }));
   el.classList.add("hs-static");
   const wrap = h("div", { class: "slide-wrap", ondragover: onStageDragOver, ondrop: onStageDrop }, E.mount(el));
   // The slide alone in the middle of the stage; where it is, its notes and the zoom are around it (shell.mjs).
   body.replaceChildren(h("div", { class: "stage-single" }, wrap));
   // Mark what does not fit on the slide itself (red dashed outline) and keep the measurement in step.
-  if (body.offsetParent) {
+  if (body.offsetParent && !master) {
     const result = E.fit(el);
     const brand = E.brandCheck(el).map((issue) => ({ ...issue, slide: index }));
     fitState.byKey.set(slideKey(index), { fs: result.fs, ts: result.ts, ...(result.objs ? { objs: result.objs } : {}), issues: result.issues.map((issue) => ({ ...issue, slide: index })), brand });
@@ -2166,6 +2183,7 @@ function renderStage() {
 
 /** The status bar's 「スライド 3 / 15」 and what the slide is (a deep-dive page, hidden, its layout and build). */
 function slideStatus(index = state.selected) {
+  if (state.masterEdit && state.deck) return { pos: "スライド マスター", detail: `ここに置いた図形・文字・図は全スライド（${state.deck.slides.length}枚）に出ます・SEJのマスターは動かせません` };
   const deck = state.deck;
   const slide = deck?.slides[index];
   if (!slide) return null;
@@ -2312,6 +2330,7 @@ function renderOutline(body) {
 
 function setView(view) {
   state.view = view;
+  if (view !== "single") state.masterEdit = false;
   shell.viewChanged();
   const radio = document.querySelector(`input[name=view][value=${view}]`);
   if (radio) radio.checked = true;
@@ -2360,8 +2379,12 @@ const editorApp = {
   E, h,
   state: () => state,
   deck: () => state.deck,
-  slide: () => (state.deck ? state.deck.slides[state.selected] ?? null : null),
+  slide: () => (state.masterEdit && state.deck ? masterSlide() : state.deck ? state.deck.slides[state.selected] ?? null : null),
   index: () => state.selected,
+  // スライド マスター表示 (表示 → スライド マスター): the objects every slide shows are edited like a slide's own.
+  masterView: () => Boolean(state.masterEdit),
+  openMaster: () => openMaster(),
+  closeMaster: () => closeMaster(),
   isFinal: () => isFinal(state.deck),
   setFinal: (on) => setFinal(on),
   undo: () => undoRedo("undo"),
@@ -2633,13 +2656,20 @@ coedit = createCoedit({
 editor.overlay((list, k) => coedit.overlay(list, k));
 editor.subscribe(() => coedit.sendPresence());
 // Read-only access for the browser checks (qa/studio-objects.mjs): the deck and the slide on the stage.
-window.__hsej = { coedit: () => coedit?.info(), deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection, typing: () => editor.state.typing?.cell ?? (editor.typing ? "text" : null), cellRange: () => editor.cellRange };
+window.__hsej = { coedit: () => coedit?.info(), master: () => Boolean(state.masterEdit), deck: () => state.deck, slide: () => state.deck?.slides[state.selected] ?? null, selection: () => editor.selection, typing: () => editor.state.typing?.cell ?? (editor.typing ? "text" : null), cellRange: () => editor.cellRange };
 
 /**
  * The objects of the slide on the stage changed (one undo step unless told otherwise). Their animations follow:
  * `timeline` replaces them in the same step, and animations of objects that are gone go with them.
  */
 function setObjects(list, { undo = true, timeline = undefined } = {}) {
+  // スライド マスター表示: what is drawn there is the deck's master objects.
+  if (state.masterEdit && state.deck) {
+    if (undo) pushUndo();
+    if (list.length) state.deck.masterObjects = list; else delete state.deck.masterObjects;
+    markChanged({ structural: true });
+    return;
+  }
   const slide = state.deck?.slides[state.selected];
   if (!slide) return;
   if (undo) pushUndo();
@@ -2705,6 +2735,7 @@ function undoAutoHtml() {
 
 /** The animations of the slide on the stage changed (the animation pane and ribbon). */
 function setTimeline(list, { undo = true } = {}) {
+  if (state.masterEdit) { toast("スライド マスターの部品には動きを付けられません"); return; }
   const slide = state.deck?.slides[state.selected];
   if (!slide) return;
   if (undo) pushUndo();
@@ -3387,6 +3418,13 @@ function findHits(m) {
     eachObjectText([slide], visit);
     if (count) hits.push({ index, count, text: first });
   }
+  // スライド マスター: the words of its objects are searched with the deck (index -1).
+  if ($("findScope").value === "deck" && state.deck.masterObjects?.length) {
+    let count = 0;
+    let first = "";
+    eachObjectText([{ elements: state.deck.masterObjects }], (text) => { const ranges = m.ranges(text); if (ranges.length) { count += ranges.length; first ||= findSnippet(text, ranges[0]); } return text; });
+    if (count) hits.push({ index: -1, count, text: first });
+  }
   return hits;
 }
 const findInTitle = (m) => ($("findScope").value === "deck" && m ? m.count(state.deck?.title || "") : 0);
@@ -3397,8 +3435,8 @@ function updateFindCount() {
   const total = hits.reduce((sum, hit) => sum + hit.count, 0) + findInTitle(m);
   $("findCount").textContent = !m ? "資料タイトル・本文・ノート・詳細を対象にします。" : total ? `${total}か所見つかりました（${hits.length}枚のスライド）` : "見つかりませんでした";
   $("replaceAllBtn").disabled = !total;
-  $("findHits").replaceChildren(...hits.slice(0, 200).map((hit) => h("li", {}, h("button", { type: "button", class: "find-hit", title: `${hit.index + 1}枚目へ移動`, onclick: () => { $("replaceDialog").close(); select(hit.index); } },
-    h("b", {}, `${hit.index + 1}枚目`), ` ${hit.text}`, hit.count > 1 ? h("small", {}, `（${hit.count}か所）`) : null))));
+  $("findHits").replaceChildren(...hits.slice(0, 200).map((hit) => h("li", {}, h("button", { type: "button", class: "find-hit", title: `${hit.index + 1}枚目へ移動`, onclick: () => { $("replaceDialog").close(); if (hit.index < 0) openMaster(); else select(hit.index); } },
+    h("b", {}, hit.index < 0 ? "マスター" : `${hit.index + 1}枚目`), ` ${hit.text}`, hit.count > 1 ? h("small", {}, `（${hit.count}か所）`) : null))));
 }
 
 /** Every word of the deck (slides, objects, notes, details) through `fn`: one undo step. */
@@ -3422,6 +3460,7 @@ function replaceAll() {
   pushUndo();
   const swap = (text) => m.replace(text, replacement);
   for (const hit of hits) {
+    if (hit.index < 0) { eachObjectText([{ elements: state.deck.masterObjects }], swap); continue; }
     state.deck.slides[hit.index] = eachText([state.deck.slides[hit.index]], swap)[0];
     eachObjectText([state.deck.slides[hit.index]], swap);
   }
@@ -5965,7 +6004,9 @@ async function portableDeck() {
     bytes += blob.size;
   };
   const missing = [];
-  for (const [index, slide] of deck.slides.entries()) {
+  // スライド マスター: its pictures travel too (the master is the last "slide" of the loop).
+  const master = deck.masterObjects?.length ? { elements: deck.masterObjects } : null;
+  for (const [index, slide] of (master ? [...deck.slides, master] : deck.slides).entries()) {
     if (slide.visualAsset && E.PHOTOS[slide.visualAsset]) await addAsset(slide.visualAsset);
     const src = slide.media?.src;
     if (src?.startsWith("asset:")) await addAsset(src.slice(6));
@@ -6004,6 +6045,7 @@ async function portableDeck() {
       slide.elements = kept;
     }
   }
+  if (master) { if (master.elements?.length) deck.masterObjects = master.elements; else delete deck.masterObjects; }
   return { deck, assets, bytes, missing };
 }
 
@@ -6011,9 +6053,9 @@ async function standaloneHtml({ title, body, boot, data, background = "#07080c",
   const bundle = await engineBundle();
   const fonts = E.fontHref([data.deck.theme]);
   // The Lottie player travels with the file only when a slide has an animation to play.
-  const lottie = player && data.deck.slides.some((slide) => slide.media?.kind === "lottie" || (slide.elements || []).some((o) => o.kind === "lottie")) ? (await fetchText("/vendor/lottie.js")).replace(/<\/script/gi, "<\\/script") : "";
+  const lottie = player && withMaster(data.deck).some((slide) => slide.media?.kind === "lottie" || (slide.elements || []).some((o) => o.kind === "lottie")) ? (await fetchText("/vendor/lottie.js")).replace(/<\/script/gi, "<\\/script") : "";
   // So does three.js, only when a slide has a 3D model.
-  const three = player && data.deck.slides.some((slide) => (slide.elements || []).some((o) => o.kind === "model")) ? await threeBundle() : null;
+  const three = player && withMaster(data.deck).some((slide) => (slide.elements || []).some((o) => o.kind === "model")) ? await threeBundle() : null;
   return `<!doctype html>
 <html lang="ja">
 <head>
@@ -6337,6 +6379,34 @@ function setFinal(on) {
   renderStage();
   editorUi.renderRibbon(true);
 }
+/** The master view's own page: a blank slide whose objects are the deck's master objects (written back by setObjects). */
+function masterSlide() {
+  const slide = (state.masterSlide ||= { type: "blank", hideTitle: true, hideMaster: true, sid: "master" });
+  slide.elements = state.deck?.masterObjects || [];
+  return slide;
+}
+function openMaster() {
+  if (!state.deck || state.mode !== "edit") return;
+  if (state.view !== "single") setView("single");
+  if (editor.typing) editor.stopTyping(true);
+  editor.clear();
+  state.masterEdit = true;
+  renderAll();
+}
+function closeMaster() {
+  if (!state.masterEdit) return;
+  if (editor.typing) editor.stopTyping(true);
+  editor.clear();
+  state.masterEdit = false;
+  renderAll();
+}
+function masterCallout() {
+  if (!state.masterEdit || state.mode !== "edit") return null;
+  return h("div", { class: "callout callout-master" },
+    h("div", { class: "text" }, h("b", {}, "スライド マスター"), "ここに置いた図形・文字・図は、すべてのスライドに出ます（スライドごとにデザイン → 背景グラフィックを表示しないで外せます）。SEJのマスター（ロゴ・秘（B）・社内限り・スローガン・緑線・ページ番号）は動かせません。"),
+    h("button", { class: "btn btn-master-close", type: "button", onclick: () => closeMaster() }, "マスター表示を閉じる"));
+}
+
 function finalCallout() {
   if (!isFinal(state.deck) || state.mode !== "edit") return null;
   return h("div", { class: "callout callout-final" },
