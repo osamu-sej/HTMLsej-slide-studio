@@ -406,6 +406,12 @@ export function createAnimations(editor, app, kit) {
       const type = key === "auto" ? app.deck()?.transition || "fade" : key;
       const keep = (E.TRANSITION_OPTIONS[type] || []).some(([k]) => k === slide()?.transitionDir);
       app.setSlideFields({ transition: key === "auto" ? undefined : key, ...(keep ? {} : { transitionDir: undefined }) });
+      // 変形: say what will travel from the slide before (the same parts: a duplicated slide's, or the same "!!" name).
+      if (key === "morph") {
+        const before = app.deck()?.slides[app.index() - 1];
+        const n = before ? E.morphPairs(before.elements, slide()?.elements).length : 0;
+        app.toast(n ? `前のスライドと同じ部品 ${n} 個がつながって動きます` : "前のスライドと同じ部品がありません（スライドを複製して部品を動かすか、同じ「!!」で始まる名前を付けると、つながって動きます）");
+      }
       if (auto && key !== "auto") app.previewTransition();
     };
     const kinds = [["auto", "資料の設定"], ...Object.entries(E.TRANSITIONS).map(([k, l]) => [k, l.replace(/（.*$/, "")])];

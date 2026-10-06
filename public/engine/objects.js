@@ -3855,11 +3855,60 @@
     return `${base} ${index + 1}`;
   }
 
+  // ---------------------------------------------------------------- 変形 (Morph)
+
+  // What can be the same thing on two slides: not what plays (videos, sounds, animations, 3D models, cameras, polls) or points elsewhere.
+  const MORPH_KINDS = new Set(["shape", "text", "image", "line", "icon", "table", "chart", "smartart", "ink", "equation"]);
+  const morphable = (o) => Boolean(o && !o.hidden && MORPH_KINDS.has(o.kind) && o.id);
+  /** A name that starts with "!!" says "this is the same as the one with this name on the next slide" (as in PowerPoint). */
+  const isMorphName = (name) => typeof name === "string" && name.startsWith("!!") && name.length > 2;
+  /** What makes two parts the same when they were not named: the same words, the same picture, the same icon. */
+  function morphLook(o) {
+    if (o.kind === "image" && o.src) return `image:${o.src}`;
+    if (o.kind === "icon" && o.icon) return `icon:${o.icon}`;
+    if ((o.kind === "shape" || o.kind === "text") && o.text) {
+      const words = richToText(o.text).replace(/\s+/g, " ").trim();
+      if (words) return `${o.kind}:${words}`;
+    }
+    return "";
+  }
+  /**
+   * 画面切り替え「変形」: the objects of the slide being left that are the same as objects of the slide coming in, as
+   * [from, to] pairs. In this order: the same "!!" name; the same id and kind (a duplicated slide keeps its ids, so the
+   * parts moved on the copy are the same parts); the same words, picture or icon where that is only one on each side.
+   */
+  function morphPairs(fromList, toList) {
+    const from = (Array.isArray(fromList) ? fromList : []).filter(morphable);
+    const to = (Array.isArray(toList) ? toList : []).filter(morphable);
+    const pairs = [];
+    const usedFrom = new Set();
+    const usedTo = new Set();
+    const take = (a, b) => { pairs.push([a, b]); usedFrom.add(a); usedTo.add(b); };
+    for (const b of to) {
+      if (!isMorphName(b.name)) continue;
+      const a = from.find((m) => !usedFrom.has(m) && m.name === b.name);
+      if (a) take(a, b);
+    }
+    for (const b of to) {
+      if (usedTo.has(b)) continue;
+      const a = from.find((m) => !usedFrom.has(m) && m.id === b.id && m.kind === b.kind && !isMorphName(m.name));
+      if (a) take(a, b);
+    }
+    const looks = (list, used) => { const map = new Map(); for (const o of list) { if (used.has(o)) continue; const look = morphLook(o); if (look) map.set(look, [...(map.get(look) || []), o]); } return map; };
+    const fromLooks = looks(from, usedFrom);
+    const toLooks = looks(to, usedTo);
+    for (const [look, bs] of toLooks) {
+      const as = fromLooks.get(look);
+      if (as?.length === 1 && bs.length === 1) take(as[0], bs[0]);
+    }
+    return pairs;
+  }
+
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
     LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
     geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
-    corners, bounds, sites, lineEnds, linePath, objectLayer, masterLayer, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
+    corners, bounds, sites, lineEnds, linePath, objectLayer, masterLayer, morphPairs, MORPH_KINDS, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,
     normalizeStrokes, inkPath, INK_COLORS, texToMathML,

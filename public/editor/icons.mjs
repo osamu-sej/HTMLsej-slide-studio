@@ -118,6 +118,7 @@ const P = {
   up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
   animPane: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M7 9h3M7 13h3M7 17h3M12 9h6M12 13h4M12 17h5"/>',
+  qr: '<rect x="4" y="4" width="6" height="6" rx=".6"/><rect x="14" y="4" width="6" height="6" rx=".6"/><rect x="4" y="14" width="6" height="6" rx=".6"/><path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5zM14 18.5v1.5M19 14v1.5"/>',
   sigma: '<path d="M18 5H6.5l6 7-6 7H18"/>',
   fx: '<path d="M10 20c1.2-5 1.4-9 2.4-12 .5-1.5 1.5-2.5 3.1-2.5M7.5 11.5h6.5"/><path d="M14.5 15.5l5 5M19.5 15.5l-5 5"/>',
   sheet: '<rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 9h16M4 14.5h16M10 9v11"/><path d="M13 5.5l4 .1" opacity=".5"/>',
