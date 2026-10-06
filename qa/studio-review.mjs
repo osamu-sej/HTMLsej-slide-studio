@@ -209,7 +209,7 @@ await step("印刷 → コメントを印刷する: a page of comments (and repl
   await page.waitForTimeout(400);
   const handout = await page.$$eval(".pr-preview .pr-sheet", (els) => els.map((el) => (el.querySelector(".pr-comments") ? "comments" : "page")));
   assert(handout.join() === "page,comments", `handouts: the comments at the end: ${handout}`);
-  assert(await page.locator(".pr-preview .pr-comments .pr-foot").count(), "with the page's footer");
+  assert(await page.locator(".pr-preview .pr-comments .pr-ph-pageNo").count(), "with the page's footer");
   await page.evaluate(() => { window.__printed = null; window.print = () => { const r = document.getElementById("printRoot"); window.__printed = { comments: r.querySelectorAll(".pr-comments li").length }; }; });
   await page.click(".print-dialog .pr-go");
   await page.waitForFunction(() => window.__printed, null, { timeout: 8000 });

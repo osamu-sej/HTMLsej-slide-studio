@@ -783,6 +783,42 @@ test("the deck schema accepts every layout, video, details, builds and deck-wide
   });
 });
 
+test("an Excel workbook is read as table cells (formulas and number formats kept)", async () => {
+  const venv = join(root, ".venv", "bin", "python");
+  const python = process.env.PYTHON_BIN || (existsSync(venv) ? venv : "python3");
+  const script = [
+    "import io, sys, zipfile",
+    "buf = io.BytesIO()",
+    "M = 'xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"'",
+    "z = zipfile.ZipFile(buf, 'w')",
+    "z.writestr('xl/workbook.xml', '<workbook ' + M + '><sheets><sheet name=\"売上\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>')",
+    "z.writestr('xl/_rels/workbook.xml.rels', '<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"ws\" Target=\"worksheets/sheet1.xml\"/></Relationships>')",
+    "z.writestr('xl/styles.xml', '<styleSheet ' + M + '><cellXfs count=\"2\"><xf numFmtId=\"0\"/><xf numFmtId=\"3\"/></cellXfs></styleSheet>')",
+    "z.writestr('xl/worksheets/sheet1.xml', '<worksheet ' + M + '><sheetData><row r=\"1\"><c r=\"A1\" s=\"1\"><v>1200</v></c><c r=\"B1\" s=\"1\"><f>A1*2</f><v>2400</v></c></row></sheetData></worksheet>')",
+    "z.close(); sys.stdout.buffer.write(buf.getvalue())",
+  ].join("\n");
+  const child = spawn(python, ["-c", script], { stdio: ["ignore", "pipe", "pipe"] });
+  const chunks = [];
+  child.stdout.on("data", (chunk) => chunks.push(chunk));
+  const [code] = await once(child, "exit");
+  assert.equal(code, 0);
+  const server = await startServer({ PYTHON_BIN: python });
+  try {
+    const done = await server.request("/api/tables/xlsx?name=%E5%A3%B2%E4%B8%8A.xlsx", { method: "POST", headers: { "content-type": "application/octet-stream" }, body: Buffer.concat(chunks) });
+    assert.equal(done.status, 200, await done.clone().text());
+    const { sheets } = await done.json();
+    assert.equal(sheets[0].name, "売上");
+    assert.deepEqual(sheets[0].rows[0].map((c) => [c.text, c.f || null]), [["1,200", null], ["2,400", "=A1*2"]]);
+    const wrong = await server.request("/api/tables/xlsx?name=old.xls", { method: "POST", body: "x" });
+    assert.equal(wrong.status, 400);
+    const broken = await server.request("/api/tables/xlsx?name=broken.xlsx", { method: "POST", body: "not a zip" });
+    assert.equal(broken.status, 422);
+    assert.match((await broken.json()).error, /Excel/);
+  } finally {
+    await server.stop();
+  }
+});
+
 test("an existing PowerPoint is imported into an editable deck and its text can be attached", async (t) => {
   const venv = join(root, ".venv", "bin", "python");
   const python = process.env.PYTHON_BIN || (existsSync(venv) ? venv : "python3");

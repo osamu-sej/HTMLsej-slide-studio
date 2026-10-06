@@ -6,6 +6,7 @@
 
 import * as ops from "./ops.mjs";
 import { autoCorrect, autoCorrectOptions } from "./autocorrect.mjs";
+import { cellPatch, richOf } from "./sheet.mjs";
 
 const SNAP_SCREEN = 7; // px on screen
 const NUDGE = { plain: 5, fine: 1, big: 25 };
@@ -861,6 +862,9 @@ export function createCanvas(app) {
       where = ops.tableOrigin(o, ...(cell || [0, 0]));
       tx = node?.querySelector(`td[data-r="${where[0]}"][data-c="${where[1]}"] .hs-cell-tx`);
       ed.cellRange = null;
+      // Excel スプレッドシート: a formula cell shows its formula while it is edited (what it works out to shows otherwise).
+      const own = o.sheet ? o.cells[where[0]]?.[where[1]] : null;
+      if (own?.f && tx) tx.innerHTML = richOf(own.f);
     }
     if (!tx) return false;
     ed.sel = [id];
@@ -980,6 +984,8 @@ export function createCanvas(app) {
     const head = document.createRange();
     head.setStart(root, 0);
     head.setEnd(range.startContainer, range.startOffset);
+    // A formula in a sheet is left as typed ("<--" or "(c)" in it is not meant as an arrow or a ©).
+    if (t.cell && /^\s*[=＝]/.test(head.toString()) && byId(t.id)?.sheet) return;
     const fix = autoCorrect(head.toString(), typed, { inList: Boolean(at.closest("li")), options: autoCorrectOptions() });
     if (!fix) return;
     const back = (n) => { for (let i = 0; i < n; i += 1) selection.modify("extend", "backward", "character"); };
@@ -997,6 +1003,8 @@ export function createCanvas(app) {
     if (list && t.tx.contains(list) && fix.style !== (fix.list === "bullet" ? "disc" : "decimal")) list.setAttribute("data-style", fix.style);
   }
   function onTypingKey(event) {
+    // F4 (繰り返し) and ⇧F7 (類義語) work while typing too: the box's own handler stops the key from reaching the page's.
+    if ((event.key === "F4" || event.key === "F7") && keydown(event)) { event.stopPropagation(); return; }
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); stopTyping(true); return; }
     if (event.key === "Tab" && ed.typing?.cell) {
       // Tab: the next cell (a new row after the last one), Shift+Tab: the one before.
@@ -1014,6 +1022,16 @@ export function createCanvas(app) {
         to = [byId(id).cells.length - 1, 0];
       }
       if (to) startTyping(id, { cell: to, caret: "all" });
+      return;
+    }
+    // Excel スプレッドシート: Enter ends the cell and goes to the one below (⇧Enter above); ⌥Enter is a new line.
+    if (event.key === "Enter" && ed.typing?.cell && !event.altKey && !event.isComposing && byId(ed.typing.id)?.sheet) {
+      event.preventDefault();
+      event.stopPropagation();
+      const { id, cell: [r, c] } = ed.typing;
+      stopTyping(true);
+      const next = Math.max(0, Math.min(byId(id).cells.length - 1, r + (event.shiftKey ? -1 : 1)));
+      startTyping(id, { cell: [next, c], caret: "all" });
       return;
     }
     if (event.key === "Tab") {
@@ -1092,7 +1110,12 @@ export function createCanvas(app) {
     const empty = !html.replace(/<[^>]+>/g, "").trim();
     if (t.cell) {
       // A cell keeps its words; a table that no longer fits its text grows (rows keep their proportions).
-      let next = save && html !== E.sanitizeRich(t.before) ? ops.tableCells(o, t.cell[0], t.cell[1], t.cell[0], t.cell[1], { text: empty ? undefined : html }) : o;
+      // In a sheet, "=…" typed in a cell is a formula (and typing words over a formula takes it away).
+      const own = o.sheet ? o.cells[t.cell[0]]?.[t.cell[1]] : null;
+      const words = own ? E.richToText(html) : "";
+      const formula = own && (own.f || /^\s*=/.test(words));
+      const patch = formula ? (cell) => cellPatch(cell, words) : { text: empty ? undefined : html };
+      let next = save && html !== E.sanitizeRich(t.before) ? ops.tableCells(o, t.cell[0], t.cell[1], t.cell[0], t.cell[1], patch) : o;
       next = { ...next, ...tableFit(next, t.node) };
       if (next !== o && JSON.stringify(next) !== JSON.stringify(o)) commit(objects().map((item) => (item.id === o.id ? next : item)));
       else { app.rerender(); emit(); }
@@ -1823,6 +1846,23 @@ export function createCanvas(app) {
     // 類義語: the words selected while typing, the text round them, and a pick that takes their place.
     selectedWords: () => (ed.typing && ed.range ? ed.range.toString() : ""),
     typingText: () => ed.typing?.tx.textContent || "",
+    // Excel スプレッドシート: the cell being typed in (the formula bar shows and sets its words).
+    typingCell: () => (ed.typing?.cell ? { id: ed.typing.id, cell: [...ed.typing.cell] } : null),
+    setTypingText(text, { focus = false } = {}) {
+      const t = ed.typing;
+      if (!t?.cell) return false;
+      t.tx.innerHTML = richOf(String(text ?? ""));
+      if (focus) {
+        t.tx.focus({ preventScroll: true });
+        const range = document.createRange();
+        range.selectNodeContents(t.tx);
+        range.collapse(false);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      return true;
+    },
     replaceWords(text) { if (!restoreRange()) return false; document.execCommand("insertText", false, text); return true; },
     removeSelection, duplicateSelection, groupSelection, ungroupSelection, order, alignSelection, distributeSelection, rotateSelection, flipSelection,
     setLocked, setHidden, rename, moveInOrder, copyFormat, pasteFormat,

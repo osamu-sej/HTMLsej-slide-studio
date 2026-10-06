@@ -4,6 +4,8 @@
 // lines on the stage.
 
 import * as ops from "./ops.mjs";
+import * as sheet from "./sheet.mjs";
+import { tableToXlsx } from "./xlsx.mjs";
 import { ico } from "./icons.mjs";
 
 const SAMPLE = {
@@ -37,6 +39,12 @@ const SAMPLES = {
   sunburst: { labels: ["食品/おにぎり", "食品/弁当", "食品/パン", "飲料/お茶", "飲料/コーヒー", "日用品/洗剤", "日用品/ティッシュ"], series: [{ name: "売上（百万円）", values: [42, 35, 18, 24, 20, 9, 6] }] },
 };
 
+// 挿入 → 表 → Excel スプレッドシート: a small sheet with sums, to show how formulas read ("=" starts one).
+const SHEET_SAMPLE = [["項目", "第1四半期", "第2四半期", "合計"], ["店舗", "1,200", "1,350", "=SUM(B2:C2)"], ["宅配", "480", "560", "=SUM(B3:C3)"], ["合計", "=SUM(B2:B3)", "=SUM(C2:C3)", "=SUM(D2:D3)"]];
+// 関数の挿入: the functions a slide's table uses most.
+const FUNCTION_LIST = [["SUM", "合計"], ["AVERAGE", "平均"], ["COUNT", "数値の個数"], ["MIN", "最小値"], ["MAX", "最大値"], ["MEDIAN", "中央値"], ["ROUND", "四捨五入"], ["IF", "条件で分ける"], ["IFERROR", "エラーのとき別の値に"],
+  ["SUMIF", "条件に合うものの合計"], ["COUNTIF", "条件に合うものの個数"], ["AVERAGEIF", "条件に合うものの平均"], ["VLOOKUP", "表から探す"], ["INDEX", "位置の値を取り出す"], ["MATCH", "位置を探す"], ["AND", "すべて満たす"], ["OR", "どれか満たす"], ["CONCAT", "文字をつなぐ"], ["TEXT", "書式を付けた文字"], ["ABS", "絶対値"]];
+
 export function createTableUi(editor, app, kit) {
   const { E, h } = app;
   const { btn, drop, group, col, row, menu, openPop, updater, colors, showTab } = kit;
@@ -57,6 +65,71 @@ export function createTableUi(editor, app, kit) {
     const [made] = editor.insert([o]);
     if (made) { showTab("tableDesign"); editor.startTyping(made.id, { cell: [0, 0] }); }
   }
+  /** 挿入 → 表 → Excel スプレッドシート: a table whose cells can hold formulas. */
+  function insertSheet() {
+    const cells = sheet.cellsFromWords(SHEET_SAMPLE);
+    cells.forEach((row) => row.forEach((cell, c) => { if (c > 0) cell.align = "right"; if (cell.f) { cell.sep = true; cell.dec = 0; } }));
+    const o = { ...ops.makeTable(4, 4, { x: 0, y: 0, w: 1000, h: 4 * 76 }), id: ops.newId(), sheet: true, lastRow: true, cells, cols: [0.34, 0.22, 0.22, 0.22] };
+    const [made] = editor.insert([o]);
+    if (made) { showTab("tableDesign"); editor.startTyping(made.id, { cell: [1, 1], caret: "all" }); app.toast("セルに = から数式を書けます（例：=SUM(B2:B4)）。数式バーは「テーブル デザイン」にあります"); }
+  }
+  /** Rows of cells (from Excel or a CSV) as a sheet table sized for the slide; a big sheet is cut to fit and keeps only its values. */
+  function sheetFromRows(rows, shares) {
+    let grid = rows.map((row) => row.map((cell) => ({ ...cell })));
+    let note = "";
+    if (grid.length > 40 || (grid[0]?.length || 0) > 20) {
+      grid = grid.slice(0, 40).map((row) => row.slice(0, 20));
+      for (const row of grid) for (const cell of row) delete cell.f;
+      note = "表が大きいので 40行×20列までにして、数式は値にしました。";
+    }
+    const widths = Array.isArray(shares) && shares.length >= grid[0].length ? shares.slice(0, grid[0].length) : null;
+    const o = ops.tableFromGrid({ rows: grid });
+    // Numbers sit on the right, as in Excel.
+    o.cells.forEach((row) => row.forEach((cell) => { if (!cell.merged && !cell.align && (cell.f ? !cell.text || sheet.parseNumber(sheet.plainOf(cell.text)) != null : sheet.parseNumber(sheet.plainOf(cell.text)) != null)) cell.align = "right"; }));
+    o.sheet = true;
+    if (widths) { const sum = widths.reduce((a, b) => a + b, 0) || 1; o.cols = widths.map((v) => v / sum); }
+    return { o, note };
+  }
+  /** Words of a CSV file: UTF-8, or Shift_JIS when that is what Excel saved. */
+  async function readCsv(file) {
+    const bytes = await file.arrayBuffer();
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { return new TextDecoder("shift_jis").decode(bytes); }
+  }
+  /** Excel／CSV から表を作る (or, with `into`, in place of the words of a table that is there). */
+  async function importSheet({ into = null } = {}) {
+    const [file] = await app.pickFiles(".xlsx,.xlsm,.csv,.tsv,.txt,text/csv,text/tab-separated-values", false);
+    if (!file) return;
+    try {
+      let data;
+      if (/\.(xlsx|xlsm)$/i.test(file.name)) {
+        app.toast("Excelを読み込んでいます…");
+        const response = await fetch(`/api/tables/xlsx?name=${encodeURIComponent(file.name)}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: file });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || "読み込めませんでした");
+        let pick = body.sheets[0];
+        if (body.sheets.length > 1) {
+          const answer = await app.ask("シートを選ぶ", `どのシートを表にしますか（番号）：${body.sheets.map((x, i) => `${i + 1}＝${x.name}`).join("　")}`, "1");
+          if (answer == null) return;
+          pick = body.sheets[Math.max(0, Math.min(body.sheets.length - 1, (parseInt(String(answer).normalize("NFKC"), 10) || 1) - 1))];
+        }
+        data = { rows: pick.rows.map((row) => row.map((cell) => (cell.text ? { ...cell, text: sheet.richOf(cell.text) } : { ...cell }))), cols: pick.cols };
+      } else {
+        const words = sheet.parseCsv(await readCsv(file));
+        if (!words.length) throw new Error("表にできるデータがありませんでした");
+        data = { rows: sheet.cellsFromWords(words) };
+      }
+      const { o, note } = sheetFromRows(data.rows, data.cols);
+      if (into) {
+        editor.commit(editor.objects().map((x) => (x.id === into ? { ...x, ...o, id: x.id, x: x.x, y: x.y } : x)), { select: [into] });
+      } else {
+        const [made] = editor.insert([{ ...o, id: ops.newId() }]);
+        if (made) showTab("tableDesign");
+      }
+      app.toast(`${file.name} を表にしました（${o.cells.length}行×${o.cells[0].length}列）${note ? ` ${note}` : ""}`);
+    } catch (error) {
+      app.toast(error?.message || "読み込めませんでした");
+    }
+  }
   /** The grid under 表: hover to pick rows × columns (PowerPoint's 10 × 8), or type the numbers. */
   function tablePicker() {
     return (close) => {
@@ -75,7 +148,9 @@ export function createTableUi(editor, app, kit) {
           const answer = await app.ask("表の挿入", "列数 × 行数（例：4 × 5）", "4 × 5");
           const m = /(\d+)\s*[×xX*,\s]\s*(\d+)/.exec(answer || "");
           if (m) insertTable(Math.min(40, Math.max(1, Number(m[2]))), Math.min(20, Math.max(1, Number(m[1]))));
-        } }, ico("table"), "表の挿入…（列数と行数を指定）"));
+        } }, ico("table"), "表の挿入…（列数と行数を指定）"),
+        h("button", { type: "button", class: "tb-pick-more", "data-sheet": "insert", title: "セルに数式（=SUM(B2:B4) など）を書ける表を入れます", onclick: () => { close(); insertSheet(); } }, ico("sheet"), "Excel スプレッドシート"),
+        h("button", { type: "button", class: "tb-pick-more", "data-sheet": "import", title: "Excelのブック（.xlsx）やCSVを表にします（数式・桁区切り・%・結合セルはそのまま）", onclick: () => { close(); importSheet(); } }, ico("save"), "Excel／CSV から表を作る…"));
     };
   }
   function insertChart(type) {
@@ -188,6 +263,107 @@ export function createTableUi(editor, app, kit) {
     dialog.showModal();
   }
 
+  // ---------------------------------------------------------------- Excel スプレッドシート: formulas, number formats, the formula bar, Excel and CSV files
+
+  const isSheet = () => Boolean(table()?.sheet);
+  /** The picked cells of a sheet (typing in one, or a dragged block) — not "the whole table". */
+  const sheetCells = () => { const x = target(); return x?.o.sheet && x.cells ? x : null; };
+  function toggleSheet() {
+    const o = table();
+    if (!o) return;
+    if (o.sheet) {
+      change((x) => ({ ...x, sheet: undefined, cells: x.cells.map((row) => row.map((cell) => { const { f, ...rest } = cell; return rest; })) }));
+      app.toast("数式を使うのをやめました（表に見えている値はそのまま残ります）");
+    } else {
+      change((x) => ({ ...x, sheet: true, cells: x.cells.map((row) => row.map((cell) => (cell.merged || !/^\s*[=＝]/.test(sheet.plainOf(cell.text)) ? cell : sheet.enterText(cell, sheet.plainOf(cell.text))))) }));
+      app.toast("セルに = から数式を書けます（例：=SUM(B2:B4)）。セルをダブルクリックして入力します");
+    }
+  }
+  /** オートSUM: the numbers right above the picked cell (else to its left). */
+  function autoSum() {
+    const x = sheetCells();
+    if (!x) { app.toast("数式を使う表で、合計を入れるセルを選んでください（ダブルクリック）"); return; }
+    const f = sheet.autoSum(x.o.cells, x.r0, x.c0);
+    if (!f) { app.toast("セルの上か左に数字が並んでいません"); return; }
+    change((o) => ops.tableCells(o, x.r0, x.c0, x.r0, x.c0, (cell) => sheet.cellPatch(cell, f)));
+  }
+  /** 下方向へコピー・右方向へコピー: the first row (column) of the picked block over the rest; formulas move with their cell. */
+  function fill(axis) {
+    const x = sheetCells();
+    if (!x || (x.r0 === x.r1 && x.c0 === x.c1)) { app.toast("コピー先までドラッグで選んでください（いちばん上の行・左の列が元になります）"); return; }
+    change((o) => ({ ...o, cells: sheet.fillBlock(o.cells, x.r0, x.c0, x.r1, x.c1, axis) }));
+  }
+  /** 桁数・桁区切り・％・¥ on the picked cells (a formula's result takes the setting; a typed number is rewritten). */
+  function restyle(op) {
+    const x = target();
+    if (!x?.cells) { app.toast("数字のセルを選んでください"); return; }
+    change((o) => ops.tableCells(o, x.r0, x.c0, x.r1, x.c1, (cell) => sheet.restyleNumber(cell, op)));
+  }
+  const fileBase = () => String(app.deck?.()?.title || "表").replace(/[\\/:*?"<>|]/g, "_");
+  /** The table as it is now (typing in a cell ends first). */
+  function settled() {
+    const o = table();
+    if (!o) return null;
+    const id = o.id;
+    editor.stopTyping(true);
+    return editor.objects().find((x) => x.id === id) || null;
+  }
+  function saveXlsx() {
+    const o = settled();
+    if (!o) return;
+    app.download(new Blob([tableToXlsx(o, { name: "表" })], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `${fileBase()}_表.xlsx`);
+    app.toast("Excelのファイルにしました。Excelで編集して「Excel／CSV から」で読み込み直せます");
+  }
+  function saveCsv() {
+    const o = settled();
+    if (!o) return;
+    app.download(new Blob(["\ufeff", sheet.toCsv(sheet.tableWords(o))], { type: "text/csv;charset=utf-8" }), `${fileBase()}_表.csv`);
+  }
+  function functionMenu() {
+    return menu([{ head: "関数の挿入（セルの数式に書き足す）" }, ...FUNCTION_LIST.map(([name, words]) => ({ label: `${name}　${words}`, run: () => insertFunction(name) }))]);
+  }
+  function insertFunction(name) {
+    const at = editor.typingCell();
+    const o = at && editor.objects().find((x) => x.id === at.id);
+    if (!o?.sheet) { app.toast("数式を入れるセルをダブルクリックしてから選んでください（数式を使う表）"); return; }
+    const now = editor.typingText();
+    editor.setTypingText(`${/^\s*=/.test(now) ? now : "="}${name}(`, { focus: true });
+    syncBar?.();
+  }
+  let syncBar = null;
+  // The formula bar mirrors the cell being typed in (a formula shows as the formula); one listener serves every build of the tab.
+  document.addEventListener("input", (event) => { if (event.target?.classList?.contains("ed-typing-tx")) syncBar?.(); });
+  /** 数式バー: the cell's name, 関数の挿入, and the words (or formula) of the cell being typed in. */
+  function formulaBar() {
+    const name = h("span", { class: "tb-fname", "aria-label": "セルの位置" }, "");
+    const input = h("input", { type: "text", class: "tb-fx", "data-keeps-text": "", spellcheck: "false", autocomplete: "off", "aria-label": "数式バー", disabled: true, placeholder: "数式を使う表のセルをダブルクリック" });
+    const here = () => { const at = editor.typingCell(); const o = at && editor.objects().find((x) => x.id === at.id); return o?.sheet ? { o, id: at.id, cell: at.cell } : null; };
+    const sync = () => {
+      const c = here();
+      name.textContent = c ? sheet.cellName(...c.cell) : "";
+      input.disabled = !c;
+      input.placeholder = c ? "数式は = から（例：=SUM(B2:B4)）" : "数式を使う表のセルをダブルクリック";
+      if (document.activeElement !== input) input.value = c ? editor.typingText() : "";
+      const value = c ? sheet.valueAt(c.o.cells, ...c.cell) : null;
+      input.title = value instanceof sheet.SheetError ? `${value.code}：${sheet.ERROR_HINTS[value.code] || ""}` : "数式バー（Enterで確定・Escで取り消し）";
+    };
+    syncBar = sync;
+    updater(sync);
+    input.addEventListener("input", () => editor.setTypingText(input.value));
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      const c = here();
+      if (event.key === "Escape") { event.preventDefault(); editor.stopTyping(false); return; }
+      if (event.key !== "Enter" || event.isComposing || !c) return;
+      event.preventDefault();
+      editor.setTypingText(input.value);
+      editor.stopTyping(true);
+      editor.startTyping(c.id, { cell: [Math.min(c.o.cells.length - 1, c.cell[0] + 1), c.cell[1]], caret: "all" });
+    });
+    sync();
+    return h("div", { class: "tb-fbar" }, name, drop("fx", "", "関数の挿入（SUM・AVERAGE・IF など）", () => functionMenu(), { enabled: isSheet, keep: true }), input);
+  }
+
   // ---------------------------------------------------------------- the contextual tabs
 
   const isTable = () => Boolean(table());
@@ -224,6 +400,22 @@ export function createTableUi(editor, app, kit) {
         col(drop("weight", "ペンの太さ", "罫線を引くペンの太さ", () => menu([{ head: "ペンの太さ" }, ...PEN_WIDTHS.map(([w, label]) => ({ label, on: pen.w === w, run: () => { pen.w = w; } }))]), { enabled: isTable, keep: true }),
           drop("outline", "ペンの色", "罫線を引くペンの色（SEJの線の色）", () => colors(E.PALETTE.line, pen.c, (c) => { if (c !== "none") pen.c = c; }, { custom: false }), { enabled: isTable, keep: true, swatch: () => pen.c })),
         drop("borders", "罫線", "選んだセル（なければ表全体）に罫線を引く・消す：下・上・左・右・枠なし・格子・外枠・内側（ペンの色と太さで）", () => bordersMenu(), { big: true, enabled: isTable, keep: true })),
+      group("数式",
+        btn("sheet", "数式を使う", "表のセルに数式（=SUM(B2:B4) など）を書けるようにする。もう一度押すと値だけの表に戻ります", () => toggleSheet(), { big: true, enabled: isTable, keep: true, pressed: isSheet }),
+        col(btn("sigma", "オートSUM", "選んだセルに、すぐ上（なければ左）の数字の合計を入れる", () => autoSum(), { enabled: isSheet, keep: true }),
+          btn("fillDown", "下へコピー", "選んだ範囲の一番上のセルを下へコピー（数式のセルの参照は動きます）", () => fill("down"), { enabled: isSheet, keep: true }),
+          btn("fillRight", "右へコピー", "選んだ範囲の一番左のセルを右へコピー（数式のセルの参照は動きます）", () => fill("right"), { enabled: isSheet, keep: true }))),
+      group("数値の書式",
+        row(btn("percent", "", "パーセント表示（％）：数式の結果と入力した数字に", () => restyle("pct"), { enabled: isTable, keep: true }),
+          btn("yen", "", "円の記号（¥）を付ける・外す", () => restyle("yen"), { enabled: isTable, keep: true }),
+          btn("thousands", "", "桁区切り（,）を付ける・外す", () => restyle("sep"), { enabled: isTable, keep: true })),
+        row(btn("decMore", "", "小数点以下の桁数を増やす", () => restyle("decMore"), { enabled: isTable, keep: true }),
+          btn("decLess", "", "小数点以下の桁数を減らす", () => restyle("decLess"), { enabled: isTable, keep: true }))),
+      group("数式バー", formulaBar()),
+      group("Excel／CSV",
+        col(btn("save", "Excel に保存", "この表を Excel のファイル（.xlsx）にする（数式もそのまま）。Excelで直したあと「Excel／CSV から」で読み込み直せます", () => saveXlsx(), { enabled: isTable, keep: true }),
+          btn("save", "CSV に保存", "この表の値をCSV（UTF-8）にする", () => saveCsv(), { enabled: isTable, keep: true })),
+        btn("sheet", "Excel／CSV から", "Excelのブック（.xlsx）かCSVを読み込んで、この表の内容を置き換える（数式・桁区切り・結合セルはそのまま）", () => importSheet({ into: table()?.id }), { big: true, enabled: isTable, keep: true })),
     ];
   }
   // セルの余白 (PowerPoint's cell margins): 標準 is the style's own; the others set each cell's padding (cm).

@@ -10,7 +10,8 @@ export function createSynonyms(app, editor) {
   function open(initial) {
     const typed = editor.typing ? editor.selectedWords().trim() : "";
     const canReplace = Boolean(typed);
-    const dialog = h("dialog", { class: "syn-dialog", "aria-label": "類義語" });
+    // data-keeps-text: looking a word up does not end the typing it came from (the pick takes the words' place there).
+    const dialog = h("dialog", { class: "syn-dialog", "aria-label": "類義語", "data-keeps-text": "" });
     const input = h("input", { type: "text", name: "word", "aria-label": "調べる言葉", maxlength: "40", placeholder: "調べたい言葉", value: (initial ?? typed).trim().slice(0, 40) });
     const list = h("div", { class: "syn-list", "aria-live": "polite" });
     const status = h("p", { class: "hint syn-status" });

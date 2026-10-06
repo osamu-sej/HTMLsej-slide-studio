@@ -3,7 +3,7 @@
 // 比較 with a deck in the library (a changed slide taken back), インクの非表示, and the right-click menu's 図として保存,
 // リンクを開く / リンクの削除 and 図とサイズのリセット.
 // Usage: node qa/studio-format.mjs [--base=http://127.0.0.1:8787]   (with `npm start` running)
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1847,6 +1847,159 @@ await step("類義語（⇧F7・校閲）: 選んだ言葉の言い換えが出�
   await page.fill('.syn-dialog [name="word"]', "ＫＰＩ");
   assert(/辞書に見つかりません/.test(await page.textContent(".syn-dialog .syn-status")), "an unknown word says so");
   await page.keyboard.press("Escape");
+});
+
+await step("Excel スプレッドシート: 数式つきの表（挿入・数式バー・オートSUM・桁区切り・Excel/CSVの保存と読み込み）", async () => {
+  await freshSlide();
+  const table = async () => (await slide()).elements.filter((o) => o.kind === "table").at(-1);
+  const words = (o, r, c) => (o.cells[r][c].text || "").replace(/<[^>]+>/g, "");
+  await tab("挿入");
+  await ribbonBtn("表");
+  await page.waitForSelector(".tb-pick");
+  await page.click('.tb-pick-more[data-sheet="insert"]');
+  await page.waitForFunction(() => (window.__hsej.slide().elements || []).some((o) => o.kind === "table" && o.sheet), null, { timeout: 5000 });
+  let o = await table();
+  assert(words(o, 1, 3) === "2,550" && words(o, 3, 3) === "3,590", `the sums are worked out: ${words(o, 1, 3)} ${words(o, 3, 3)}`);
+  assert(o.cells[1][3].f === "=SUM(B2:C2)", "the formula is kept");
+  // Typing starts in B2: the formula bar names the cell and shows its words.
+  await page.waitForSelector(".tb-fx:not([disabled])");
+  assert((await page.textContent(".tb-fname")) === "B2" && (await page.inputValue(".tb-fx")) === "1,200", "the bar shows B2");
+  await shot("sheet");
+  // Changing B2 in the bar re-works every sum; Enter goes down to B3.
+  await page.fill(".tb-fx", "2,000");
+  await page.press(".tb-fx", "Enter");
+  await page.waitForFunction(() => { const t = window.__hsej.slide().elements.find((x) => x.kind === "table"); return /3,350/.test(t.cells[1][3].text || ""); }, null, { timeout: 5000 });
+  o = await table();
+  assert(words(o, 3, 3) === "4,390", `the total follows: ${words(o, 3, 3)}`);
+  assert((await page.textContent(".tb-fname")) === "B3", "Enter moved down to B3");
+  // A formula typed in the cell itself; while it is edited the cell shows the formula.
+  await page.keyboard.type("=B2*2");
+  assert((await page.inputValue(".tb-fx")) === "=B2*2", "typing in the cell shows in the bar");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => window.__hsej.slide().elements.find((x) => x.kind === "table").cells[2][1].f === "=B2*2", null, { timeout: 5000 });
+  o = await table();
+  assert(words(o, 2, 1) === "4000", `=B2*2 is 4000: ${words(o, 2, 1)}`);
+  assert((await page.textContent(".tb-fname")) === "B4" && (await page.inputValue(".tb-fx")) === "=SUM(B2:B3)", "B4 shows its formula while it is edited");
+  // 0 で割る: the error shows in the cell.
+  await page.fill(".tb-fx", "=1/0");
+  await page.press(".tb-fx", "Enter");
+  await page.waitForFunction(() => /#DIV\/0!/.test(window.__hsej.slide().elements.find((x) => x.kind === "table").cells[3][1].text || ""), null, { timeout: 5000 });
+  // 関数の挿入 puts a function in the cell being edited.
+  await page.keyboard.press("Escape");
+  await page.locator("#stageBody .hs-obj td[data-r='3'][data-c='2']").first().dblclick();
+  await page.waitForSelector(".tb-fx:not([disabled])");
+  await page.fill(".tb-fx", "=");
+  await page.click('.tb-fbar .rb-drop');
+  await menuItem("AVERAGE");
+  await page.waitForTimeout(200);
+  assert(/^=AVERAGE\($/.test(await page.inputValue(".tb-fx")), `the function is typed: ${await page.inputValue(".tb-fx")}`);
+  await page.keyboard.type("C2:C3)");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => window.__hsej.slide().elements.find((x) => x.kind === "table").cells[3][2].f === "=AVERAGE(C2:C3)", null, { timeout: 5000 });
+  assert(words(await table(), 3, 2) === "955", `the average: ${words(await table(), 3, 2)}`);
+  await page.keyboard.press("Escape");
+  // Excel に保存: a workbook that keeps the formulas.
+  const [download] = await Promise.all([page.waitForEvent("download"), ribbonBtn("Excel に保存")]);
+  const xlsx = join(outDir, "format-sheet.xlsx");
+  await download.saveAs(xlsx);
+  assert(/\.xlsx$/.test(download.suggestedFilename()) || download.suggestedFilename() === "download", `an .xlsx: ${download.suggestedFilename()}`);
+  const inside = execFileSync("python3", ["-c", `import zipfile,sys;z=zipfile.ZipFile("${xlsx}");print(z.read("xl/worksheets/sheet1.xml").decode())`]).toString();
+  assert(inside.includes("<f>SUM(B2:C2)</f>") && inside.includes("<f>B2*2</f>") && inside.includes("<f>AVERAGE(C2:C3)</f>"), "the formulas are in the workbook");
+  // CSV に保存: UTF-8 with the values.
+  const [csvDownload] = await Promise.all([page.waitForEvent("download"), ribbonBtn("CSV に保存")]);
+  const csvFile = join(outDir, "format-sheet.csv");
+  await csvDownload.saveAs(csvFile);
+  assert((await readFile(csvFile, "utf8")).includes('店舗,"2,000","1,350","3,350"'), "the CSV has the values as they are shown (as Excel saves them)");
+  // Excel／CSV から: the workbook read back in place of this table keeps formulas and the values.
+  await page.locator("#stageBody .hs-obj td[data-r='1'][data-c='1']").first().click();
+  await withFiles([xlsx], () => ribbonBtn("Excel／CSV から"));
+  await page.waitForFunction(() => window.__hsej.slide().elements.find((x) => x.kind === "table").cells[1][3].f === "=SUM(B2:C2)", null, { timeout: 15000 });
+  o = await table();
+  assert(o.sheet && words(o, 1, 3) === "3,350" && o.cells[2][1].f === "=B2*2" && words(o, 3, 2) === "955", `read back: ${words(o, 1, 3)} ${words(o, 3, 2)}`);
+  // A CSV makes a new table; オートSUM adds the column above, 桁区切り rewrites a typed number.
+  const csv = join(outDir, "format-in.csv");
+  await writeFile(csv, "項目,金額\n売上,1200\n費用,800\n差引,=B2-B3\n");
+  await tab("挿入");
+  await ribbonBtn("表");
+  await page.waitForSelector(".tb-pick");
+  await withFiles([csv], () => page.click('.tb-pick-more[data-sheet="import"]'));
+  await page.waitForFunction(() => (window.__hsej.slide().elements || []).filter((o) => o.kind === "table").length === 2, null, { timeout: 8000 });
+  o = await table();
+  assert(o.sheet && o.cells[3][1].f === "=B2-B3" && words(o, 3, 1) === "400", `the CSV's formula works: ${words(o, 3, 1)}`);
+  assert(o.cells[1][1].align === "right", "numbers sit on the right");
+  await page.locator("#stageBody .hs-obj").last().locator("td[data-r='3'][data-c='1']").dblclick();
+  await tab("テーブル デザイン");
+  await ribbonBtn("オートSUM");
+  await page.waitForFunction(() => window.__hsej.slide().elements.filter((x) => x.kind === "table").at(-1).cells[3][1].f === "=SUM(B2:B3)", null, { timeout: 5000 });
+  assert(words(await table(), 3, 1) === "2000", "オートSUM: 1200 + 800");
+  await page.keyboard.press("Escape");
+  await page.locator("#stageBody .hs-obj").last().locator("td[data-r='1'][data-c='1']").dblclick();
+  await byTitle("桁区切り");
+  await page.waitForFunction(() => /1,200/.test(window.__hsej.slide().elements.filter((x) => x.kind === "table").at(-1).cells[1][1].text || ""), null, { timeout: 5000 });
+  await page.keyboard.press("Escape");
+  // 数式を使う をやめる: the values stay, the formulas go.
+  await byTitle("表のセルに数式");
+  await page.waitForFunction(() => !window.__hsej.slide().elements.filter((x) => x.kind === "table").at(-1).sheet, null, { timeout: 5000 });
+  o = await table();
+  assert(!o.cells.flat().some((c) => c.f) && words(o, 3, 1) === "2000", "values only");
+  await shot("sheet-csv");
+});
+
+await step("配布資料マスター・ノート マスター: 用紙の向き・ヘッダーとフッター・全ページの文字を決め、印刷が従い、1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("表示");
+  await byTitle("配布資料マスター");
+  await page.waitForSelector(".pm-dialog[open]");
+  assert((await page.$$(".pm-dialog .pm-slotbox")).length === 6, "six slides on a handout page to begin with");
+  const wide = () => page.$eval(".pm-dialog .pm-sheet", (el) => el.getBoundingClientRect().width);
+  const w0 = await wide();
+  await page.selectOption(".pm-dialog .pm-form > label:first-child select", "landscape");
+  assert((await wide()) > w0 * 1.2, "the page turns sideways");
+  await page.fill('.pm-dialog input[aria-label="ヘッダーの文字"]', "社内限りの配布資料");
+  await page.check('.pm-dialog input[data-hf="footer"]');
+  await page.fill('.pm-dialog input[aria-label="フッターの文字"]', "SEJ");
+  await page.click(".pm-add-text");
+  await page.fill(".pm-obj-text", "全ページの注記");
+  assert(await page.locator(".pm-dialog .pm-page .pr-objects").textContent().then((t) => t.includes("全ページの注記")), "the words are on the page");
+  // The header is dragged down and to the right.
+  const box = await page.locator('.pm-dialog [data-pm="header"]').boundingBox();
+  await page.mouse.move(box.x + 6, box.y + 4);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 86, box.y + 44, { steps: 4 });
+  await page.mouse.up();
+  await shot("print-master");
+  await page.click(".pm-ok");
+  await page.waitForFunction(() => window.__hsej.deck().printMasters?.handout, null, { timeout: 5000 });
+  const m = await page.evaluate(() => window.__hsej.deck().printMasters.handout);
+  assert(m.orientation === "landscape" && m.header.text === "社内限りの配布資料" && m.footer.on === true && m.footer.text === "SEJ", `kept: ${JSON.stringify(m).slice(0, 200)}`);
+  assert(m.header.x > 48 + 100 && m.header.y > 22 + 40, `the header moved: ${m.header.x},${m.header.y}`);
+  assert(m.objects.length === 1 && /全ページの注記/.test(m.objects[0].text), "the words are kept");
+  // 印刷 starts from it: the fields, a sideways page, the words on every page.
+  await page.keyboard.press("Control+p");
+  await page.waitForSelector(".print-dialog[open] .pr-sheet");
+  await page.selectOption('.print-dialog select[name="layout"]', "h6");
+  await page.waitForTimeout(500);
+  assert((await page.inputValue('.print-dialog input[name="headerText"]')) === "社内限りの配布資料" && (await page.isChecked('.print-dialog input[name="footer"]')), "the header and footer fields start as the master has them");
+  const sheet = await page.$eval(".pr-preview .pr-sheet", (el) => ({ w: el.getBoundingClientRect().width, h: el.getBoundingClientRect().height }));
+  assert(sheet.w > sheet.h, `a landscape page: ${JSON.stringify(sheet)}`);
+  assert((await page.textContent(".pr-preview .pr-ph-header")).includes("社内限りの配布資料") && (await page.textContent(".pr-preview .pr-ph-footer")).includes("SEJ"), "the header and footer are on the page");
+  assert((await page.textContent(".pr-preview .pr-objects")).includes("全ページの注記"), "and the words every page carries");
+  await shot("print-master-page");
+  await page.keyboard.press("Escape");
+  // ノート マスター: the slide and the notes can each be moved; no change keeps nothing.
+  await tab("表示");
+  await byTitle("ノート マスター");
+  await page.waitForSelector('.pm-dialog[open] [data-pm="slide"]');
+  assert(await page.$('.pm-dialog [data-pm="notes"]'), "the notes box is there too");
+  await page.click('.pm-dialog [data-pm="slide"]');
+  assert(await page.$(".pm-dialog .pm-box.sel .pm-grip"), "a chosen box has its size handle");
+  await shot("notes-master");
+  await page.click(".pm-ok");
+  await page.waitForTimeout(300);
+  assert(!(await page.evaluate(() => window.__hsej.deck().printMasters?.notes)), "nothing was changed, nothing is kept");
+  // ⌘Z takes the handout master back.
+  await undo();
+  assert(!(await page.evaluate(() => window.__hsej.deck().printMasters?.handout)), "one ⌘Z undoes the whole master");
 });
 
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
