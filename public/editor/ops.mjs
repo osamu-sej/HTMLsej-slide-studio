@@ -1134,3 +1134,45 @@ export function snapToPalette(o, P) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------- 図形の効果 (影・反射・光彩・ぼかし)
+// What PowerPoint's 図形の効果 ▾ offers, as plain data and pure functions: the studio stores `shadow`, `reflect`, `glow`
+// and `soft` on a shape, text box or picture (objects.js normalizes and draws them). Sizes are pt in the screens (2 px each).
+
+export const SHADOW_DIRECTIONS = [["br", "右下", 1, 1], ["b", "下", 0, 1], ["bl", "左下", -1, 1], ["r", "右", 1, 0], ["l", "左", -1, 0], ["tr", "右上", 1, -1], ["t", "上", 0, -1], ["tl", "左上", -1, -1]];
+export const SHADOW_COLORS = [["#000000", "黒"], ["#1f3864", "濃紺"], ["#808080", "グレー"]];
+export const REFLECTIONS = [["small", "小（近接）", 0.25], ["medium", "中", 0.5], ["large", "大（全反射）", 0.9]];
+export const GLOW_SIZES = [[10, "5 pt"], [16, "8 pt"], [22, "11 pt"], [36, "18 pt"]];
+export const GLOW_COLORS = [["#1f3864", "濃紺"], ["#808080", "グレー"], ["#b7c3da", "青灰"], ["#d6c9b8", "淡茶"]];
+export const SOFT_SIZES = [[2, "1 pt"], [5, "2.5 pt"], [10, "5 pt"], [20, "10 pt"], [50, "25 pt"], [100, "50 pt"]];
+
+/** An outer shadow towards one of the eight directions (the first column of the 影 gallery). */
+export function shadowPreset(key, { distance = 8, blur = 10, color = "#000000", opacity = 0.35 } = {}) {
+  const dir = SHADOW_DIRECTIONS.find(([k]) => k === key);
+  return dir ? { dx: dir[2] * distance, dy: dir[3] * distance, blur, color, opacity } : null;
+}
+/** Which of the eight directions a shadow is closest to (for the tick in the gallery), or "" when it has none. */
+export function shadowDirection(shadow) {
+  if (!shadow || (!shadow.dx && !shadow.dy)) return "";
+  const sx = Math.abs(shadow.dx) < 1 ? 0 : Math.sign(shadow.dx);
+  const sy = Math.abs(shadow.dy) < 1 ? 0 : Math.sign(shadow.dy);
+  return SHADOW_DIRECTIONS.find(([, , x, y]) => x === sx && y === sy)?.[0] || "";
+}
+/** The dialog's way of writing a shadow: a distance (pt) and an angle (degrees, 0 = right, 90 = down). */
+export function shadowPolar(shadow) {
+  if (!shadow) return { distance: 4, angle: 45, blur: 5, opacity: 0.35, color: "#000000" };
+  return { distance: Math.round((Math.hypot(shadow.dx, shadow.dy) / 2) * 10) / 10, angle: Math.round((Math.atan2(shadow.dy, shadow.dx) * 180) / Math.PI), blur: Math.round((shadow.blur / 2) * 10) / 10, opacity: shadow.opacity, color: shadow.color };
+}
+export function shadowFromPolar({ distance, angle, blur, opacity, color }) {
+  const d = (Number(distance) || 0) * 2;
+  const a = ((Number(angle) || 0) * Math.PI) / 180;
+  return { dx: Math.round(Math.cos(a) * d * 10) / 10, dy: Math.round(Math.sin(a) * d * 10) / 10, blur: Math.max(0, Math.round((Number(blur) || 0) * 2)), color: color || "#000000", opacity: Math.min(1, Math.max(0, Number(opacity) ?? 0.35)) };
+}
+export function reflectionPreset(key) {
+  const r = REFLECTIONS.find(([k]) => k === key);
+  return r ? { size: r[2], opacity: 0.4, gap: 2 } : null;
+}
+/** The effects an object has, as one line for a button's hint ("影・反射"), or "" when it has none. */
+export function effectsWords(o) {
+  return [o?.shadow ? "影" : "", o?.reflect ? "反射" : "", o?.glow ? "光彩" : "", o?.soft ? "ぼかし" : ""].filter(Boolean).join("・");
+}

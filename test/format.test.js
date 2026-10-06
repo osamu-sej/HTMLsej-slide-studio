@@ -443,3 +443,51 @@ test("グラデーション塗りつぶし and 図のスタイル use the SEJ's 
   assert.equal(wordCount(deck, E, { notes: true }).paragraphs, 8);
   assert.deepEqual(wordCount({ slides: [] }, E), { pages: 0, paragraphs: 0, chars: 0, charsNoSpace: 0, words: 0 });
 });
+
+test("図形の効果: 影・反射・光彩・ぼかし are kept in range and drawn on the object; a shadow is flagged for the brand", async () => {
+  const { E } = await loadEngine();
+  const slide = (o) => ({ type: "blank", elements: [E.normalizeObject({ id: "a", kind: "shape", shape: "rect", x: 100, y: 100, w: 400, h: 200, fill: "#dce4f2", stroke: "none", ...o })] });
+  const draw = (o) => E.render(slide(o), { mode: "present", index: 1, deck: { slides: [slide(o)], theme: "sej" } });
+  const full = E.normalizeObject({ id: "a", kind: "shape", shape: "rect", x: 0, y: 0, w: 100, h: 100,
+    shadow: { dx: 6, dy: 6, blur: 10, color: "#000000", opacity: 0.35 }, reflect: { size: 0.5, opacity: 0.4, gap: 4 }, glow: { r: 16, color: "#B7C3DA", opacity: 0.6 }, soft: 10 });
+  assert.deepEqual(plainJson(full.reflect), { size: 0.5, opacity: 0.4, gap: 4 });
+  assert.deepEqual(plainJson(full.glow), { r: 16, color: "#b7c3da", opacity: 0.6 });
+  assert.equal(full.soft, 10);
+  // Out of range or incomplete: dropped or tidied.
+  const odd = E.normalizeObject({ id: "b", kind: "shape", shape: "rect", x: 0, y: 0, w: 10, h: 10, reflect: { size: 0 }, glow: { r: 5000, color: "nonsense" }, soft: 0.2 });
+  assert.equal(odd.reflect, undefined, "a reflection of nothing");
+  assert.equal(odd.glow, undefined, "no colour, no glow");
+  assert.equal(odd.soft, undefined);
+  assert.equal(E.normalizeObject({ id: "c", kind: "shape", shape: "rect", x: 0, y: 0, w: 10, h: 10, glow: { r: 5000, color: "#808080" } }).glow.r, 200);
+  assert.equal(E.normalizeObject({ id: "d", kind: "table", x: 0, y: 0, w: 10, h: 10, soft: 10, rows: 1, cols: 1 })?.soft, undefined, "only shapes, text boxes and pictures take effects");
+
+  const el = draw({ shadow: full.shadow, reflect: full.reflect, glow: full.glow, soft: full.soft });
+  const obj = el.querySelector(".hs-obj");
+  assert.equal(obj.getAttribute("data-shadow"), "1", "the brand check looks for it");
+  const rot = el.querySelector(".hs-obj-rot");
+  const filter = rot.style.filter || rot.getAttribute("style");
+  assert.equal((filter.match(/drop-shadow/g) || []).length, 3, "the shadow, and the glow drawn twice");
+  assert.ok(/-webkit-box-reflect:\s*below 4px linear-gradient\(to bottom, transparent 50%/.test(rot.getAttribute("style")), rot.getAttribute("style"));
+  assert.ok(/mask-image:\s*linear-gradient\(to right, transparent, #000 10px/.test(el.querySelector("svg.hs-obj-geom").getAttribute("style")), "the soft edge fades the shape, not its words");
+  const plain = draw({});
+  assert.equal(plain.querySelector(".hs-obj").getAttribute("data-shadow"), null);
+  assert.ok(!/drop-shadow|box-reflect/.test(plain.querySelector(".hs-obj-rot").getAttribute("style") || ""));
+});
+
+test("図形の効果: the presets are plain numbers (a direction, a polar shadow, a reflection) and read back", () => {
+  const br = ops.shadowPreset("br");
+  assert.deepEqual(plainJson(br), { dx: 8, dy: 8, blur: 10, color: "#000000", opacity: 0.35 });
+  assert.equal(ops.shadowDirection(br), "br");
+  assert.equal(ops.shadowDirection(ops.shadowPreset("t")), "t");
+  assert.equal(ops.shadowDirection(null), "");
+  assert.equal(ops.shadowPreset("nowhere"), null);
+  const polar = ops.shadowPolar({ dx: 0, dy: 8, blur: 10, color: "#1f3864", opacity: 0.5 });
+  assert.deepEqual(plainJson(polar), { distance: 4, angle: 90, blur: 5, opacity: 0.5, color: "#1f3864" });
+  assert.deepEqual(plainJson(ops.shadowFromPolar(polar)), { dx: 0, dy: 8, blur: 10, color: "#1f3864", opacity: 0.5 });
+  assert.deepEqual(plainJson(ops.shadowFromPolar({ distance: 5, angle: 0, blur: 0, opacity: 2, color: "" })), { dx: 10, dy: 0, blur: 0, color: "#000000", opacity: 1 }, "an opacity above 1 is 1");
+  assert.deepEqual(plainJson(ops.reflectionPreset("medium")), { size: 0.5, opacity: 0.4, gap: 2 });
+  assert.equal(ops.reflectionPreset("huge"), null);
+  assert.equal(ops.effectsWords({ shadow: {}, soft: 4 }), "影・ぼかし");
+  assert.equal(ops.effectsWords({}), "");
+  assert.ok(ops.GLOW_COLORS.every(([c]) => /^#[0-9a-f]{6}$/.test(c)) && ops.SHADOW_COLORS.length === 3);
+});

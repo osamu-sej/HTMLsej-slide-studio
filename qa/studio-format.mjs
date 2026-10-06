@@ -1687,6 +1687,70 @@ await step("PowerPoint のファンクション キー: ⇧F9 でグリッド線
   await page.keyboard.press("Escape");
 });
 
+await step("図形の効果（影・反射・光彩・ぼかし）: メニューとオプション、影はブランドの指摘、1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.locator('.rb-pop .rb-gallery button[data-shape="rect"]').last().click();
+  await page.mouse.click(...(await stageAt(900, 500)));
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((o) => o.id === id), { w: 800, h: 300, x: 500, y: 400 }), id);
+  await redraw();
+  await pickInPane([id]);
+  const obj = () => page.evaluate((id) => { const o = window.__hsej.slide().elements.find((x) => x.id === id); return { shadow: o.shadow, reflect: o.reflect, glow: o.glow, soft: o.soft }; }, id);
+  const q = (sel) => `#stageBody .slide-wrap .hs-obj[data-el="${id}"] ${sel}`;
+  await tab("図形の書式");
+  // 影 → 右下 (ブランドの指摘が出る)
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("影：右下")').click();
+  await page.waitForTimeout(400);
+  let fx = await obj();
+  assert(fx.shadow && fx.shadow.dx === 8 && fx.shadow.dy === 8, `shadow kept: ${JSON.stringify(fx.shadow)}`);
+  assert(await page.getAttribute(q(""), "data-shadow") === "1", "marked for the brand check");
+  assert(/drop-shadow/.test((await page.getAttribute(q(".hs-obj-rot"), "style")) || ""), "drawn");
+  await page.waitForTimeout(800);
+  const brand = await page.evaluate(() => [...document.querySelectorAll("#issueSummary, .issue-chip")].map((e) => e.textContent).join(" "));
+  assert(/ブランド/.test(brand), `the chip names the brand finding: ${brand}`);
+  // 反射 中 + 光彩 8pt + ぼかし 5pt
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("反射：中")').click();
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("光彩：8 pt")').click();
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("ぼかし：5 pt")').click();
+  await page.waitForTimeout(400);
+  fx = await obj();
+  assert(fx.reflect?.size === 0.5 && fx.glow?.r === 16 && fx.soft === 10, `three more: ${JSON.stringify(fx)}`);
+  const style = (await page.getAttribute(q(".hs-obj-rot"), "style")) || "";
+  assert(/box-reflect/.test(style) && (style.match(/drop-shadow/g) || []).length === 3, `reflection and glow drawn: ${style}`);
+  assert(/mask-image/.test((await page.getAttribute(q("svg.hs-obj-geom"), "style")) || ""), "the soft edge masks the shape");
+  await shot("effects");
+  // 効果のオプション: 影の距離と角度、光彩の色
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("効果のオプション")').click();
+  await page.waitForSelector(".fx-dialog[open]");
+  await page.fill('.fx-dialog [name="shadowDistance"]', "5");
+  await page.fill('.fx-dialog [name="shadowAngle"]', "90");
+  await page.selectOption('.fx-dialog [name="glowColor"]', "#d6c9b8");
+  await page.uncheck('.fx-dialog [name="reflectOn"]');
+  await page.click(".fx-dialog .fmt-ok");
+  await page.waitForTimeout(400);
+  fx = await obj();
+  assert(fx.shadow.dx === 0 && fx.shadow.dy === 10 && fx.glow.color === "#d6c9b8" && !fx.reflect, `the dialog's numbers: ${JSON.stringify(fx)}`);
+  // 1回の⌘Zでダイアログの変更だけが戻る
+  await undo();
+  fx = await obj();
+  assert(fx.reflect && fx.shadow.dx === 8, `one undo: ${JSON.stringify(fx)}`);
+  // すべての効果をなくす
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("すべての効果をなくす")').click();
+  await page.waitForTimeout(300);
+  fx = await obj();
+  assert(!fx.shadow && !fx.reflect && !fx.glow && !fx.soft, `all gone: ${JSON.stringify(fx)}`);
+  assert(await page.getAttribute(q(""), "data-shadow") === null, "and the mark with them");
+});
+
 // 画像として保存 shares this tab: a browser that accepts sharing its own tab, as a person would by choosing it.
 const capBrowser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "127.0.0.1,localhost" } : undefined, args: [...browserArgs, "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream"] });
 await step("画像として保存: the current slide as a PNG of the slide itself, and every slide in a ZIP", async () => {

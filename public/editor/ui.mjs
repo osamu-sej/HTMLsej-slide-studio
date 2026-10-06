@@ -364,6 +364,60 @@ export function createEditorUi(editor, app) {
     paint();
     settingsDialog("gradient-dialog", "グラデーションの塗りつぶし", h("div", {}, labeled("色の組み合わせ", sets), labeled("方向", dirs), bar, h("p", { class: "hint" }, "SEJの淡い面の色だけを使います（文字が読める明るさ）。")), () => setGradient(sets.value, dirs.value));
   }
+  // ---------------------------------------------------------------- 図形の効果 (影・反射・光彩・ぼかし)
+  const EFFECT_KINDS = ["shape", "text", "image"];
+  const hasEffectTarget = () => selected().some((o) => EFFECT_KINDS.includes(o.kind));
+  const setEffect = (patch) => editor.apply((o) => (EFFECT_KINDS.includes(o.kind) ? patch : null));
+  const effectOf = (key) => selected().find((o) => EFFECT_KINDS.includes(o.kind))?.[key];
+  function effectsMenu() {
+    const [shadow, reflect, glow, soft] = ["shadow", "reflect", "glow", "soft"].map(effectOf);
+    const direction = ops.shadowDirection(shadow);
+    return menu([
+      { head: "影（SEJテンプレートでは付けません。付けるとブランドの指摘が出ます）" },
+      ...ops.SHADOW_DIRECTIONS.map(([key, label]) => ({ label: `影：${label}`, on: direction === key, run: () => setEffect({ shadow: ops.shadowPreset(key) }) })),
+      { label: "影なし", disabled: !shadow, run: () => setEffect({ shadow: undefined }) },
+      "-", { head: "反射" },
+      ...ops.REFLECTIONS.map(([key, label]) => ({ label: `反射：${label}`, on: Boolean(reflect) && Math.abs(reflect.size - ops.reflectionPreset(key).size) < 0.01, run: () => setEffect({ reflect: ops.reflectionPreset(key) }) })),
+      { label: "反射なし", disabled: !reflect, run: () => setEffect({ reflect: undefined }) },
+      "-", { head: "光彩" },
+      ...ops.GLOW_SIZES.map(([r, label]) => ({ label: `光彩：${label}`, on: glow?.r === r, run: () => setEffect({ glow: { r, color: glow?.color || ops.GLOW_COLORS[2][0], opacity: glow?.opacity ?? 0.6 } }) })),
+      { label: "光彩なし", disabled: !glow, run: () => setEffect({ glow: undefined }) },
+      "-", { head: "ぼかし（縁をぼかす）" },
+      ...ops.SOFT_SIZES.map(([r, label]) => ({ label: `ぼかし：${label}`, on: soft === r, run: () => setEffect({ soft: r }) })),
+      { label: "ぼかしなし", disabled: !soft, run: () => setEffect({ soft: undefined }) },
+      "-", { label: "効果のオプション…", icon: "effects", run: () => effectsDialog() },
+      { label: "すべての効果をなくす", icon: "trash", disabled: !(shadow || reflect || glow || soft), run: () => setEffect({ shadow: undefined, reflect: undefined, glow: undefined, soft: undefined }) },
+    ]);
+  }
+  /** 効果のオプション: each effect's numbers (影＝色・透明度・ぼかし・距離・角度、反射＝大きさ・透明度・間隔、光彩＝大きさ・色・透明度、ぼかし＝大きさ). */
+  function effectsDialog() {
+    const polar = ops.shadowPolar(effectOf("shadow"));
+    const reflect = effectOf("reflect");
+    const glow = effectOf("glow");
+    const soft = effectOf("soft");
+    const input = (name, value, { min = 0, max = 100, step = 1 } = {}) => h("input", { type: "number", name, "aria-label": name, value: String(value), min: String(min), max: String(max), step: String(step) });
+    const on = (name, checked) => h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name, checked: checked || null }), h("span", {}, "付ける"));
+    const sColor = select("shadowColor", ops.SHADOW_COLORS, polar.color);
+    const gColor = select("glowColor", ops.GLOW_COLORS, glow?.color || ops.GLOW_COLORS[2][0]);
+    const body = h("div", { class: "fx-body" },
+      fieldset("影", on("shadowOn", Boolean(effectOf("shadow"))), labeled("色", sColor), labeled("透明度（%）", input("shadowTransparency", Math.round((1 - polar.opacity) * 100))), labeled("ぼかし（pt）", input("shadowBlur", polar.blur, { max: 100, step: 0.5 })), labeled("距離（pt）", input("shadowDistance", polar.distance, { max: 100, step: 0.5 })), labeled("角度（度）", input("shadowAngle", polar.angle, { min: -180, max: 180 })),
+        h("p", { class: "hint" }, "SEJテンプレートでは影を付けません。付けるとブランドの指摘が出ます。")),
+      fieldset("反射", on("reflectOn", Boolean(reflect)), labeled("大きさ（%）", input("reflectSize", Math.round((reflect?.size ?? 0.5) * 100), { min: 5 })), labeled("透明度（%）", input("reflectTransparency", Math.round((1 - (reflect?.opacity ?? 0.4)) * 100))), labeled("間隔（pt）", input("reflectGap", (reflect?.gap ?? 2) / 2, { max: 50, step: 0.5 }))),
+      fieldset("光彩", on("glowOn", Boolean(glow)), labeled("大きさ（pt）", input("glowSize", (glow?.r ?? 16) / 2, { min: 0.5, max: 100, step: 0.5 })), labeled("色", gColor), labeled("透明度（%）", input("glowTransparency", Math.round((1 - (glow?.opacity ?? 0.6)) * 100)))),
+      fieldset("ぼかし", on("softOn", Boolean(soft)), labeled("大きさ（pt）", input("softSize", (soft ?? 10) / 2, { min: 0.5, max: 100, step: 0.5 }))));
+    settingsDialog("fx-dialog", "図形の効果のオプション", body, () => {
+      const dlg = document.querySelector(".fx-dialog");
+      const f = (name) => dlg.querySelector(`[name="${name}"]`);
+      const n = (name, fallback = 0) => { const v = Number(f(name).value); return Number.isFinite(v) ? v : fallback; };
+      const patch = {
+        shadow: f("shadowOn").checked ? ops.shadowFromPolar({ distance: n("shadowDistance"), angle: n("shadowAngle"), blur: n("shadowBlur"), opacity: 1 - n("shadowTransparency") / 100, color: f("shadowColor").value }) : undefined,
+        reflect: f("reflectOn").checked ? { size: Math.min(1, Math.max(0.05, n("reflectSize", 50) / 100)), opacity: 1 - n("reflectTransparency", 60) / 100, gap: Math.round(n("reflectGap") * 2) } : undefined,
+        glow: f("glowOn").checked ? { r: Math.max(1, Math.round(n("glowSize", 8) * 2)), color: f("glowColor").value, opacity: 1 - n("glowTransparency", 40) / 100 } : undefined,
+        soft: f("softOn").checked ? Math.max(1, Math.round(n("softSize", 5) * 2)) : undefined,
+      };
+      setEffect(patch);
+    });
+  }
   /** 図形の塗りつぶし → 図: a picture from this device fills the selected shapes (cut to their outline). */
   async function pictureFill() {
     const [file] = await app.pickFiles("image/png,image/jpeg,image/webp,image/gif");
@@ -1291,7 +1345,8 @@ export function createEditorUi(editor, app) {
         col(drop("fill", "塗りつぶし", "図形の塗りつぶし", () => colors(E.PALETTE.fill, fillOf(), setFill, { none: "塗りつぶしなし", extra: fillExtras }), { enabled: hasText, swatch: fillOf }),
           drop("outline", "枠線", "図形の枠線（色・太さ・実線/点線）", () => outlineMenu(), { enabled: any, swatch: strokeOf }),
           drop("arrows", "矢印", "線の始点・終点の形", () => arrowMenu(), { enabled: () => kinds().has("line") })),
-        col(drop("transparency", "透明度", "オブジェクトの透明度", () => menu([0, 0.15, 0.3, 0.5, 0.7].map((t) => ({ label: `${Math.round(t * 100)}%`, on: Math.abs((1 - (one()?.opacity ?? 1)) - t) < 0.01, run: () => editor.apply({ opacity: t ? Math.round((1 - t) * 100) / 100 : undefined }) }))), { enabled: any }),
+        col(drop("effects", "効果", "図形の効果：影・反射・光彩・ぼかし（SEJテンプレートでは影を付けません）", () => effectsMenu(), { enabled: hasEffectTarget }),
+          drop("transparency", "透明度", "オブジェクトの透明度", () => menu([0, 0.15, 0.3, 0.5, 0.7].map((t) => ({ label: `${Math.round(t * 100)}%`, on: Math.abs((1 - (one()?.opacity ?? 1)) - t) < 0.01, run: () => editor.apply({ opacity: t ? Math.round((1 - t) * 100) / 100 : undefined }) }))), { enabled: any }),
           drop("line", "線の種類", "直線・カギ線・曲線", () => menu(Object.entries(E.ROUTES).map(([key, label]) => ({ label, run: () => editor.apply((o) => (o.kind === "line" ? { route: key === "straight" ? undefined : key } : null)) }))), { enabled: () => kinds().has("line") }))),
       group("ワードアートのスタイル",
         col(drop("fontColor", "文字の塗りつぶし", "文字の色（黒・濃紺・グレー）", () => colors(E.PALETTE.text, textColorOf(), (c) => editor.textFormat("color", c), { custom: false, note: "白抜き文字は使いません（SEJテンプレート）" }), { enabled: hasText, swatch: textColorOf, keep: true }),
@@ -1383,6 +1438,7 @@ export function createEditorUi(editor, app) {
       group("図のスタイル",
         drop("style", "クイック|スタイル", "図のスタイル：枠線・角丸・楕円・二重線などの組み合わせ（SEJの色だけ。図の大きさと修整はそのまま）", () => pictureStyleMenu(), { big: true, enabled: hasImage }),
         drop("outline", "図の枠線", "枠線の色・太さ", () => outlineMenu(), { enabled: hasImage, swatch: strokeOf }),
+        drop("effects", "図の効果", "図の効果：影・反射・光彩・ぼかし（SEJテンプレートでは影を付けません）", () => effectsMenu(), { enabled: hasImage }),
         drop("mask", "図形に合わせて|切り抜き", "画像を図形の形に切り抜く", () => (close) => h("div", { class: "rb-gallery" }, h("div", { class: "rb-gallery-grid" }, MASKS.map((key) => h("button", { type: "button", title: E.SHAPES[key].label, onclick: () => { close(); editor.apply((o) => (o.kind === "image" ? { mask: key === "rect" ? undefined : key, adj: undefined } : null)); } }, shapeThumb(key))))), { big: true, enabled: hasImage }),
         drop("smartart", "図の|レイアウト", "図のレイアウト：選んだ図をキャプション付きで並べる（横に並べる・2列のグリッド・図と説明）。図とキャプションはグループになります", () => menu(Object.entries(ops.PICTURE_LAYOUTS).map(([kind, label]) => ({ label, run: () => {
           const { list, ids } = ops.pictureLayout(editor.objects(), editor.selection, kind);
