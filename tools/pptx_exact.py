@@ -825,6 +825,16 @@ class SlideReader:
                 line = {"pts": int(ln.find(A + "spcPts").get("val", 0)) / 100}
             if "pct" in line and spacing_cut:
                 line["pct"] = max(0.5, line["pct"] - spacing_cut)
+            # Tab stops (a:tabLst): left / centre / right at so many px from the text area's left edge (a decimal stop is a right one).
+            tab_list = ppr_child("tabLst")
+            stops = []
+            if tab_list is not None:
+                for tab in tab_list.findall(A + "tab"):
+                    kind = {"l": "l", "ctr": "c", "r": "r", "dec": "r"}.get(tab.get("algn", "l"), "l")
+                    x = round(self.deck.px(int(tab.get("pos", 0))), 2)
+                    if 1 <= x <= 3840 and all(x != s[1] for s in stops):
+                        stops.append((kind, x))
+            tabs_attr = ",".join(f"{kind}{x:g}" for kind, x in sorted(stops, key=lambda s: s[1])[:8])
             spc = []
             for tag in ("spcBef", "spcAft"):
                 node = ppr_child(tag)
@@ -912,12 +922,12 @@ class SlideReader:
                             link = rel.target_ref
                     except KeyError:
                         link = None
-                runs_html.append((run, esc(text).replace("\t", " ").replace("\v", "<br>"), link))
+                runs_html.append((run, esc(text).replace("\v", "<br>"), link))
             para_size = max(line_sizes) if line_sizes else base_size
             if first is None and not runs_html:
                 # An empty paragraph keeps its line.
                 sizes.append((base_size, 0))
-            html.append({"align": align, "level": level, "bullet": bullet, "runs": runs_html, "size": para_size, "line": line, "spc": spc, "font": base_font})
+            html.append({"align": align, "level": level, "bullet": bullet, "runs": runs_html, "size": para_size, "line": line, "spc": spc, "font": base_font, "tabs": tabs_attr})
         if first is None:
             return None
         # The box's own settings are those of its most used size; runs say what differs.
@@ -965,6 +975,8 @@ class SlideReader:
                 attrs.append(f'data-indent="{min(4, para["level"])}"')
             if para["bullet"]:
                 attrs.append(f'data-bullet="{esc(para["bullet"][:4])}"')
+            if para["tabs"]:
+                attrs.append(f'data-tabs="{para["tabs"]}"')
             inner = "".join(parts) or "<br>"
             out.append(f"<p{(' ' + ' '.join(attrs)) if attrs else ''}>{inner}</p>")
         fs = self.deck.pt(base["size"])

@@ -1822,6 +1822,59 @@ await step("表の並べ替え・フィルター: 昇順・降順（数式は行
   assert((await page.$$eval(`#stageBody .hs-obj[data-kind="table"] tr`, (list) => list.length)) === 4, "and drawn");
 });
 
+await step("段落のタブ設定: Tab キーでタブを入れる・段落ダイアログでタブ位置（左・右）を決める・描画で位置にそろう・1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("テキスト ボックス");
+  await menuItem("横書きテキスト ボックス");
+  await page.mouse.click(...(await stageAt(300, 400)));
+  await page.waitForTimeout(250);
+  // At the start of a paragraph Tab indents; after words it types a tab character.
+  await page.keyboard.type("品名");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("数量");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("金額");
+  await page.waitForTimeout(200);
+  assert(await page.evaluate(() => document.querySelector(".ed-typing-tx")?.textContent === "品名\t数量\t金額"), `tabs typed: ${JSON.stringify(await page.evaluate(() => document.querySelector(".ed-typing-tx")?.textContent))}`);
+  assert(await page.locator(".ed-typing-tx.ed-has-tab").count() === 1, "the box shows its tabs while it is edited");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  const obj = () => page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id), id);
+  let o = await obj();
+  assert(/品名\t数量\t金額/.test(o.text), `the tab characters are kept: ${JSON.stringify(o.text)}`);
+  const widths = () => page.$$eval(`#stageBody .hs-obj[data-el="${id}"] .hs-tabbox`, (list) => list.map((b) => b.getAttribute("style") || "(natural)"));
+  assert((await widths()).join("|") === "width: 144px; text-align: left|width: 144px; text-align: left|(natural)", `an inch to a tab to begin with: ${await widths()}`);
+  // 段落 → タブ位置: 左 5 cm, 右 15 cm.
+  await tab("ホーム");
+  await byTitle("段落の設定");
+  await page.waitForSelector(".para-dialog[open]");
+  await page.fill('.para-dialog input[name="tabs"]', "左 5, 右 15");
+  await page.click(".para-dialog .fmt-ok");
+  await page.waitForTimeout(400);
+  o = await obj();
+  assert(/data-tabs="l\d+(\.\d+)?,r\d+(\.\d+)?"/.test(o.text), `the stops are on the paragraph: ${o.text}`);
+  const stops = await page.evaluate((id) => window.SlideEngine.parseTabs(/data-tabs="([^"]*)"/.exec(window.__hsej.slide().elements.find((x) => x.id === id).text)[1]), id);
+  assert(Math.abs(stops[0].x - 5 * 144 / 2.54) < 1 && Math.abs(stops[1].x - 15 * 144 / 2.54) < 1, `5 cm and 15 cm: ${JSON.stringify(stops)}`);
+  // A box wide enough for the stops (words past the box's right edge wrap, as they do in PowerPoint).
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((x) => x.id === id), { w: 1500, x: 200 }), id);
+  await redraw();
+  await pickInPane([id]);
+  const drawn = await widths();
+  assert(drawn.length === 3 && /text-align: right/.test(drawn[2]) && /text-align: left/.test(drawn[0]), `boxes at the stops: ${drawn}`);
+  assert(Math.abs(parseFloat(drawn[0].match(/width: ([\d.]+)px/)[1]) - stops[0].x) < 0.5, "the first word reaches the left stop");
+  await shot("tabs");
+  // The dialog shows what is set; ⌘Z takes the stops back in one step.
+  await byTitle("段落の設定");
+  await page.waitForSelector(".para-dialog[open]");
+  assert(/^左 5(\.0+)?, 右 15/.test(await page.inputValue('.para-dialog input[name="tabs"]')), `shown again: ${await page.inputValue('.para-dialog input[name="tabs"]')}`);
+  await page.keyboard.press("Escape");
+  await undo();
+  o = await obj();
+  assert(!/data-tabs/.test(o.text) && /品名\t数量\t金額/.test(o.text), "⌘Z: the stops go, the words stay");
+});
+
 await step("文字の効果（文字の影・光彩）: ホームの「文字の影」・図形の書式の文字の効果・オプション、影はブランドの指摘、1回の⌘Zで戻る", async () => {
   await freshSlide();
   await tab("挿入");

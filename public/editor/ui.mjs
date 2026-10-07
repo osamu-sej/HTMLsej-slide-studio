@@ -826,9 +826,14 @@ export function createEditorUi(editor, app) {
     const after = number("段落後", Math.round((st.psp || 0) * fsPt * 10) / 10, { step: 1, min: 0, max: 200 });
     const lineSel = select("行間", [...LINE_HEIGHTS.map(([v, l]) => [v, l]), ["custom", "倍数…"]], LINE_HEIGHTS.some(([v]) => Math.abs(v - (st.lh || 0)) < 0.01) ? LINE_HEIGHTS.find(([v]) => Math.abs(v - st.lh) < 0.01)[0] : "custom");
     const lineNum = number("倍数", st.lh || 1.35, { step: 0.05, min: 0.5, max: 5 });
+    // タブ位置: "左 3, 右 9" (cm from the text's left) — one stop a word, at most eight.
+    const TAB_WORDS = { l: "左", c: "中央", r: "右" };
+    const tabsNow = (st.tabs || []).map((s) => `${TAB_WORDS[s.type]} ${ops.toCm(s.x)}`).join(", ");
+    const tabsInput = h("input", { type: "text", name: "tabs", "aria-label": "タブ位置", value: tabsNow, placeholder: "例：左 3, 右 9（cm）" });
     const body = h("div", {},
       fieldset("全般", labeled("配置", align)),
       fieldset("インデント", labeled("テキストの前（cm）", left), labeled("最初の行", firstKind), labeled("幅（cm）", width)),
+      fieldset("タブ", labeled("タブ位置", tabsInput), h("p", { class: "hint" }, "文字の編集中に Tab キーで入れたタブが、ここで決めた位置にそろいます（左・中央・右。入れなければ2.5cmごと）。")),
       fieldset("間隔", labeled("段落後（pt）", after), labeled("行間", lineSel), labeled("倍数", lineNum)),
       h("p", { class: "hint" }, "インデントは選んだ段落（入力中でなければ、選んだ図形のすべての段落）に付きます。"));
     settingsDialog("para-dialog", "段落", body, () => {
@@ -837,6 +842,15 @@ export function createEditorUi(editor, app) {
       const b = ops.fromCm(Math.max(0, Number(left.value) || 0));
       const next = firstKind.value === "hanging" ? { left: Math.round((b + w) * 100) / 100, first: -w } : firstKind.value === "first" ? { left: b, first: w } : { left: b, first: 0 };
       if (Math.abs(next.left - ind.left) > 0.5 || Math.abs(next.first - ind.first) > 0.5) editor.textFormat("paraIndent", next);
+      // The tab stops as typed: "左 3, 右 9" → l/r at those cm (a bare number is a left stop).
+      const stops = tabsInput.value.split(/[,、，]/).map((part) => {
+        const m = /^\s*(左|中央|右|l|c|r)?\s*([\d.]+)/i.exec(part.replace(/[０-９．]/g, (c) => (c === "．" ? "." : String.fromCharCode(c.charCodeAt(0) - 0xfee0))));
+        if (!m || !(Number(m[2]) > 0)) return null;
+        const type = { 左: "l", 中央: "c", 右: "r" }[m[1]] || (m[1] || "l").toLowerCase();
+        return { type, x: Math.round(ops.fromCm(Number(m[2])) * 100) / 100 };
+      }).filter(Boolean);
+      const nextTabs = E.parseTabs(E.tabsText(stops));
+      if (E.tabsText(nextTabs) !== E.tabsText(st.tabs || [])) editor.textFormat("paraTabs", nextTabs);
       const lh = lineSel.value === "custom" ? Number(lineNum.value) : Number(lineSel.value);
       if (lh > 0 && Math.abs(lh - (st.lh || 0)) > 0.001) editor.textFormat("lh", Math.min(5, Math.max(0.5, lh)));
       const psp = Math.round(((Number(after.value) || 0) / fsPt) * 100) / 100;

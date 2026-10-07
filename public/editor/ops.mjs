@@ -665,6 +665,21 @@ export function setIndent(E, html, { left = 0, first = 0 } = {}) {
   return E.sanitizeRich(box.innerHTML);
 }
 
+/** 段落 → タブ設定: the tab stops ([{ type: "l" | "c" | "r", x }], px) on every paragraph of the text (none takes them away). */
+export function setTabs(E, html, stops) {
+  const text = E.tabsText(E.parseTabs(Array.isArray(stops) ? E.tabsText(stops) : ""));
+  const box = document.createElement("div");
+  box.append(E.richFragment(html || ""));
+  if (!box.querySelector("p, li, div") && box.textContent) { const p = document.createElement("p"); p.append(...box.childNodes); box.append(p); }
+  for (const block of box.querySelectorAll("p")) { if (text) block.setAttribute("data-tabs", text); else block.removeAttribute("data-tabs"); }
+  return E.sanitizeRich(box.innerHTML);
+}
+/** The first paragraph's tab stops: [{ type, x }]. */
+export function tabsOf(E, html) {
+  const m = /^<p\b[^>]*\bdata-tabs="([^"]*)"/.exec(String(html || ""));
+  return m ? E.parseTabs(m[1]) : [];
+}
+
 /** The first paragraph's indents (px): { left, first }. */
 export function indentOf(html) {
   const tag = /^<(p|li|div)\b[^>]*style="([^"]*)"/.exec(String(html || "").replace(/^<(ul|ol)\b[^>]*>/, ""));

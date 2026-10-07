@@ -277,6 +277,25 @@ class SourceEffectsTest(unittest.TestCase):
         self.assertNotIn("tglow", ordinary)
         self.assertNotIn("toutline", ordinary)
 
+    def test_tab_characters_and_tab_stops_are_kept(self):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(8), Inches(1))
+        box.text_frame.text = "品名\t数量\t金額"
+        ppr = box.text_frame.paragraphs[0]._p.get_or_add_pPr()
+        ppr.append(etree.fromstring('''<a:tabLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:tab pos="2743200" algn="l"/><a:tab pos="5486400" algn="r"/></a:tabLst>'''))
+        plain = slide.shapes.add_textbox(Inches(1), Inches(3), Inches(8), Inches(1))
+        plain.text_frame.text = "名前\t値"
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        tabbed = by_text(deck["slideData"][0], "品名")
+        self.assertIn("品名\t数量\t金額", tabbed["text"], "the tab characters stay")
+        self.assertIn('data-tabs="l432,r864"', tabbed["text"], "3 in and 6 in, in px (144 to the inch)")
+        ordinary = by_text(deck["slideData"][0], "名前")
+        self.assertIn("名前\t値", ordinary["text"])
+        self.assertNotIn("data-tabs", ordinary["text"], "no stops: the default inch stops apply")
+
 
 if __name__ == "__main__":
     unittest.main()
