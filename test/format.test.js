@@ -534,6 +534,31 @@ test("文字の効果: 文字の影・光彩 are kept in range and drawn on the 
   assert.deepEqual(plainJson(ops.defaultStyleOf("text", full)).tshadow, plainJson(full.tshadow));
 });
 
+test("3-D 回転: turns about x and y with a camera's field of view are kept in range and drawn as a CSS perspective turn", async () => {
+  const { E } = await loadEngine();
+  const shape = (o) => E.normalizeObject({ id: "a", kind: "shape", shape: "rect", x: 100, y: 100, w: 400, h: 200, fill: "#dce4f2", stroke: "none", ...o });
+  assert.deepEqual(plainJson(shape({ rot3d: { x: 30.04, y: -20 } }).rot3d), { x: 30, y: -20 }, "45° is the usual view and is not kept");
+  assert.deepEqual(plainJson(shape({ rot3d: { x: 0, y: 40, p: 0 } }).rot3d), { x: 0, y: 40, p: 0 }, "a flat view is kept");
+  assert.deepEqual(plainJson(shape({ rot3d: { x: 500, y: -500, p: 500 } }).rot3d), { x: 89, y: -89, p: 120 }, "kept to what can be seen");
+  assert.equal(shape({ rot3d: { x: 0.2, y: 0.1 } }).rot3d, undefined, "no turn, nothing kept");
+  assert.equal(shape({ rot3d: "no" }).rot3d, undefined);
+  assert.equal(E.normalizeObject({ id: "t", kind: "table", x: 0, y: 0, w: 400, h: 200, cols: [1], rows: [1], cells: [[{ text: "<p>a</p>" }]], rot3d: { x: 20, y: 20 } })?.rot3d, undefined, "shapes, text boxes and pictures only");
+  const draw = (o) => { const slide = { type: "blank", elements: [shape(o)] }; return E.render(slide, { mode: "present", index: 1, deck: { slides: [slide], theme: "sej" } }); };
+  const turned = draw({ rot3d: { x: 20, y: -30 }, rot: 10, flipH: true }).querySelector(".hs-obj-rot").getAttribute("style");
+  assert.ok(/transform:\s*perspective\(482\.\d+px\) rotateX\(20deg\) rotateY\(-30deg\) rotate\(10deg\) scale\(-1, 1\)/.test(turned), turned);
+  const flat = draw({ rot3d: { x: 35, y: -45, p: 0 } }).querySelector(".hs-obj-rot").getAttribute("style");
+  assert.ok(/transform:\s*rotateX\(35deg\) rotateY\(-45deg\)/.test(flat) && !/perspective/.test(flat), flat);
+  assert.ok(!/rotateX/.test(draw({}).querySelector(".hs-obj-rot").getAttribute("style") || ""));
+  // The gallery.
+  assert.deepEqual(plainJson(ops.rot3dPreset("right")), { x: 0, y: 28 });
+  assert.equal(ops.rot3dPreset("nowhere"), null);
+  assert.equal(ops.rot3dKey({ x: 35, y: -45, p: 0 }), "isoTopLeft");
+  assert.equal(ops.rot3dKey({ x: 12, y: 3 }), "");
+  assert.equal(ops.rot3dKey(null), "");
+  for (const [key, , turn] of ops.ROT3D_PRESETS) assert.equal(ops.rot3dKey(plainJson(shape({ rot3d: turn }).rot3d || {})), key, `${key} is found again after normalizing`);
+  assert.equal(ops.effectsWords({ rot3d: {}, soft: 4 }), "ぼかし・3-D 回転");
+});
+
 test("文字の輪郭: a line round the letters behind their fill, in the SEJ's text colours; another colour is flagged for the brand", async () => {
   const { E } = await loadEngine();
   const text = (o, kind = "text") => E.normalizeObject({ id: "t", kind, x: 100, y: 100, w: 600, h: 120, text: "<p>文字</p>", fs: 40, ...(kind === "shape" ? { shape: "rect", fill: "#dce4f2", stroke: "none" } : {}), ...o });

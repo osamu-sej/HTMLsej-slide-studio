@@ -1208,7 +1208,24 @@ export function textOutline(color, current = null) {
 export function textEffectsWords(o) {
   return [o?.tshadow ? "影" : "", o?.tglow ? "光彩" : "", o?.toutline ? "輪郭" : ""].filter(Boolean).join("・");
 }
+// 3-D 回転: the gallery's turns (degrees about the x axis — the top goes back when positive — and the y axis — the right goes back
+// when positive) and the camera's field of view (45° is a natural view, 0° a flat isometric one).
+export const ROT3D_PRESETS = [
+  ["right", "右を奥に", { x: 0, y: 28 }], ["left", "左を奥に", { x: 0, y: -28 }], ["top", "上を奥に", { x: 28, y: 0 }], ["bottom", "下を奥に", { x: -28, y: 0 }],
+  ["topRight", "右上を奥に", { x: 22, y: 22 }], ["topLeft", "左上を奥に", { x: 22, y: -22 }], ["bottomRight", "右下を奥に", { x: -22, y: 22 }], ["bottomLeft", "左下を奥に", { x: -22, y: -22 }],
+  ["isoTopLeft", "等角図法：左上", { x: 35, y: -45, p: 0 }], ["isoTopRight", "等角図法：右上", { x: 35, y: 45, p: 0 }], ["isoBottomLeft", "等角図法：左下", { x: -35, y: -45, p: 0 }], ["isoBottomRight", "等角図法：右下", { x: -35, y: 45, p: 0 }],
+];
+/** A preset's turn as an object's `rot3d` (null for an unknown name). */
+export function rot3dPreset(key) {
+  const found = ROT3D_PRESETS.find(([k]) => k === key);
+  return found ? { ...found[2] } : null;
+}
+/** Which preset a turn is (or ""). */
+export function rot3dKey(rot3d) {
+  if (!rot3d) return "";
+  return ROT3D_PRESETS.find(([, , t]) => t.x === rot3d.x && t.y === rot3d.y && (t.p ?? 45) === (rot3d.p ?? 45))?.[0] || "";
+}
 /** The effects an object has, as one line for a button's hint ("影・反射"), or "" when it has none. */
 export function effectsWords(o) {
-  return [o?.shadow ? "影" : "", o?.reflect ? "反射" : "", o?.glow ? "光彩" : "", o?.soft ? "ぼかし" : ""].filter(Boolean).join("・");
+  return [o?.shadow ? "影" : "", o?.reflect ? "反射" : "", o?.glow ? "光彩" : "", o?.soft ? "ぼかし" : "", o?.rot3d ? "3-D 回転" : ""].filter(Boolean).join("・");
 }

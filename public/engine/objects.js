@@ -1731,6 +1731,14 @@
     }
     const opacity = num(raw.opacity, 0, 1);
     if (opacity != null && opacity < 1) o.opacity = opacity;
+    // 3-D 回転 (図形の効果): the object turned about its horizontal (x) and vertical (y) axis, in degrees, seen from a camera whose
+    // field of view is `p` degrees (45 unless said; 0 is a flat, isometric view). Shapes, text boxes and pictures.
+    if (raw.rot3d && typeof raw.rot3d === "object" && ["shape", "text", "image"].includes(o.kind)) {
+      const x = Math.round(num(raw.rot3d.x, -89, 89, 0) * 10) / 10;
+      const y = Math.round(num(raw.rot3d.y, -89, 89, 0) * 10) / 10;
+      const p = Math.round(num(raw.rot3d.p, 0, 120, 45));
+      if (Math.abs(x) >= 0.5 || Math.abs(y) >= 0.5) o.rot3d = { x, y, ...(p !== 45 ? { p } : {}) };
+    }
     if (raw.shadow && typeof raw.shadow === "object") {
       const color = hexColor(raw.shadow.color);
       if (color) o.shadow = { dx: num(raw.shadow.dx, -500, 500, 0), dy: num(raw.shadow.dy, -500, 500, 0),
@@ -3889,6 +3897,14 @@
     return el;
   }
 
+  /** 3-D 回転: the CSS that turns an object about its x and y axes, with the camera's field of view as the perspective. */
+  function rot3dCss(o) {
+    if (!o.rot3d) return "";
+    const { x, y, p = 45 } = o.rot3d;
+    const persp = p > 0 ? `perspective(${r2(Math.max(o.w, o.h) / 2 / Math.tan((p * Math.PI) / 360))}px) ` : "";
+    return `${persp}rotateX(${x}deg) rotateY(${y}deg)`;
+  }
+
   /** One object as HTML: a positioned box → a layer for motion paths → a layer for effects → a rotated body. */
   function objectNode(raw, ctx, all, scale) {
     const o = withDefaults(raw);
@@ -3912,7 +3928,7 @@
     const fx = h("div", { class: "hs-obj-fx" });
     const rot = h("div", { class: "hs-obj-rot" });
     if (o.kind === "image") applyEffects(o, rot);
-    const transform = [o.rot ? `rotate(${o.rot}deg)` : "", o.flipH || o.flipV ? `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1})` : ""].filter(Boolean).join(" ");
+    const transform = [rot3dCss(o), o.rot ? `rotate(${o.rot}deg)` : "", o.flipH || o.flipV ? `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1})` : ""].filter(Boolean).join(" ");
     if (transform) rot.style.transform = transform;
     if (o.kind === "shape" || o.kind === "text") {
       shapeBody(o, rot, scale, ctx);

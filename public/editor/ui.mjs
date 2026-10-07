@@ -370,7 +370,7 @@ export function createEditorUi(editor, app) {
   const setEffect = (patch) => editor.apply((o) => (EFFECT_KINDS.includes(o.kind) ? patch : null));
   const effectOf = (key) => selected().find((o) => EFFECT_KINDS.includes(o.kind))?.[key];
   function effectsMenu() {
-    const [shadow, reflect, glow, soft] = ["shadow", "reflect", "glow", "soft"].map(effectOf);
+    const [shadow, reflect, glow, soft, rot3d] = ["shadow", "reflect", "glow", "soft", "rot3d"].map(effectOf);
     const direction = ops.shadowDirection(shadow);
     return menu([
       { head: "影（SEJテンプレートでは付けません。付けるとブランドの指摘が出ます）" },
@@ -385,8 +385,11 @@ export function createEditorUi(editor, app) {
       "-", { head: "ぼかし（縁をぼかす）" },
       ...ops.SOFT_SIZES.map(([r, label]) => ({ label: `ぼかし：${label}`, on: soft === r, run: () => setEffect({ soft: r }) })),
       { label: "ぼかしなし", disabled: !soft, run: () => setEffect({ soft: undefined }) },
+      "-", { head: "3-D 回転" },
+      ...ops.ROT3D_PRESETS.map(([key, label]) => ({ label: `3-D：${label}`, on: ops.rot3dKey(rot3d) === key, run: () => setEffect({ rot3d: ops.rot3dPreset(key) }) })),
+      { label: "3-D 回転なし", disabled: !rot3d, run: () => setEffect({ rot3d: undefined }) },
       "-", { label: "効果のオプション…", icon: "effects", run: () => effectsDialog() },
-      { label: "すべての効果をなくす", icon: "trash", disabled: !(shadow || reflect || glow || soft), run: () => setEffect({ shadow: undefined, reflect: undefined, glow: undefined, soft: undefined }) },
+      { label: "すべての効果をなくす", icon: "trash", disabled: !(shadow || reflect || glow || soft || rot3d), run: () => setEffect({ shadow: undefined, reflect: undefined, glow: undefined, soft: undefined, rot3d: undefined }) },
     ]);
   }
   /** 効果のオプション: each effect's numbers (影＝色・透明度・ぼかし・距離・角度、反射＝大きさ・透明度・間隔、光彩＝大きさ・色・透明度、ぼかし＝大きさ). */
@@ -395,6 +398,7 @@ export function createEditorUi(editor, app) {
     const reflect = effectOf("reflect");
     const glow = effectOf("glow");
     const soft = effectOf("soft");
+    const rot3d = effectOf("rot3d");
     const input = (name, value, { min = 0, max = 100, step = 1 } = {}) => h("input", { type: "number", name, "aria-label": name, value: String(value), min: String(min), max: String(max), step: String(step) });
     const on = (name, checked) => h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name, checked: checked || null }), h("span", {}, "付ける"));
     const sColor = select("shadowColor", ops.SHADOW_COLORS, polar.color);
@@ -404,7 +408,9 @@ export function createEditorUi(editor, app) {
         h("p", { class: "hint" }, "SEJテンプレートでは影を付けません。付けるとブランドの指摘が出ます。")),
       fieldset("反射", on("reflectOn", Boolean(reflect)), labeled("大きさ（%）", input("reflectSize", Math.round((reflect?.size ?? 0.5) * 100), { min: 5 })), labeled("透明度（%）", input("reflectTransparency", Math.round((1 - (reflect?.opacity ?? 0.4)) * 100))), labeled("間隔（pt）", input("reflectGap", (reflect?.gap ?? 2) / 2, { max: 50, step: 0.5 }))),
       fieldset("光彩", on("glowOn", Boolean(glow)), labeled("大きさ（pt）", input("glowSize", (glow?.r ?? 16) / 2, { min: 0.5, max: 100, step: 0.5 })), labeled("色", gColor), labeled("透明度（%）", input("glowTransparency", Math.round((1 - (glow?.opacity ?? 0.6)) * 100)))),
-      fieldset("ぼかし", on("softOn", Boolean(soft)), labeled("大きさ（pt）", input("softSize", (soft ?? 10) / 2, { min: 0.5, max: 100, step: 0.5 }))));
+      fieldset("ぼかし", on("softOn", Boolean(soft)), labeled("大きさ（pt）", input("softSize", (soft ?? 10) / 2, { min: 0.5, max: 100, step: 0.5 }))),
+      fieldset("3-D 回転", on("rot3dOn", Boolean(rot3d)), labeled("X 回転（°）", input("rotX", rot3d?.x ?? 0, { min: -89, max: 89, step: 1 })), labeled("Y 回転（°）", input("rotY", rot3d?.y ?? 0, { min: -89, max: 89, step: 1 })), labeled("遠近（°。0 は平行）", input("rotP", rot3d?.p ?? 45, { min: 0, max: 120, step: 1 })),
+        h("p", { class: "hint" }, "X が正だと上が、Y が正だと右が奥に下がります。")));
     settingsDialog("fx-dialog", "図形の効果のオプション", body, () => {
       const dlg = document.querySelector(".fx-dialog");
       const f = (name) => dlg.querySelector(`[name="${name}"]`);
@@ -414,6 +420,7 @@ export function createEditorUi(editor, app) {
         reflect: f("reflectOn").checked ? { size: Math.min(1, Math.max(0.05, n("reflectSize", 50) / 100)), opacity: 1 - n("reflectTransparency", 60) / 100, gap: Math.round(n("reflectGap") * 2) } : undefined,
         glow: f("glowOn").checked ? { r: Math.max(1, Math.round(n("glowSize", 8) * 2)), color: f("glowColor").value, opacity: 1 - n("glowTransparency", 40) / 100 } : undefined,
         soft: f("softOn").checked ? Math.max(1, Math.round(n("softSize", 5) * 2)) : undefined,
+        rot3d: f("rot3dOn").checked && (Math.abs(n("rotX")) >= 0.5 || Math.abs(n("rotY")) >= 0.5) ? { x: Math.max(-89, Math.min(89, n("rotX"))), y: Math.max(-89, Math.min(89, n("rotY"))), p: Math.max(0, Math.min(120, Math.round(n("rotP", 45)))) } : undefined,
       };
       setEffect(patch);
     });

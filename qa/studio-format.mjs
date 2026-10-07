@@ -1771,6 +1771,53 @@ await step("図形の効果（影・反射・光彩・ぼかし）: メニュー
   assert(await page.getAttribute(q(""), "data-shadow") === null, "and the mark with them");
 });
 
+await step("3-D 回転: 図形の効果のギャラリー（右を奥に・等角図法）とオプション（X・Y・遠近）、描画のCSS、1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.locator('.rb-pop .rb-gallery button[data-shape="rect"]').last().click();
+  await page.mouse.click(...(await stageAt(900, 500)));
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((o) => o.id === id), { w: 800, h: 300, x: 500, y: 400 }), id);
+  await redraw();
+  await pickInPane([id]);
+  const rot3d = () => page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id).rot3d || null, id);
+  const css = () => page.getAttribute(`#stageBody .slide-wrap .hs-obj[data-el="${id}"] .hs-obj-rot`, "style");
+  await tab("図形の書式");
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("3-D：右を奥に")').click();
+  await page.waitForTimeout(400);
+  let r = await rot3d();
+  assert(r && r.x === 0 && r.y === 28, `右を奥に: ${JSON.stringify(r)}`);
+  assert(/perspective\([\d.]+px\) rotateX\(0deg\) rotateY\(28deg\)/.test((await css()) || ""), `drawn turned: ${await css()}`);
+  await shot("rot3d");
+  await byTitle("図形の効果");
+  assert(await page.locator('.rb-pop .rb-menu button.on:has-text("3-D：右を奥に")').count() === 1, "the preset it is shows as chosen");
+  await page.locator('.rb-pop .rb-menu button:has-text("3-D：等角図法：左上")').click();
+  await page.waitForTimeout(300);
+  r = await rot3d();
+  assert(r && r.x === 35 && r.y === -45 && r.p === 0 && !/perspective/.test((await css()) || ""), `等角図法 is flat: ${JSON.stringify(r)} ${await css()}`);
+  // オプション: X 10, Y -10, 遠近 60.
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("効果のオプション")').click();
+  await page.waitForSelector(".fx-dialog[open]");
+  await page.fill('.fx-dialog [name="rotX"]', "10");
+  await page.fill('.fx-dialog [name="rotY"]', "-10");
+  await page.fill('.fx-dialog [name="rotP"]', "60");
+  await page.click(".fx-dialog .fmt-ok");
+  await page.waitForTimeout(300);
+  r = await rot3d();
+  assert(r && r.x === 10 && r.y === -10 && r.p === 60, `the dialog: ${JSON.stringify(r)}`);
+  await undo();
+  r = await rot3d();
+  assert(r && r.x === 35 && r.p === 0, `one undo goes back to 等角図法: ${JSON.stringify(r)}`);
+  await byTitle("図形の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("3-D 回転なし")').click();
+  await page.waitForTimeout(300);
+  assert((await rot3d()) === null && !/rotateX/.test((await css()) || ""), "no turn at all");
+});
+
 await step("パレート図: 順不同の値が大きい順の棒になり、累積比率の線が右軸（0〜100%）に出る・書式設定の棒の間隔・1回の⌘Zで戻る", async () => {
   await freshSlide();
   await tab("挿入");
