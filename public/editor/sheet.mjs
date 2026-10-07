@@ -874,3 +874,77 @@ export function mapFormulas(table, fn) {
   if (!table?.cells?.some((row) => row.some((cell) => cell?.f))) return table;
   return { ...table, cells: table.cells.map((row) => row.map((cell) => (cell?.f ? { ...cell, f: fn(cell.f) } : cell))) };
 }
+
+// ---------------------------------------------------------------- 並べ替え and フィルター (the rows of a sheet)
+
+export const FILTER_OPS = [
+  ["eq", "と等しい"], ["ne", "と等しくない"], ["contains", "を含む"], ["gt", "より大きい"], ["ge", "以上"], ["lt", "より小さい"], ["le", "以下"], ["nonblank", "空白でない"], ["blank", "空白"],
+];
+const SORT_RANK = (v) => (v === null || v === undefined || v === "" ? 4 : v instanceof SheetError ? 3 : typeof v === "boolean" ? 2 : typeof v === "number" ? 0 : 1);
+
+/** The row a sort of this table starts and ends at when one cell is picked: under the header row, above a totals row. */
+export function sortSpan(table) {
+  const first = table.header === false ? 0 : 1;
+  const last = table.cells.length - 1 - (table.lastRow ? 1 : 0);
+  return [first, last];
+}
+
+/**
+ * 並べ替え: the rows r0…r1 in the order of one column — 昇順 (numbers, then words, then TRUE/FALSE, then errors) or 降順,
+ * blanks last either way. A formula moves with its row and its references to other cells in that row follow it, as in
+ * Excel (a reference written with $ stays). Returns the new cells, or null when there is nothing to sort or a merged cell is in the way.
+ */
+export function sortRows(cells, { col, desc = false, r0, r1 }) {
+  if (!Array.isArray(cells) || !(r1 > r0) || col < 0 || r0 < 0 || r1 >= cells.length) return null;
+  for (let r = r0; r <= r1; r += 1) if (cells[r].some((cell) => cell && (cell.merged || cell.rs > 1 || cell.cs > 1))) return null;
+  const sheet = makeSheet(cells);
+  const entries = [];
+  for (let r = r0; r <= r1; r += 1) entries.push({ r, v: sheet.cell(r, col) });
+  entries.sort((a, b) => {
+    const ra = SORT_RANK(a.v);
+    const rb = SORT_RANK(b.v);
+    if (ra === 4 || rb === 4) return ra === rb ? 0 : ra === 4 ? 1 : -1;
+    if (ra !== rb) return desc ? rb - ra : ra - rb;
+    const d = ra === 0 ? a.v - b.v : ra === 1 ? String(a.v).localeCompare(String(b.v), "ja") : ra === 2 ? Number(a.v) - Number(b.v) : String(a.v.code).localeCompare(String(b.v.code));
+    return desc ? -d : d;
+  });
+  if (entries.every((e, i) => e.r === r0 + i)) return cells;
+  const moved = entries.map((e, i) => cells[e.r].map((cell) => (cell?.f && e.r !== r0 + i ? { ...cell, f: shiftFormula(cell.f, r0 + i - e.r, 0) } : cell)));
+  return [...cells.slice(0, r0), ...moved, ...cells.slice(r1 + 1)];
+}
+
+/** Whether a cell's words meet a filter's condition (numbers compare as numbers when both are, else as words). */
+function filterMatch(words, { op, value }) {
+  const text = String(words ?? "").trim();
+  const want = String(value ?? "").trim();
+  if (op === "blank") return text === "";
+  if (op === "nonblank") return text !== "";
+  if (op === "contains") return want === "" || text.toLowerCase().includes(want.toLowerCase());
+  // A blank cell meets no comparison (but is "not equal" to anything written).
+  if (text === "") return op === "ne" && want !== "";
+  const a = parseNumber(text);
+  const b = parseNumber(want);
+  const numbers = a != null && b != null;
+  const cmp = numbers ? a - b : text.localeCompare(want, "ja");
+  return { eq: cmp === 0, ne: cmp !== 0, gt: cmp > 0, ge: cmp >= 0, lt: cmp < 0, le: cmp <= 0 }[op] ?? true;
+}
+/**
+ * フィルター: the rows a table's `filter` ({ col, op, value }) hides — the data rows that fail it (the header row and a totals
+ * row stay). A table with merged cells is not filtered (a hidden row could cut a merged cell in two).
+ */
+export function filterRows(table) {
+  const f = table?.filter;
+  if (!f || !Array.isArray(table.cells) || !FILTER_OPS.some(([op]) => op === f.op) || !(f.col >= 0)) return [];
+  if (table.cells.some((row) => row.some((cell) => cell && (cell.merged || cell.rs > 1 || cell.cs > 1)))) return [];
+  const [first, last] = sortSpan(table);
+  const hide = [];
+  for (let r = first; r <= last; r += 1) if (!filterMatch(plainOf(table.cells[r][f.col]?.text), f)) hide.push(r);
+  return hide;
+}
+/** Fills `table.hide` from `table.filter` in place (the hook the engine calls whenever a sheet is normalised). */
+export function applyFilter(table) {
+  if (!table) return table;
+  const hide = filterRows(table);
+  if (hide.length) table.hide = hide; else delete table.hide;
+  return table;
+}

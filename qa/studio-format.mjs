@@ -1771,6 +1771,57 @@ await step("図形の効果（影・反射・光彩・ぼかし）: メニュー
   assert(await page.getAttribute(q(""), "data-shadow") === null, "and the mark with them");
 });
 
+await step("表の並べ替え・フィルター: 昇順・降順（数式は行といっしょに動く）、条件に合う行だけを表示、解除、1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("表");
+  await page.waitForSelector(".tb-pick");
+  await page.click('.tb-pick-more[data-sheet="insert"]');
+  await page.waitForFunction(() => (window.__hsej.slide().elements || []).some((o) => o.kind === "table" && o.sheet), null, { timeout: 5000 });
+  const table = async () => (await slide()).elements.filter((o) => o.kind === "table").at(-1);
+  const words = (o, r, c) => (o.cells[r][c].text || "").replace(/<[^>]+>/g, "");
+  let o = await table();
+  assert(words(o, 1, 0) === "店舗" && words(o, 2, 0) === "宅配", "店舗 (1,200) above 宅配 (480) to begin with");
+  // B2 is being typed in: 昇順 sorts the data rows by column B (the header and the total row stay).
+  await byTitle("選んだセルの列の昇順");
+  await page.waitForFunction(() => /宅配/.test((window.__hsej.slide().elements.find((x) => x.kind === "table").cells[1][0].text || "")), null, { timeout: 5000 });
+  o = await table();
+  assert(words(o, 1, 0) === "宅配" && words(o, 2, 0) === "店舗" && words(o, 3, 0) === "合計" && words(o, 0, 0) === "項目", "宅配 first, the header and the total stay");
+  assert(o.cells[1][3].f === "=SUM(B2:C2)" && words(o, 1, 3) === "1,040", `the formula moved with its row: ${o.cells[1][3].f} ${words(o, 1, 3)}`);
+  assert(words(o, 3, 1) === "1,680", "the total still adds both rows");
+  await shot("sheet-sorted");
+  await page.keyboard.press("Escape");
+  await undo();
+  assert(words(await table(), 1, 0) === "店舗", "⌘Z puts the rows back in one step");
+  await page.locator("#stageBody .hs-obj td[data-r='1'][data-c='1']").first().dblclick();
+  await page.waitForSelector(".tb-fx:not([disabled])");
+  await byTitle("選んだセルの列の降順");
+  await page.waitForTimeout(400);
+  assert(words(await table(), 1, 0) === "店舗", "already in 降順: nothing moves");
+  // フィルター: column B larger than 1000 → 宅配 is hidden, not deleted.
+  await byTitle("ある列の条件に合う行だけを表示する");
+  await page.waitForSelector(".filter-dialog[open]");
+  await page.selectOption('.filter-dialog [name="col"]', "1");
+  await page.selectOption('.filter-dialog [name="op"]', "gt");
+  await page.fill('.filter-dialog [name="value"]', "1000");
+  await page.click(".filter-dialog .fmt-ok");
+  await page.waitForFunction(() => (window.__hsej.slide().elements.find((x) => x.kind === "table").hide || []).length === 1, null, { timeout: 5000 });
+  o = await table();
+  assert(JSON.stringify(o.hide) === "[2]" && o.filter.op === "gt" && o.cells.length === 4, `row 3 (宅配) hidden, all four rows kept: ${JSON.stringify({ hide: o.hide, filter: o.filter })}`);
+  const trs = await page.$$eval(`#stageBody .hs-obj[data-kind="table"] tr`, (list) => list.map((tr) => tr.getAttribute("data-r")));
+  assert(trs.join(",") === "0,1,3", `the hidden row is not drawn: ${trs}`);
+  await shot("sheet-filtered");
+  assert(await page.locator('.rb-btn[title^="ある列の条件に合う行だけを表示する"][aria-pressed="true"]').count() === 1, "the button shows a filter is on");
+  // The sum still counts the hidden row (as Excel's SUM does), and the rows left are not squeezed.
+  assert(words(o, 3, 1) === "1,680", "SUM counts hidden rows too");
+  // 解除.
+  await byTitle("フィルターを解除");
+  await page.waitForFunction(() => !(window.__hsej.slide().elements.find((x) => x.kind === "table").filter), null, { timeout: 5000 });
+  o = await table();
+  assert(!o.hide && o.cells.length === 4, "every row is back");
+  assert((await page.$$eval(`#stageBody .hs-obj[data-kind="table"] tr`, (list) => list.length)) === 4, "and drawn");
+});
+
 await step("文字の効果（文字の影・光彩）: ホームの「文字の影」・図形の書式の文字の効果・オプション、影はブランドの指摘、1回の⌘Zで戻る", async () => {
   await freshSlide();
   await tab("挿入");

@@ -1935,6 +1935,7 @@
     return values.map((v) => Math.round((v / sum) * 100000) / 100000);
   }
   /** A table's cells (rich text, fill, colour, bold, alignment, merged spans), columns and rows, style options. */
+  const TABLE_FILTER_OPS = new Set(["eq", "ne", "contains", "gt", "ge", "lt", "le", "nonblank", "blank"]);
   function normalizeTable(raw) {
     // Excel スプレッドシート: a table with `sheet` lets cells hold formulas (`f`), whose words (`text`) the editor's sheet.mjs works out.
     const sheet = raw.sheet === true;
@@ -1994,7 +1995,19 @@
     const out = { cells, cols: shares(raw.cols, nCols), rows: shares(raw.rows, cells.length) };
     if (TABLE_STYLES[raw.style] && raw.style !== "sej") out.style = raw.style;
     for (const key of ["header", "banded", "firstCol", "lastRow"]) if (typeof raw[key] === "boolean") out[key] = raw[key];
-    if (sheet) { out.sheet = true; E.sheetCalc?.(out); }
+    if (sheet) {
+      out.sheet = true;
+      // フィルター: one column's condition; the rows it hides (`hide`) are worked out again whenever the sheet is normalised
+      // (the editor's hook), and kept as they were saved where there is none (an exported show).
+      const flt = raw.filter;
+      if (flt && typeof flt === "object" && Number.isInteger(flt.col) && flt.col >= 0 && flt.col < nCols && TABLE_FILTER_OPS.has(flt.op)) {
+        out.filter = { col: flt.col, op: flt.op };
+        if (typeof flt.value === "string" && flt.value.trim()) out.filter.value = flt.value.trim().slice(0, 100);
+        const hide = [...new Set((Array.isArray(raw.hide) ? raw.hide : []).filter((r) => Number.isInteger(r) && r >= 0 && r < cells.length))].sort((a, b) => a - b);
+        if (hide.length && hide.length < cells.length) out.hide = hide;
+      }
+      E.sheetCalc?.(out);
+    }
     return out;
   }
   // As many categories and series as a PowerPoint chart brought over may carry.
@@ -2990,8 +3003,12 @@
     const table = h("table", { class: classes, style: { "font-size": `calc(${o.fs}px * var(--os, 1))`, color: o.color, "line-height": String(o.lh), "font-family": o.font ? FONTS[o.font][1] : null } });
     table.append(h("colgroup", {}, o.cols.map((f) => h("col", { style: { width: `${(f * 100).toFixed(3)}%` } }))));
     const body = h("tbody");
+    // フィルター: the rows it hides are not drawn; the rows left share the table's height as theirs did.
+    const hidden = new Set(o.hide || []);
+    const shown = o.rows.reduce((sum, share, r) => sum + (hidden.has(r) ? 0 : share), 0) || 1;
     o.cells.forEach((row, r) => {
-      const tr = h("tr", { "data-r": String(r), style: { height: `${r2(o.rows[r] * o.h)}px` } });
+      if (hidden.has(r)) return;
+      const tr = h("tr", { "data-r": String(r), style: { height: `${r2((o.rows[r] / (hidden.size ? shown : 1)) * o.h)}px` } });
       row.forEach((cell, c) => {
         if (cell.merged) return;
         const edge = (side) => (cell[side] === "none" ? "none" : cell[side] ? `${cell[side].w}px solid ${cell[side].c}` : null);
