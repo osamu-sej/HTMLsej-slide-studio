@@ -1395,7 +1395,7 @@ await step("グラフの数値の書式（表示単位 万・小数1桁・後ろ
   await page.locator('.rb-pop .rb-menu button:has-text("誤差範囲を付ける")').click();
   await page.fill("#askInput", "1");
   await page.keyboard.press("Enter");
-  await page.waitForTimeout(250);
+  await page.waitForFunction(() => document.querySelector("#askTitle")?.textContent.includes("固定値"));
   await page.fill("#askInput", "2000");
   await page.keyboard.press("Enter");
   await page.waitForTimeout(400);
