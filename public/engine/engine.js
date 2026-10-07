@@ -2936,6 +2936,7 @@
       if (fill && fill !== "ffffff" && stroke) flag("色の付いた図形に枠線を付けません（SEJテンプレート）");
       if (obj.dataset.shadow) flag("影は付けません（SEJテンプレート）");
       if (obj.dataset.tshadow) flag("文字に影は付けません（SEJテンプレート）");
+      if (obj.dataset.pattern) for (const color of obj.dataset.pattern.split(",")) if (Engine.BRAND_FILLS && !Engine.BRAND_FILLS.has(color.slice(1).toLowerCase()) && !SEJ_TEXT.has(color.slice(1).toLowerCase()) && !(Engine.BRAND_LINES?.has(color.slice(1).toLowerCase()))) flag(`パターンの色 ${color} はSEJの色（淡青・グレー・淡茶・濃紺・黒）ではありません`);
       if (obj.dataset.toutline && !SEJ_TEXT.has(obj.dataset.toutline.slice(1).toLowerCase())) flag(`文字の輪郭の色 ${obj.dataset.toutline} はSEJの文字色（黒・濃紺・グレー）ではありません`);
       // A table's cells are filled from the same palette.
       for (const td of obj.querySelectorAll("td[data-fill]")) {

@@ -1771,6 +1771,52 @@ await step("図形の効果（影・反射・光彩・ぼかし）: メニュー
   assert(await page.getAttribute(q(""), "data-shadow") === null, "and the mark with them");
 });
 
+await step("パターンの塗りつぶし: 図形の塗りつぶし → パターン…（一覧から選び前景・背景はSEJの色）、描画、単色に戻す、1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("図形");
+  await page.locator('.rb-pop .rb-gallery button[data-shape="rect"]').last().click();
+  await page.mouse.click(...(await stageAt(900, 500)));
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((o) => o.id === id), { w: 800, h: 300, x: 500, y: 400 }), id);
+  await redraw();
+  await pickInPane([id]);
+  const obj = () => page.evaluate((id) => { const o = window.__hsej.slide().elements.find((x) => x.id === id); return { fill: o.fill, pattern: o.pattern || null }; }, id);
+  await tab("図形の書式");
+  await byTitle("図形の塗りつぶし");
+  await page.click('.rb-pop .rb-extra[data-fill="pattern"]');
+  await page.waitForSelector(".pattern-dialog[open]");
+  assert(await page.locator(".pattern-dialog .pat-tile").count() >= 34, "the kinds are drawn small to choose from");
+  await page.click('.pattern-dialog .pat-tile[data-pattern="dkDnDiag"]');
+  await page.selectOption('.pattern-dialog select[name="前景"]', "#1f3864");
+  await page.selectOption('.pattern-dialog select[name="背景"]', "#dce4f2");
+  await page.click(".pattern-dialog .fmt-ok");
+  await page.waitForTimeout(400);
+  let o = await obj();
+  assert(o.pattern?.kind === "dkDnDiag" && o.pattern.fg === "#1f3864" && o.pattern.bg === "#dce4f2" && o.fill === "#dce4f2", `a pattern: ${JSON.stringify(o)}`);
+  const drawn = await page.evaluate((id) => { const el = document.querySelector(`#stageBody .hs-obj[data-el="${id}"]`); const p = el?.querySelector("pattern"); return p ? { fill: el.querySelector("svg > path").getAttribute("fill"), id: p.id, bg: p.querySelector("rect").getAttribute("fill"), fg: p.querySelector("path").getAttribute("fill") } : null; }, id);
+  assert(drawn && drawn.fill === `url(#${drawn.id})` && drawn.fg === "#1f3864" && drawn.bg === "#dce4f2", `drawn as a pattern: ${JSON.stringify(drawn)}`);
+  await shot("pattern");
+  // The dialog shows what the shape has; a plain colour takes the pattern off, and ⌘Z brings it back in one step.
+  await byTitle("図形の塗りつぶし");
+  await page.click('.rb-pop .rb-extra[data-fill="pattern"]');
+  await page.waitForSelector(".pattern-dialog[open]");
+  assert(await page.locator('.pattern-dialog .pat-tile.on[data-pattern="dkDnDiag"]').count() === 1, "the pattern it has is marked");
+  await page.keyboard.press("Escape");
+  await byTitle("図形の塗りつぶし");
+  await page.locator(".rb-pop .rb-sw").nth(3).click();
+  await page.waitForTimeout(300);
+  assert((await obj()).pattern === null, "a plain colour replaces the pattern");
+  await undo();
+  assert((await obj()).pattern?.kind === "dkDnDiag", "⌘Z brings the pattern back");
+  await byTitle("図形の塗りつぶし");
+  await page.click('.rb-pop .rb-extra[data-fill="nopattern"]');
+  await page.waitForTimeout(300);
+  o = await obj();
+  assert(o.pattern === null && o.fill === "#dce4f2", `パターンを外す keeps the background as the colour: ${JSON.stringify(o)}`);
+});
+
 await step("3-D 回転: 図形の効果のギャラリー（右を奥に・等角図法）とオプション（X・Y・遠近）、描画のCSS、1回の⌘Zで戻る", async () => {
   await freshSlide();
   await tab("挿入");

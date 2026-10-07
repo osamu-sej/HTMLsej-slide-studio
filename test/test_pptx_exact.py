@@ -244,6 +244,26 @@ class SourceEffectsTest(unittest.TestCase):
         self.assertEqual(imported["gradient"]["angle"], 90)
         self.assertAlmostEqual(imported["shadow"]["opacity"], 0.5)
 
+    def test_a_pattern_fill_comes_over_as_a_pattern(self):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        kinds = [("ltUpDiag", "ltUpDiag"), ("pct25", "pct25"), ("dashHorz", "horz"), ("zigZag", "dnDiag")]
+        for i, (prst, _) in enumerate(kinds):
+            shape = slide.shapes.add_shape(1, Inches(1), Inches(1 + i), Inches(3), Inches(0.8))
+            shape.text = f"パターン{i}"
+            sppr = shape._element.spPr
+            for child in list(sppr):
+                if etree.QName(child).localname in ("solidFill", "noFill"):
+                    sppr.remove(child)
+            sppr.insert(1, etree.fromstring(f'''<a:pattFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" prst="{prst}"><a:fgClr><a:srgbClr val="1F3864"/></a:fgClr><a:bgClr><a:srgbClr val="DCE4F2"/></a:bgClr></a:pattFill>'''))
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        for i, (_, expected) in enumerate(kinds):
+            o = by_text(deck["slideData"][0], f"パターン{i}")
+            self.assertEqual(o["pattern"], {"kind": expected, "fg": "#1f3864", "bg": "#dce4f2"}, kinds[i][0])
+            self.assertEqual(o["fill"], "none", "the pattern is the fill")
+
     def test_text_shadow_and_glow_on_the_letters_become_text_effects(self):
         prs = Presentation()
         slide = prs.slides.add_slide(prs.slide_layouts[6])

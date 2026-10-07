@@ -36,8 +36,8 @@ export function newId() {
 // 既定の図形に設定・既定のテキスト ボックスに設定・既定の線に設定 (kept on the deck as deck.objectDefaults): which
 // parts of an object's look a new shape, text box or line starts with — never its words, place or size.
 export const DEFAULT_STYLE_KEYS = {
-  shape: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
-  text: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
+  shape: ["fill", "gradient", "pattern", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
+  text: ["fill", "gradient", "pattern", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
   line: ["stroke", "strokeW", "dash", "head", "tail", "headSize", "tailSize", "route", "opacity"],
 };
 
@@ -1146,6 +1146,7 @@ export function snapToPalette(o, P) {
   if (hex(out.stroke)) out.stroke = pick(out.stroke, "line");
   if (hex(out.color)) out.color = pick(out.color, out.kind === "icon" ? "line" : "text");
   if (out.gradient?.stops) out.gradient = { ...out.gradient, stops: out.gradient.stops.map((s) => (hex(s.color) ? { ...s, color: pick(s.color, "fill") } : s)) };
+  if (out.pattern) out.pattern = { ...out.pattern, fg: hex(out.pattern.fg) ? pick(out.pattern.fg, "fill") : out.pattern.fg, bg: hex(out.pattern.bg) ? pick(out.pattern.bg, "fill") : out.pattern.bg };
   if (typeof out.text === "string") {
     out.text = out.text
       .replace(/background-color:\s*(#[0-9a-f]{6})/gi, (_, c) => `background-color: ${pick(c, "highlight")}`)

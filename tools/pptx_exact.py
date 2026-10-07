@@ -50,6 +50,16 @@ DSP = "{%s}" % NS["dsp"]
 
 # PowerPoint's preset shapes → the studio's (public/engine/objects.js SHAPES). `scale` turns an OOXML
 # adjustment (1/100000) into ours; "deg" angles (1/60000 degree).
+# PowerPoint's 54 pattern fills (a:pattFill prst) and the studio's nearest (objects.js PATTERN_KINDS).
+PATTERN_MAP = {
+    **{f"pct{p}": f"pct{p}" for p in (5, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90)},
+    **{k: k for k in ("ltHorz", "horz", "narHorz", "dkHorz", "ltVert", "vert", "narVert", "dkVert", "ltDnDiag", "dnDiag", "dkDnDiag", "wdDnDiag",
+                      "ltUpDiag", "upDiag", "dkUpDiag", "wdUpDiag", "smGrid", "lgGrid", "smCheck", "lgCheck", "diagCross", "openDmnd")},
+    "dashHorz": "horz", "dashVert": "vert", "dashDnDiag": "dnDiag", "dashUpDiag": "upDiag", "dotGrid": "pct20", "cross": "lgGrid",
+    "solidDmnd": "diagCross", "dotDmnd": "openDmnd", "plaid": "lgCheck", "weave": "smCheck", "trellis": "diagCross", "zigZag": "dnDiag",
+    "wave": "ltDnDiag", "divot": "pct30", "shingle": "upDiag", "sphere": "pct50", "horzBrick": "lgGrid", "diagBrick": "diagCross",
+    "smConfetti": "pct20", "lgConfetti": "pct30",
+}
 SHAPE_MAP = {name: name for name in (
     "rect roundRect snip1Rect snip2SameRect snip2DiagRect round1Rect round2SameRect round2DiagRect ellipse triangle "
     "rtTriangle parallelogram trapezoid diamond pentagon hexagon heptagon octagon decagon dodecagon pie chord teardrop "
@@ -526,9 +536,15 @@ class SlideReader:
                 if name == "gradFill":
                     return self.gradient_of(child)
                 if name == "pattFill":
-                    self.deck.stats["unsupported"] += 1
-                    c = self.color(child.find(A + "fgClr")) or self.color(child.find(A + "bgClr"))
-                    return ("solid", c) if c else None
+                    fg = self.color(child.find(A + "fgClr"))
+                    bg = self.color(child.find(A + "bgClr")) or ((255, 255, 255), 1.0)
+                    if fg is None:
+                        c = self.color(child.find(A + "bgClr"))
+                        return ("solid", c) if c else None
+                    kind = PATTERN_MAP.get(child.get("prst", "pct50"), "pct50")
+                    if kind != child.get("prst", "pct50"):
+                        self.deck.stats["unsupported"] += 1  # drawn by the nearest pattern of the studio's
+                    return ("pattern", {"kind": kind, "fg": hexc(fg), "bg": hexc(bg)})
                 if name == "blipFill":
                     return ("blip", child)
                 if name == "grpFill":
@@ -1144,6 +1160,9 @@ class SlideReader:
         elif fill and fill[0] == "gradient":
             out["fill"] = "none"
             out["gradient"] = fill[1]
+        elif fill and fill[0] == "pattern":
+            out["fill"] = "none"
+            out["pattern"] = fill[1]
         else:
             out["fill"] = "none"
         out.update(self.stroke(line) if line else {"stroke": "none"})
@@ -1739,6 +1758,9 @@ class SlideReader:
             elif fill[0] == "gradient":
                 self.objects.append({"id": self.new_id("bg", None), "kind": "shape", "name": "背景", "shape": "rect", **full,
                                      "fill": "none", "gradient": fill[1], "stroke": "none", "locked": True})
+            elif fill[0] == "pattern":
+                self.objects.append({"id": self.new_id("bg", None), "kind": "shape", "name": "背景", "shape": "rect", **full,
+                                     "fill": "none", "pattern": fill[1], "stroke": "none", "locked": True})
             return
 
     def decorations(self):

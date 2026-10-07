@@ -1,6 +1,6 @@
 {
   "name": "htmlsej-slide-studio",
-  "version": "1.55.0",
+  "version": "1.56.0",
   "private": true,
   "type": "module",
   "description": "AI-built slide decks as moving HTML presentations in the SEJ corporate template: outline, edit, talk to the AI, present over a screen share, and export a single HTML file.",

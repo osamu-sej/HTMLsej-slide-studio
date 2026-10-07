@@ -345,14 +345,56 @@ export function createEditorUi(editor, app) {
   const strokeOf = () => { const o = selected()[0]; return o ? E.withDefaults(o).stroke : null; };
   const textColorOf = () => editor.textState()?.color ?? "#1a1a1a";
   // A colour replaces a picture fill (図で塗りつぶし), as in PowerPoint.
-  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color, fillImg: undefined, fillTile: undefined, gradient: undefined } : null));
+  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color, fillImg: undefined, fillTile: undefined, gradient: undefined, pattern: undefined } : null));
   /** 塗りつぶし → グラデーション: a gradient of the SEJ's light fills (kept with its first colour as the fill). */
   const setGradient = (setKey, directionKey) => editor.apply((o) => {
     if (!["shape", "text"].includes(o.kind)) return null;
     const g = ops.makeGradient(setKey, directionKey);
-    return { gradient: g, fill: g.stops[0].color, fillImg: undefined, fillTile: undefined };
+    return { gradient: g, fill: g.stops[0].color, fillImg: undefined, fillTile: undefined, pattern: undefined };
   });
   const gradientOf = () => editor.selectedObjects().find((o) => o.gradient)?.gradient || null;
+  const patternOf = () => editor.selectedObjects().find((o) => o.pattern)?.pattern || null;
+  /** パターンの塗りつぶし: the kinds drawn small (pick one), then the two colours (the SEJ's fills and lines). */
+  function patternDialog() {
+    const now = patternOf() || { kind: "ltUpDiag", fg: "#b7c3da", bg: "#ffffff" };
+    const colors = [...new Map([...E.PALETTE.fill, ...E.PALETTE.line].map(([c, label]) => [c, label])).entries()];
+    const fg = select("前景", colors, now.fg);
+    const bg = select("背景", E.PALETTE.fill.map(([c, label]) => [c, label]), now.bg);
+    let kind = now.kind;
+    const grid = h("div", { class: "pat-grid", role: "listbox", "aria-label": "パターン" });
+    const tiles = new Map();
+    const draw = () => {
+      for (const [key, [label]] of Object.entries(E.PATTERN_KINDS)) {
+        const id = `pt-${key}`;
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 48 36");
+        svg.setAttribute("width", "48");
+        svg.setAttribute("height", "36");
+        const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+        defs.append(E.patternNode(id, { kind: key, fg: fg.value, bg: bg.value }));
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("width", "48");
+        rect.setAttribute("height", "36");
+        rect.setAttribute("fill", `url(#${id})`);
+        svg.append(defs, rect);
+        let tile = tiles.get(key);
+        if (!tile) {
+          tile = h("button", { type: "button", class: "pat-tile", role: "option", "data-pattern": key, title: label, onclick: () => { kind = key; mark(); } });
+          tiles.set(key, tile);
+          grid.append(tile);
+        }
+        tile.replaceChildren(svg);
+      }
+      mark();
+    };
+    const mark = () => { for (const [key, tile] of tiles) { tile.classList.toggle("on", key === kind); tile.setAttribute("aria-selected", String(key === kind)); } };
+    fg.addEventListener("change", draw);
+    bg.addEventListener("change", draw);
+    draw();
+    const dialog = settingsDialog("pattern-dialog", "パターンの塗りつぶし", h("div", {}, grid, labeled("前景", fg), labeled("背景", bg), h("p", { class: "hint" }, "SEJの色だけを使います。PowerPoint のパターンに近い見た目です。")), () => {
+      editor.apply((o) => (["shape", "text"].includes(o.kind) ? { pattern: { kind, fg: fg.value, bg: bg.value }, fill: bg.value, fillImg: undefined, fillTile: undefined, gradient: undefined } : null));
+    });
+  }
   function gradientDialog() {
     const current = ops.gradientChoice(gradientOf()) || { set: ops.GRADIENT_SETS[0][0], direction: "down" };
     const sets = select("色の組み合わせ", ops.GRADIENT_SETS.map(([key, label]) => [key, label]), current.set);
@@ -488,6 +530,8 @@ export function createEditorUi(editor, app) {
     { key: "tile", label: "図を並べて表示", icon: "grid", on: editor.selectedObjects().some((o) => o.fillTile), disabled: !pictureFilled(), run: () => { const on = !editor.selectedObjects().some((o) => o.fillTile); editor.apply((o) => (o.fillImg ? { fillTile: on || undefined } : null)); } },
     { key: "gradient", label: "グラデーション…", icon: "gradient", run: () => gradientDialog() },
     { key: "nogradient", label: "グラデーションを外す", icon: "trash", disabled: !gradientOf(), run: () => editor.apply((o) => (o.gradient ? { gradient: undefined } : null)) },
+    { key: "pattern", label: "パターン…", icon: "grid", run: () => patternDialog() },
+    { key: "nopattern", label: "パターンを外す", icon: "trash", disabled: !patternOf(), run: () => editor.apply((o) => (o.pattern ? { pattern: undefined } : null)) },
     { key: "nopicture", label: "図を外す", icon: "trash", disabled: !pictureFilled(), run: () => editor.apply((o) => (o.fillImg ? { fillImg: undefined, fillTile: undefined } : null)) },
   ];
   const setStroke = (color) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { stroke: color, ...(color !== "none" && o.kind !== "line" && E.withDefaults(o).stroke === "none" ? { strokeW: E.withDefaults(o).strokeW || 2 } : {}) } : o.kind === "icon" ? { color } : null));
@@ -1337,7 +1381,7 @@ export function createEditorUi(editor, app) {
   }
   function styleMenu() {
     return (close) => h("div", { class: "rb-styles" }, QUICK_STYLES.map(([label, style]) => {
-      const sample = h("button", { type: "button", title: label, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); editor.apply((o) => (["shape", "text"].includes(o.kind) ? { ...style, gradient: undefined } : null)); } },
+      const sample = h("button", { type: "button", title: label, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); editor.apply((o) => (["shape", "text"].includes(o.kind) ? { ...style, gradient: undefined, pattern: undefined } : null)); } },
         h("span", { class: "rb-style", style: { background: style.fill === "none" ? "transparent" : style.fill, border: style.stroke !== "none" ? `2px solid ${style.stroke}` : "1px solid transparent", color: style.color } }, "Aa"), h("small", {}, label));
       return sample;
     }));

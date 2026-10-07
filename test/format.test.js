@@ -534,6 +534,39 @@ test("文字の効果: 文字の影・光彩 are kept in range and drawn on the 
   assert.deepEqual(plainJson(ops.defaultStyleOf("text", full)).tshadow, plainJson(full.tshadow));
 });
 
+test("パターンの塗りつぶし: a kind and two colours are kept, drawn as a repeating SVG pattern over the shape; the SEJ's colours are checked", async () => {
+  const { E } = await loadEngine();
+  const shape = (o) => E.normalizeObject({ id: "a", kind: "shape", shape: "rect", x: 100, y: 100, w: 400, h: 200, fill: "#dce4f2", stroke: "none", ...o });
+  assert.deepEqual(plainJson(shape({ pattern: { kind: "ltUpDiag", fg: "#B7C3DA", bg: "#FFFFFF" } }).pattern), { kind: "ltUpDiag", fg: "#b7c3da", bg: "#ffffff" });
+  assert.equal(shape({ pattern: { kind: "nonsense", fg: "#b7c3da", bg: "#ffffff" } }).pattern, undefined, "a kind that is not there");
+  assert.equal(shape({ pattern: { kind: "pct50", fg: "no", bg: "#ffffff" } }).pattern, undefined, "a colour that is not one");
+  assert.equal(E.normalizeObject({ id: "i", kind: "image", src: "data:image/png;base64,AA==", x: 0, y: 0, w: 100, h: 100, pattern: { kind: "pct50", fg: "#808080", bg: "#ffffff" } })?.pattern, undefined, "shapes and text boxes only");
+  // The kinds: a name and a rule over an 8 × 8 cell; the dots grow with the share; a line pattern is a line.
+  const kinds = Object.keys(E.PATTERN_KINDS);
+  assert.ok(kinds.length >= 34, `kinds: ${kinds.length}`);
+  const cells = (kind) => { let n = 0; for (let y = 0; y < 8; y += 1) for (let x = 0; x < 8; x += 1) if (E.PATTERN_KINDS[kind][1](x, y)) n += 1; return n; };
+  assert.ok(cells("pct10") < cells("pct25") && cells("pct25") < cells("pct50") && cells("pct50") < cells("pct90"), "denser means more cells");
+  assert.equal(cells("pct50"), 32, "half of the 64 cells");
+  assert.equal(cells("horz"), 16, "a line in every 4 rows");
+  assert.equal(cells("lgGrid"), 15, "the top row and the left column");
+  assert.ok(kinds.every((k) => typeof E.PATTERN_KINDS[k][0] === "string" && cells(k) > 0 && cells(k) < 64), "every kind shows both colours");
+  // Drawn: a <pattern> in the shape's svg, the path filled with it; a gradient or a picture goes under the pattern or over it as before.
+  const draw = (o) => { const slide = { type: "blank", elements: [shape(o)] }; return E.render(slide, { mode: "present", index: 1, deck: { slides: [slide], theme: "sej" } }); };
+  const el = draw({ fill: "none", pattern: { kind: "dnDiag", fg: "#1f3864", bg: "#dce4f2" } });
+  const pattern = el.querySelector(".hs-obj-geom pattern");
+  assert.ok(pattern, "a pattern is made");
+  assert.equal(pattern.querySelector("rect").getAttribute("fill"), "#dce4f2", "the background colour");
+  assert.equal(pattern.querySelector("path").getAttribute("fill"), "#1f3864", "the cells' colour");
+  assert.equal(pattern.getAttribute("width"), "12", "8 cells of 1.5 px");
+  assert.equal(el.querySelector(".hs-obj-geom > path").getAttribute("fill"), `url(#${pattern.getAttribute("id")})`);
+  assert.equal(el.querySelector(".hs-obj").getAttribute("data-pattern"), "#1f3864,#dce4f2", "the brand check looks at the two colours");
+  assert.equal(draw({}).querySelector(".hs-obj-geom pattern"), null);
+  // Applying one: a plain fill, a gradient or a quick style take it off; the format painter and the defaults carry it; colours snap to the palette.
+  for (const kind of ["shape", "text"]) assert.ok(ops.DEFAULT_STYLE_KEYS[kind].includes("pattern"), kind);
+  const snapped = ops.snapToPalette({ id: "p", kind: "shape", fill: "#ff0000", pattern: { kind: "pct25", fg: "#101010", bg: "#fafafa" } }, E.PALETTE);
+  assert.ok(E.PALETTE.fill.some(([c]) => c === snapped.pattern.fg) && E.PALETTE.fill.some(([c]) => c === snapped.pattern.bg), JSON.stringify(snapped.pattern));
+});
+
 test("3-D 回転: turns about x and y with a camera's field of view are kept in range and drawn as a CSS perspective turn", async () => {
   const { E } = await loadEngine();
   const shape = (o) => E.normalizeObject({ id: "a", kind: "shape", shape: "rect", x: 100, y: 100, w: 400, h: 200, fill: "#dce4f2", stroke: "none", ...o });

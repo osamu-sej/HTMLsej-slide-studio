@@ -1793,6 +1793,12 @@
           .filter((stop) => stop.at != null && stop.color);
         if (stops.length) o.gradient = { angle: num(raw.gradient.angle, -360, 360, 0), stops };
       }
+      // パターンの塗りつぶし: a kind (PATTERN_KINDS) and its two colours.
+      if (raw.pattern && typeof raw.pattern === "object" && PATTERN_KINDS[raw.pattern.kind]) {
+        const fg = hexColor(raw.pattern.fg);
+        const bg = hexColor(raw.pattern.bg);
+        if (fg && bg) o.pattern = { kind: raw.pattern.kind, fg: fg.toLowerCase(), bg: bg.toLowerCase() };
+      }
       // 図形の塗りつぶし → 図: a picture fills the shape (cut to its outline), stretched to cover it or tiled.
       if (typeof raw.fillImg === "string" && /^(data:image\/(png|jpeg|webp|gif)[;,]|idb:|asset:|https:\/\/|blob:)/i.test(raw.fillImg.trim()) && raw.fillImg.length <= 30_000_000) {
         o.fillImg = raw.fillImg.trim();
@@ -3047,6 +3053,40 @@
     for (const [key, value] of [["-webkit-mask-image", mask], ["mask-image", mask], ["-webkit-mask-composite", "source-in"], ["mask-composite", "intersect"]]) el.style.setProperty(key, value);
   }
 
+  // ---------------------------------------------------------------- パターンの塗りつぶし
+  // PowerPoint's pattern fills are tiny 8 × 8 bitmaps repeated over the shape. These are drawn the same way, a cell being 1.5 px on
+  // the slide, in two colours of the SEJ's; a few of PowerPoint's own are drawn by the nearest of these.
+  const BAYER = [[0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26], [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22], [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25], [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21]];
+  const m8 = (n) => ((n % 8) + 8) % 8;
+  const m4 = (n) => ((n % 4) + 4) % 4;
+  const PATTERN_KINDS = {};
+  for (const p of [5, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90]) PATTERN_KINDS[`pct${p}`] = [`${p}%`, (x, y) => BAYER[y][x] < Math.round(p * 0.64)];
+  Object.assign(PATTERN_KINDS, {
+    ltHorz: ["薄い横線", (x, y) => y === 0], horz: ["横線", (x, y) => y % 4 === 0], narHorz: ["細かい横線", (x, y) => y % 2 === 0], dkHorz: ["濃い横線", (x, y) => y % 4 < 2],
+    ltVert: ["薄い縦線", (x) => x === 0], vert: ["縦線", (x) => x % 4 === 0], narVert: ["細かい縦線", (x) => x % 2 === 0], dkVert: ["濃い縦線", (x) => x % 4 < 2],
+    ltDnDiag: ["薄い右下がり斜線", (x, y) => m8(x - y) === 0], dnDiag: ["右下がり斜線", (x, y) => m4(x - y) === 0], dkDnDiag: ["濃い右下がり斜線", (x, y) => m4(x - y) < 2], wdDnDiag: ["太い右下がり斜線", (x, y) => m8(x - y) < 3],
+    ltUpDiag: ["薄い右上がり斜線", (x, y) => m8(x + y) === 0], upDiag: ["右上がり斜線", (x, y) => m4(x + y) === 0], dkUpDiag: ["濃い右上がり斜線", (x, y) => m4(x + y) < 2], wdUpDiag: ["太い右上がり斜線", (x, y) => m8(x + y) < 3],
+    smGrid: ["小さい格子", (x, y) => x % 4 === 0 || y % 4 === 0], lgGrid: ["大きい格子", (x, y) => x === 0 || y === 0],
+    smCheck: ["小さい市松模様", (x, y) => ((x >> 1) + (y >> 1)) % 2 === 0], lgCheck: ["大きい市松模様", (x, y) => ((x >> 2) + (y >> 2)) % 2 === 0],
+    diagCross: ["斜め格子", (x, y) => m4(x - y) === 0 || m4(x + y) === 0], openDmnd: ["ひし形格子", (x, y) => m8(x - y) === 0 || m8(x + y) === 0],
+  });
+  /** An SVG <pattern> of a pattern fill: the background colour and the kind's cells in the other (an unknown kind is 50%). */
+  function patternNode(id, { kind, fg, bg }, cell = 1.5) {
+    const rule = (PATTERN_KINDS[kind] || PATTERN_KINDS.pct50)[1];
+    const size = 8 * cell;
+    let d = "";
+    for (let y = 0; y < 8; y += 1) {
+      for (let x = 0; x < 8; x += 1) {
+        if (!rule(x, y)) continue;
+        let run = 1;
+        while (x + run < 8 && rule(x + run, y)) run += 1;
+        d += `M${r2(x * cell)} ${r2(y * cell)}h${r2(run * cell)}v${r2(cell)}h${r2(-run * cell)}z`;
+        x += run - 1;
+      }
+    }
+    return s("pattern", { id, patternUnits: "userSpaceOnUse", width: size, height: size }, s("rect", { width: size, height: size, fill: bg }), s("path", { d, fill: fg, "shape-rendering": "crispEdges" }));
+  }
+
   function shapeBody(o, rotEl, scale, ctx = {}) {
     const g = geometry(o.shape, o.w, o.h, o.adj, o.path);
     const sw = o.stroke !== "none" ? o.strokeW : 0;
@@ -3062,6 +3102,12 @@
       const grad = s("linearGradient", { id, x1: `${50 - dx}%`, y1: `${50 - dy}%`, x2: `${50 + dx}%`, y2: `${50 + dy}%` });
       for (const stop of o.gradient.stops) grad.append(s("stop", { offset: `${stop.at * 100}%`, "stop-color": stop.color, "stop-opacity": stop.opacity }));
       svg.append(s("defs", {}, grad));
+      paint = `url(#${id})`;
+    }
+    // パターンの塗りつぶし: two colours in a repeating cell pattern (over a gradient).
+    if (!g.open && o.pattern) {
+      const id = newId();
+      svg.append(s("defs", {}, patternNode(id, o.pattern)));
       paint = `url(#${id})`;
     }
     // 図で塗りつぶし: the picture covers the shape's box (cut to its outline), or repeats as tiles.
@@ -3916,6 +3962,7 @@
       "data-shadow": o.shadow && ["shape", "text", "image"].includes(o.kind) ? "1" : null,
       "data-tshadow": o.tshadow && ["shape", "text"].includes(o.kind) ? "1" : null,
       "data-toutline": o.toutline && ["shape", "text"].includes(o.kind) ? o.toutline.color : null,
+      "data-pattern": o.pattern && ["shape", "text"].includes(o.kind) ? `${o.pattern.fg},${o.pattern.bg}` : null,
       "data-autofit": o.autofit && o.autofit !== "none" ? o.autofit : null, "data-item": o.item || null,
       "data-bbox": Object.values(bounds(o)).map(r2).join(","),
       // Screen readers: a decorative object is skipped; a picture-like object says its alternative text.
@@ -4184,7 +4231,7 @@
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
     LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, CHART_STYLES, chartStyleOf, applyChartStyle, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
-    geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, parseTabs, tabsText, tabBoxes, noteHtml, noteToText, noteOf, noteFields, noteFormatted, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
+    geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, PATTERN_KINDS, patternNode, parseTabs, tabsText, tabBoxes, noteHtml, noteToText, noteOf, noteFields, noteFormatted, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, masterLayer, morphPairs, MORPH_KINDS, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,
