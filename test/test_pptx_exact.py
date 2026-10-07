@@ -250,6 +250,7 @@ class SourceEffectsTest(unittest.TestCase):
         box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
         box.text = "光る文字"
         rpr = box.text_frame.paragraphs[0].runs[0]._r.get_or_add_rPr()
+        rpr.append(etree.fromstring('''<a:ln xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" w="19050"><a:solidFill><a:srgbClr val="1F3864"/></a:solidFill></a:ln>'''))
         rpr.append(etree.fromstring('''<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
           <a:glow rad="76200"><a:srgbClr val="B7C3DA"><a:alpha val="60000"/></a:srgbClr></a:glow>
           <a:outerShdw blurRad="38100" dist="38100" dir="2700000"><a:srgbClr val="000000"><a:alpha val="40000"/></a:srgbClr></a:outerShdw>
@@ -268,10 +269,13 @@ class SourceEffectsTest(unittest.TestCase):
         self.assertGreater(fx["tshadow"]["dx"], 0)
         self.assertGreater(fx["tshadow"]["dy"], 0)
         self.assertGreater(fx["tshadow"]["blur"], 0)
+        self.assertEqual(fx["toutline"]["color"], "#1f3864", "文字の輪郭")
+        self.assertAlmostEqual(fx["toutline"]["w"], 3.0, places=1)
         self.assertNotIn("shadow", fx, "the shape's own shadow is another thing")
         ordinary = by_text(deck["slideData"][0], "ふつうの文字")
         self.assertNotIn("tshadow", ordinary)
         self.assertNotIn("tglow", ordinary)
+        self.assertNotIn("toutline", ordinary)
 
 
 if __name__ == "__main__":

@@ -1751,6 +1751,12 @@
         const color = hexColor(raw.tglow.color);
         if (color) o.tglow = { r: Math.round(num(raw.tglow.r, 1, 100, 8)), color: color.toLowerCase(), opacity: r2(num(raw.tglow.opacity, 0.05, 1, 0.6)) };
       }
+      // 文字の輪郭 (toutline): a line of a colour and a width (px) round the letters, drawn behind their fill.
+      if (raw.toutline && typeof raw.toutline === "object") {
+        const color = hexColor(raw.toutline.color);
+        const w = Number(raw.toutline.w);
+        if (color && Number.isFinite(w) && w >= 0.25) o.toutline = { w: r2(Math.min(24, w)), color: color.toLowerCase() };
+      }
       if (Array.isArray(raw.pad) && raw.pad.length === 4) o.pad = raw.pad.map((v) => num(v, 0, 400, 0));
       if (AUTOFIT[raw.autofit]) o.autofit = raw.autofit;
       // 段組み: the words run in two to four columns.
@@ -2911,6 +2917,7 @@
       "letter-spacing": o.ls ? `${o.ls}em` : null, "--psp": o.psp ? `${o.psp}em` : null,
       "text-transform": o.caps === "all" ? "uppercase" : null, "font-variant": o.caps === "small" ? "small-caps" : null,
       "text-shadow": textShadowOf(o),
+      "-webkit-text-stroke": o.toutline ? `${o.toutline.w}px ${o.toutline.color}` : null, "paint-order": o.toutline ? "stroke fill" : null,
       "font-family": o.fontFace ? `"${o.fontFace}", sans-serif` : o.font ? FONTS[o.font][1] : null, "white-space": o.wrap === false ? "pre" : null,
     };
     for (const [k, v] of Object.entries(style)) if (v != null) tx.style.setProperty(k, String(v));
@@ -3802,6 +3809,7 @@
       "data-stroke": ["shape", "text", "image"].includes(o.kind) && o.stroke !== "none" ? o.stroke : null,
       "data-shadow": o.shadow && ["shape", "text", "image"].includes(o.kind) ? "1" : null,
       "data-tshadow": o.tshadow && ["shape", "text"].includes(o.kind) ? "1" : null,
+      "data-toutline": o.toutline && ["shape", "text"].includes(o.kind) ? o.toutline.color : null,
       "data-autofit": o.autofit && o.autofit !== "none" ? o.autofit : null, "data-item": o.item || null,
       "data-bbox": Object.values(bounds(o)).map(r2).join(","),
       // Screen readers: a decorative object is skipped; a picture-like object says its alternative text.

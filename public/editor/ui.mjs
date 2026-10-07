@@ -420,9 +420,9 @@ export function createEditorUi(editor, app) {
   }
   // ---------------------------------------------------------------- 文字の効果 (文字の影・光彩)
   const textFxOf = (key) => editor.textState()?.[key];
-  const setTextFx = (patch) => editor.textFormat("tfx", { tshadow: textFxOf("tshadow"), tglow: textFxOf("tglow"), ...patch });
+  const setTextFx = (patch) => editor.textFormat("tfx", { tshadow: textFxOf("tshadow"), tglow: textFxOf("tglow"), toutline: textFxOf("toutline"), ...patch });
   function textEffectsMenu() {
-    const [shadow, glow] = [textFxOf("tshadow"), textFxOf("tglow")];
+    const [shadow, glow, outline] = [textFxOf("tshadow"), textFxOf("tglow"), textFxOf("toutline")];
     const direction = ops.shadowDirection(shadow);
     return menu([
       { head: "文字の影（SEJテンプレートでは付けません。付けるとブランドの指摘が出ます）" },
@@ -431,22 +431,29 @@ export function createEditorUi(editor, app) {
       "-", { head: "光彩" },
       ...ops.TEXT_GLOW_SIZES.map(([r, label]) => ({ label: `光彩：${label}`, on: glow?.r === r, run: () => setTextFx({ tglow: { r, color: glow?.color || ops.GLOW_COLORS[2][0], opacity: glow?.opacity ?? 0.7 } }) })),
       { label: "光彩なし", disabled: !glow, run: () => setTextFx({ tglow: undefined }) },
+      "-", { head: "文字の輪郭（SEJの文字色）" },
+      ...ops.TEXT_OUTLINE_COLORS.map(([color, label]) => ({ label: `輪郭：${label}`, on: outline?.color === color, run: () => setTextFx({ toutline: ops.textOutline(color, outline) }) })),
+      ...ops.TEXT_OUTLINE_WIDTHS.map(([w, label]) => ({ label: `輪郭の太さ：${label}`, on: outline?.w === w, run: () => setTextFx({ toutline: { w, color: outline?.color || ops.TEXT_OUTLINE_COLORS[1][0] } }) })),
+      { label: "輪郭なし", disabled: !outline, run: () => setTextFx({ toutline: undefined }) },
       "-", { label: "文字の効果のオプション…", icon: "effects", run: () => textEffectsDialog() },
-      { label: "すべての文字の効果をなくす", icon: "trash", disabled: !(shadow || glow), run: () => setTextFx({ tshadow: undefined, tglow: undefined }) },
+      { label: "すべての文字の効果をなくす", icon: "trash", disabled: !(shadow || glow || outline), run: () => setTextFx({ tshadow: undefined, tglow: undefined, toutline: undefined }) },
     ]);
   }
   /** 文字の効果のオプション: 影＝色・透明度・ぼかし・距離・角度、光彩＝大きさ・色・透明度 (pt, like the shape's). */
   function textEffectsDialog() {
     const polar = ops.shadowPolar(textFxOf("tshadow") || { dx: 3, dy: 3, blur: 4, color: "#000000", opacity: 0.4 });
     const glow = textFxOf("tglow");
+    const outline = textFxOf("toutline");
     const input = (name, value, { min = 0, max = 100, step = 1 } = {}) => h("input", { type: "number", name, "aria-label": name, value: String(value), min: String(min), max: String(max), step: String(step) });
     const on = (name, checked) => h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name, checked: checked || null }), h("span", {}, "付ける"));
     const sColor = select("shadowColor", ops.SHADOW_COLORS, polar.color);
     const gColor = select("glowColor", ops.GLOW_COLORS, glow?.color || ops.GLOW_COLORS[2][0]);
+    const oColor = select("outlineColor", ops.TEXT_OUTLINE_COLORS, outline?.color || ops.TEXT_OUTLINE_COLORS[1][0]);
     const body = h("div", { class: "fx-body" },
       fieldset("文字の影", on("shadowOn", Boolean(textFxOf("tshadow"))), labeled("色", sColor), labeled("透明度（%）", input("shadowTransparency", Math.round((1 - polar.opacity) * 100))), labeled("ぼかし（pt）", input("shadowBlur", polar.blur, { max: 50, step: 0.5 })), labeled("距離（pt）", input("shadowDistance", polar.distance, { max: 50, step: 0.5 })), labeled("角度（°）", input("shadowAngle", polar.angle, { min: -180, max: 180 })),
         h("p", { class: "hint" }, "SEJテンプレートでは影を付けません。付けるとブランドの指摘が出ます。")),
-      fieldset("文字の光彩", on("glowOn", Boolean(glow)), labeled("大きさ（pt）", input("glowSize", (glow?.r ?? 10) / 2, { min: 0.5, max: 50, step: 0.5 })), labeled("色", gColor), labeled("透明度（%）", input("glowTransparency", Math.round((1 - (glow?.opacity ?? 0.7)) * 100)))));
+      fieldset("文字の光彩", on("glowOn", Boolean(glow)), labeled("大きさ（pt）", input("glowSize", (glow?.r ?? 10) / 2, { min: 0.5, max: 50, step: 0.5 })), labeled("色", gColor), labeled("透明度（%）", input("glowTransparency", Math.round((1 - (glow?.opacity ?? 0.7)) * 100)))),
+      fieldset("文字の輪郭", on("outlineOn", Boolean(outline)), labeled("太さ（pt）", input("outlineWidth", (outline?.w ?? 2) / 2, { min: 0.25, max: 12, step: 0.25 })), labeled("色", oColor)));
     settingsDialog("tfx-dialog", "文字の効果のオプション", body, () => {
       const dlg = document.querySelector(".tfx-dialog");
       const f = (name) => dlg.querySelector(`[name="${name}"]`);
@@ -454,6 +461,7 @@ export function createEditorUi(editor, app) {
       setTextFx({
         tshadow: f("shadowOn").checked ? ops.shadowFromPolar({ distance: n("shadowDistance"), angle: n("shadowAngle"), blur: n("shadowBlur"), opacity: 1 - n("shadowTransparency") / 100, color: f("shadowColor").value }) : undefined,
         tglow: f("glowOn").checked ? { r: Math.max(1, Math.round(n("glowSize", 5) * 2)), color: f("glowColor").value, opacity: 1 - n("glowTransparency", 30) / 100 } : undefined,
+        toutline: f("outlineOn").checked ? { w: Math.max(0.5, Math.round(n("outlineWidth", 1) * 4) / 2), color: f("outlineColor").value } : undefined,
       });
     });
   }

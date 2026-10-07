@@ -534,6 +534,30 @@ test("文字の効果: 文字の影・光彩 are kept in range and drawn on the 
   assert.deepEqual(plainJson(ops.defaultStyleOf("text", full)).tshadow, plainJson(full.tshadow));
 });
 
+test("文字の輪郭: a line round the letters behind their fill, in the SEJ's text colours; another colour is flagged for the brand", async () => {
+  const { E } = await loadEngine();
+  const text = (o, kind = "text") => E.normalizeObject({ id: "t", kind, x: 100, y: 100, w: 600, h: 120, text: "<p>文字</p>", fs: 40, ...(kind === "shape" ? { shape: "rect", fill: "#dce4f2", stroke: "none" } : {}), ...o });
+  assert.deepEqual(plainJson(text({ toutline: { w: 2, color: "#1F3864" } }).toutline), { w: 2, color: "#1f3864" });
+  assert.equal(text({ toutline: { w: 0, color: "#1f3864" } }).toutline, undefined, "no width, no outline");
+  assert.equal(text({ toutline: { w: 2, color: "nonsense" } }).toutline, undefined, "no colour, no outline");
+  assert.equal(text({ toutline: { w: 900, color: "#808080" } }).toutline.w, 24, "kept to a sensible width");
+  assert.equal(E.normalizeObject({ id: "i", kind: "icon", name: "check", x: 0, y: 0, w: 80, h: 80, toutline: { w: 2, color: "#1f3864" } })?.toutline, undefined, "only text takes it");
+  const draw = (o, kind) => { const slide = { type: "blank", elements: [text(o, kind)] }; return E.render(slide, { mode: "present", index: 1, deck: { slides: [slide], theme: "sej" } }); };
+  for (const kind of ["text", "shape"]) {
+    const el = draw({ toutline: { w: 2, color: "#1f3864" } }, kind);
+    const style = el.querySelector(".hs-obj-tx").getAttribute("style");
+    assert.ok(/-webkit-text-stroke:\s*2px #1f3864/.test(style) && /paint-order:\s*stroke fill/.test(style), `${kind}: ${style}`);
+    assert.equal(el.querySelector(".hs-obj").getAttribute("data-toutline"), "#1f3864");
+  }
+  assert.ok(!/text-stroke/.test(draw({}).querySelector(".hs-obj-tx").getAttribute("style") || ""));
+  // The choices.
+  assert.deepEqual(plainJson(ops.textOutline("#808080", { w: 4, color: "#1f3864" })), { w: 4, color: "#808080" }, "a new colour keeps the width");
+  assert.deepEqual(plainJson(ops.textOutline("#808080")), { w: 2, color: "#808080" });
+  assert.ok(ops.TEXT_OUTLINE_COLORS.every(([c]) => ["#1a1a1a", "#1f3864", "#808080"].includes(c)), "the SEJ's text colours only");
+  assert.equal(ops.textEffectsWords({ tshadow: {}, tglow: {}, toutline: {} }), "影・光彩・輪郭");
+  for (const kind of ["shape", "text"]) assert.ok(ops.DEFAULT_STYLE_KEYS[kind].includes("toutline"), kind);
+});
+
 test("スライド マスター: the deck's master objects lie under every slide's own layer; a slide can leave them out", async () => {
   const { E } = await loadEngine();
   const master = E.normalizeObjects([{ id: "m1", kind: "text", x: 100, y: 900, w: 600, h: 60, text: "<p>プロジェクト名</p>" }, { id: "m2", kind: "shape", shape: "rect", x: 0, y: 0, w: 50, h: 50, fill: "#dce4f2" }, { id: "bad", kind: "nothing" }]);

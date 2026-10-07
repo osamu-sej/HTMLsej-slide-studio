@@ -36,8 +36,8 @@ export function newId() {
 // 既定の図形に設定・既定のテキスト ボックスに設定・既定の線に設定 (kept on the deck as deck.objectDefaults): which
 // parts of an object's look a new shape, text box or line starts with — never its words, place or size.
 export const DEFAULT_STYLE_KEYS = {
-  shape: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
-  text: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
+  shape: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
+  text: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
   line: ["stroke", "strokeW", "dash", "head", "tail", "headSize", "tailSize", "route", "opacity"],
 };
 
@@ -1182,9 +1182,16 @@ export const TEXT_GLOW_SIZES = [[6, "3 pt"], [10, "5 pt"], [16, "8 pt"], [24, "1
 export function textShadowPreset(key) {
   return shadowPreset(key, { distance: 3, blur: 4, color: "#000000", opacity: 0.4 });
 }
-/** The text effects an object has, as words ("影・光彩"), or "". */
+// 文字の輪郭: the line round the letters (px; the screens say pt, 2 px each), in the colours of the SEJ's text.
+export const TEXT_OUTLINE_WIDTHS = [[1, "0.5 pt"], [2, "1 pt"], [3, "1.5 pt"], [4, "2 pt"], [6, "3 pt"]];
+export const TEXT_OUTLINE_COLORS = [["#1a1a1a", "黒"], ["#1f3864", "濃紺"], ["#808080", "グレー"]];
+/** A text outline of a colour (the width kept from the one it has, else 1 pt). */
+export function textOutline(color, current = null) {
+  return { w: current?.w ?? 2, color };
+}
+/** The text effects an object has, as words ("影・光彩・輪郭"), or "". */
 export function textEffectsWords(o) {
-  return [o?.tshadow ? "影" : "", o?.tglow ? "光彩" : ""].filter(Boolean).join("・");
+  return [o?.tshadow ? "影" : "", o?.tglow ? "光彩" : "", o?.toutline ? "輪郭" : ""].filter(Boolean).join("・");
 }
 /** The effects an object has, as one line for a button's hint ("影・反射"), or "" when it has none. */
 export function effectsWords(o) {

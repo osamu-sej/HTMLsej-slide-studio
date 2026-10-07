@@ -588,9 +588,17 @@ class SlideReader:
                 "color": hexc(color), "opacity": r2(clamp(color[1], 0, 1))}
 
     def text_effects(self, rpr):
-        """文字の効果: a run's shadow and glow (a:rPr/a:effectLst), as the studio keeps them on the text box (tshadow, tglow)."""
-        lst = rpr.find(f"{A}effectLst") if rpr is not None else None
+        """文字の効果: a run's outline (a:rPr/a:ln), shadow and glow (a:rPr/a:effectLst), as the studio keeps them on the text box (toutline, tshadow, tglow)."""
         out = {}
+        if rpr is None:
+            return out
+        ln = rpr.find(f"{A}ln")
+        if ln is not None and ln.find(f"{A}noFill") is None and ln.find(f"{A}solidFill") is not None:
+            color = self.color(ln.find(f"{A}solidFill"))
+            width = self.deck.px(int(ln.get("w", 12700)))
+            if color and width >= 0.25:
+                out["toutline"] = {"w": r2(min(24, width)), "color": hexc(color)}
+        lst = rpr.find(f"{A}effectLst")
         if lst is None:
             return out
         shadow = lst.find(f"{A}outerShdw")

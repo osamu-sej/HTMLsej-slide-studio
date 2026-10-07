@@ -13,7 +13,7 @@ const NUDGE = { plain: 5, fine: 1, big: 25 };
 const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96, 120, 150, 200];
 // グリッドとガイド → 間隔 (cm).
 export const GRID_STEPS = [0.1, 0.2, 0.25, 0.5, 1, 2];
-const STYLE_KEYS = ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity", "head", "tail", "headSize", "tailSize", "route", "vertical"];
+const STYLE_KEYS = ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity", "head", "tail", "headSize", "tailSize", "route", "vertical"];
 
 const stored = (key, fallback) => { try { const v = localStorage.getItem(`hsej-editor-${key}`); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } };
 const store = (key, value) => { try { localStorage.setItem(`hsej-editor-${key}`, JSON.stringify(value)); } catch { /* private window */ } };
@@ -1608,7 +1608,7 @@ export function createCanvas(app) {
         case "ls": return { ls: Number(value) || undefined };
         case "caps": return { caps: value === "all" || value === "small" ? value : undefined };
         // 文字の効果: the letters' 影 and 光彩 (a patch of the two, each or neither).
-        case "tfx": return { tshadow: value?.tshadow || undefined, tglow: value?.tglow || undefined };
+        case "tfx": return { tshadow: value?.tshadow || undefined, tglow: value?.tglow || undefined, toutline: value?.toutline || undefined };
         case "paraIndent": return { text: ops.setIndent(E, text, value || {}) || undefined };
         case "vertical": return { vertical: !o.vertical || undefined };
         // 文字列の方向: "h" 横書き, "v" 縦書き, 90 / 270 the letters turned on their sides.
@@ -1646,7 +1646,7 @@ export function createCanvas(app) {
     const chosen = selected(list).filter((o) => ["shape", "text"].includes(o.kind) || (o.kind === "table" && ed.typing?.cell)).map((o) => E.withDefaults(o));
     if (!chosen.length) return null;
     const o = chosen[0];
-    const out = { tshadow: o.tshadow, tglow: o.tglow, fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, textRot: o.textRot || null, list: ops.listOf(o.text), listStyle: ops.listStyleOf(o.text), listProps: ops.listPropsOf(o.text), uline: o.underline ? o.uline || "single" : null, sline: o.strike ? o.sline || "single" : null, pad: o.pad, wrap: o.wrap !== false, caps: o.caps || null, ls: o.ls || 0, psp: o.psp || 0, indent: ops.indentOf(o.text) };
+    const out = { tshadow: o.tshadow, tglow: o.tglow, toutline: o.toutline, fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, textRot: o.textRot || null, list: ops.listOf(o.text), listStyle: ops.listStyleOf(o.text), listProps: ops.listPropsOf(o.text), uline: o.underline ? o.uline || "single" : null, sline: o.strike ? o.sline || "single" : null, pad: o.pad, wrap: o.wrap !== false, caps: o.caps || null, ls: o.ls || 0, psp: o.psp || 0, indent: ops.indentOf(o.text) };
     if (ed.typing) {
       try {
         out.bold = document.queryCommandState("bold");

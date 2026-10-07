@@ -1878,6 +1878,32 @@ await step("文字の効果（文字の影・光彩）: ホームの「文字の
   await undo();
   fx = await obj();
   assert(fx.tshadow.dy === 3 && fx.tglow.color === "#b7c3da", `one undo: ${JSON.stringify(fx)}`);
+  // 文字の輪郭: 色と太さ（濃紺・1.5 pt）。
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("輪郭：濃紺")').click();
+  await page.waitForTimeout(300);
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("輪郭の太さ：1.5 pt")').click();
+  await page.waitForTimeout(300);
+  let outline = await page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id).toutline, id);
+  assert(outline?.w === 3 && outline.color === "#1f3864", `an outline of 1.5 pt in navy: ${JSON.stringify(outline)}`);
+  assert(/-webkit-text-stroke:[^;]*3px/.test(await textStyle()), `drawn round the letters: ${await textStyle()}`);
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("文字の効果のオプション")').click();
+  await page.waitForSelector(".tfx-dialog[open]");
+  await page.fill('.tfx-dialog [name="outlineWidth"]', "2");
+  await page.selectOption('.tfx-dialog [name="outlineColor"]', "#808080");
+  await page.click(".tfx-dialog .fmt-ok");
+  await page.waitForTimeout(300);
+  outline = await page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id).toutline, id);
+  assert(outline?.w === 4 && outline.color === "#808080", `the dialog: ${JSON.stringify(outline)}`);
+  await undo();
+  outline = await page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id).toutline, id);
+  assert(outline?.w === 3 && outline.color === "#1f3864", `one undo: ${JSON.stringify(outline)}`);
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("輪郭なし")').click();
+  await page.waitForTimeout(300);
+  assert(!(await page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id).toutline, id)), "the outline is gone");
   // 光彩だけならブランドの指摘は出ない。すべての文字の効果をなくす。
   await byTitle("文字の効果");
   await page.locator('.rb-pop .rb-menu button:has-text("影なし")').click();
