@@ -124,8 +124,9 @@ test("a chart keeps its kind, labels and numbers, and draws like the layouts' ch
   for (const type of Object.keys(E.CHART_KINDS)) {
     const chart = E.normalizeObject({ kind: "chart", chart: { type, labels: ["A", "B"], series: [{ name: "一", values: [1, 2] }, { name: "二", values: [3, 4] }] } }).chart;
     const model = E.chartModel(E.chartSpec(chart));
-    assert.deepEqual([...model.labels], ["A", "B"], type);
-    assert.deepEqual([...model.series[0].values], [1, 2], type);
+    // The pareto chart is the one that draws its first series from the largest (the data itself stays as it was typed).
+    assert.deepEqual([...model.labels], type === "pareto" ? ["B", "A"] : ["A", "B"], type);
+    assert.deepEqual([...model.series[0].values], type === "pareto" ? [2, 1] : [1, 2], type);
   }
   const slide = { type: "blank", title: "", elements: [o] };
   const el = E.render(slide, { deck: deckWith(slide), index: 1, mode: "thumb" });
