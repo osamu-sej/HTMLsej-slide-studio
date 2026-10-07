@@ -94,3 +94,11 @@ test("what is written is read back by tools/xlsx_table.py: words, formulas, form
   assert.equal(S.plainOf(back.cells[1][3].text), "300");
   assert.equal(S.plainOf(back.cells[3][3].text), "29", "2024/4/30 − 2024/4/1 days");
 });
+
+test("フィルター: the rows a filter hides are hidden rows in the workbook", () => {
+  const cells = S.cellsFromWords([["店", "売上"], ["A店", "10"], ["B店", "20"]]);
+  const parts = workbookParts({ cells, cols: [0.5, 0.5], rows: [1 / 3, 1 / 3, 1 / 3], w: 800, hide: [1], sheet: true });
+  const xml = parts["xl/worksheets/sheet1.xml"];
+  assert.ok(/<row r="2" hidden="1">/.test(xml), "row 2 is hidden");
+  assert.ok(/<row r="1">/.test(xml) && /<row r="3">/.test(xml), "the others are not");
+});

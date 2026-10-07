@@ -13,7 +13,7 @@ const NUDGE = { plain: 5, fine: 1, big: 25 };
 const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96, 120, 150, 200];
 // グリッドとガイド → 間隔 (cm).
 export const GRID_STEPS = [0.1, 0.2, 0.25, 0.5, 1, 2];
-const STYLE_KEYS = ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity", "head", "tail", "headSize", "tailSize", "route", "vertical"];
+const STYLE_KEYS = ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity", "head", "tail", "headSize", "tailSize", "route", "vertical"];
 
 const stored = (key, fallback) => { try { const v = localStorage.getItem(`hsej-editor-${key}`); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } };
 const store = (key, value) => { try { localStorage.setItem(`hsej-editor-${key}`, JSON.stringify(value)); } catch { /* private window */ } };
@@ -867,6 +867,9 @@ export function createCanvas(app) {
       if (own?.f && tx) tx.innerHTML = richOf(own.f);
     }
     if (!tx) return false;
+    // 段落 → タブ設定: the words are edited as they were typed (tab characters), not as the boxes they are drawn in.
+    if (o.kind !== "table" && /\t/.test(o.text || "")) tx.replaceChildren(E.richFragment(o.text));
+    tx.classList.toggle("ed-has-tab", /\t/.test(tx.textContent));
     ed.sel = [id];
     ed.typing = { id, before: tx.innerHTML, node, tx, cell: where };
     if (!tx.innerHTML.trim()) tx.innerHTML = "<p><br></p>";
@@ -1002,6 +1005,20 @@ export function createCanvas(app) {
     const list = (node?.nodeType === 1 ? node : node?.parentElement)?.closest?.("ul, ol");
     if (list && t.tx.contains(list) && fix.style !== (fix.list === "bullet" ? "disc" : "decimal")) list.setAttribute("data-style", fix.style);
   }
+  /** Whether Tab indents here: in a list, or with nothing of the paragraph before the caret (and nothing selected). */
+  function tabIndents() {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount || !ed.typing?.tx.contains(sel.anchorNode)) return true;
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer.nodeType === 3 ? range.startContainer.parentElement : range.startContainer;
+    if (node?.closest("li")) return true;
+    if (!range.collapsed) return false;
+    const block = node?.closest("p, div") || ed.typing.tx;
+    const before = document.createRange();
+    before.selectNodeContents(block);
+    before.setEnd(range.startContainer, range.startOffset);
+    return before.toString() === "";
+  }
   function onTypingKey(event) {
     // F4 (繰り返し) and ⇧F7 (類義語) work while typing too: the box's own handler stops the key from reaching the page's.
     if ((event.key === "F4" || event.key === "F7") && keydown(event)) { event.stopPropagation(); return; }
@@ -1036,7 +1053,9 @@ export function createCanvas(app) {
     }
     if (event.key === "Tab") {
       event.preventDefault();
-      document.execCommand(event.shiftKey ? "outdent" : "indent");
+      // At the start of a paragraph (or in a list) Tab indents; anywhere else it types a tab, which falls on the paragraph's tab stops.
+      if (event.shiftKey || tabIndents()) document.execCommand(event.shiftKey ? "outdent" : "indent");
+      else { document.execCommand("insertText", false, "\t"); ed.typing?.tx.classList.add("ed-has-tab"); }
     }
     event.stopPropagation();
   }
@@ -1520,6 +1539,7 @@ export function createCanvas(app) {
       }
       else if (kind === "size" || kind === "grow" || kind === "shrink") sizeSelectedWords(kind, value);
       // 段落 → インデント on the paragraphs being typed in.
+      else if (kind === "paraTabs") { const text = E.tabsText(E.parseTabs(E.tabsText(value || []))); for (const block of typedBlocks()) { if (text) block.setAttribute("data-tabs", text); else block.removeAttribute("data-tabs"); } }
       else if (kind === "paraIndent") for (const block of typedBlocks()) { block.style.marginLeft = value?.left ? `${value.left}px` : ""; block.style.textIndent = value?.first ? `${value.first}px` : ""; }
       else if (["valign", "lh", "vertical", "direction", "font", "autofit", "pad", "wrap", "psp", "ls", "caps", "tfx", "listStyle", "listProps"].includes(kind)) { stopTyping(true); applyText(kind, value); return; }
       growWhileTyping();
@@ -1608,8 +1628,9 @@ export function createCanvas(app) {
         case "ls": return { ls: Number(value) || undefined };
         case "caps": return { caps: value === "all" || value === "small" ? value : undefined };
         // 文字の効果: the letters' 影 and 光彩 (a patch of the two, each or neither).
-        case "tfx": return { tshadow: value?.tshadow || undefined, tglow: value?.tglow || undefined };
+        case "tfx": return { tshadow: value?.tshadow || undefined, tglow: value?.tglow || undefined, toutline: value?.toutline || undefined };
         case "paraIndent": return { text: ops.setIndent(E, text, value || {}) || undefined };
+        case "paraTabs": return { text: ops.setTabs(E, text, value) || undefined };
         case "vertical": return { vertical: !o.vertical || undefined };
         // 文字列の方向: "h" 横書き, "v" 縦書き, 90 / 270 the letters turned on their sides.
         case "direction": return value === "v" ? { vertical: true, textRot: undefined } : value === 90 || value === 270 ? { vertical: undefined, textRot: value } : { vertical: undefined, textRot: undefined };
@@ -1646,7 +1667,7 @@ export function createCanvas(app) {
     const chosen = selected(list).filter((o) => ["shape", "text"].includes(o.kind) || (o.kind === "table" && ed.typing?.cell)).map((o) => E.withDefaults(o));
     if (!chosen.length) return null;
     const o = chosen[0];
-    const out = { tshadow: o.tshadow, tglow: o.tglow, fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, textRot: o.textRot || null, list: ops.listOf(o.text), listStyle: ops.listStyleOf(o.text), listProps: ops.listPropsOf(o.text), uline: o.underline ? o.uline || "single" : null, sline: o.strike ? o.sline || "single" : null, pad: o.pad, wrap: o.wrap !== false, caps: o.caps || null, ls: o.ls || 0, psp: o.psp || 0, indent: ops.indentOf(o.text) };
+    const out = { tshadow: o.tshadow, tglow: o.tglow, toutline: o.toutline, fs: ops.toPt(o.fs), color: o.color, bold: chosen.every((x) => x.bold), italic: chosen.every((x) => x.italic), underline: chosen.every((x) => x.underline), strike: chosen.every((x) => x.strike), align: o.align, valign: o.valign, vertical: Boolean(o.vertical), lh: o.lh, font: o.font || "body", autofit: o.autofit, textRot: o.textRot || null, list: ops.listOf(o.text), listStyle: ops.listStyleOf(o.text), listProps: ops.listPropsOf(o.text), uline: o.underline ? o.uline || "single" : null, sline: o.strike ? o.sline || "single" : null, pad: o.pad, wrap: o.wrap !== false, caps: o.caps || null, ls: o.ls || 0, psp: o.psp || 0, indent: ops.indentOf(o.text), tabs: ops.tabsOf(E, o.text) };
     if (ed.typing) {
       try {
         out.bold = document.queryCommandState("bold");

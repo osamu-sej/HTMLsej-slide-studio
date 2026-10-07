@@ -26,6 +26,8 @@ export function workbookParts(table, { name = "表" } = {}) {
     if (!formats.has(key)) { formats.set(key, formats.size); formatList.push([key, code]); }
     return formats.get(key);
   };
+  // フィルター: the rows it hides are hidden in Excel too.
+  const hidden = new Set(table.hide || []);
   const rows = table.cells.map((cells, r) => {
     const out = cells.map((cell, c) => {
       if (!cell || cell.merged) return "";
@@ -48,7 +50,7 @@ export function workbookParts(table, { name = "表" } = {}) {
       if (day != null) return `<c r="${ref}" s="${styleOf("yyyy/m/d", true)}"><v>${day}</v></c>`;
       return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${esc(words)}</t></is></c>`;
     }).join("");
-    return out ? `<row r="${r + 1}">${out}</row>` : "";
+    return out ? `<row r="${r + 1}"${hidden.has(r) ? ' hidden="1"' : ""}>${out}</row>` : "";
   }).join("");
   const merges = [];
   table.cells.forEach((row, r) => row.forEach((cell, c) => {

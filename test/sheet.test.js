@@ -305,3 +305,91 @@ test("typing as a patch for ops.tableCells: what the typed words take away is se
   assert.equal(words.cells[0][1].f, undefined);
   assert.equal(S.plainOf(words.cells[0][1].text), "メモ");
 });
+
+test("並べ替え: numbers, then words, blanks last; formulas move with their row; the header and totals rows stay", () => {
+  const rows = [["店", "売上", "倍"], ["C店", "30", "=B2*2"], ["A店", "10", "=B3*2"], ["", "", ""], ["B店", "20", "=B5*2"], ["合計", "=SUM(B2:B5)", ""]];
+  const table = { ...sheetOf(rows), header: true, lastRow: true };
+  assert.deepEqual(S.sortSpan(table), [1, 4], "under the header, above the totals");
+  const asc = { ...table, cells: S.sortRows(table.cells, { col: 1, r0: 1, r1: 4 }) };
+  assert.deepEqual(shown(asc).map((r) => r.join("|")), ["店|売上|倍", "A店|10|20", "B店|20|40", "C店|30|60", "||", "合計|60|"], "numbers up, the blank row last, the sum still covers them");
+  assert.equal(asc.cells[1][2].f, "=B2*2", "a formula follows its row: B3 → B2");
+  const desc = { ...table, cells: S.sortRows(table.cells, { col: 1, desc: true, r0: 1, r1: 4 }) };
+  assert.deepEqual(shown(desc).map((r) => r[0]), ["店", "C店", "B店", "A店", "", "合計"], "blanks stay last in 降順 too");
+  // Words: by the column of words, in Japanese order; the same order again is "nothing to do".
+  const byName = S.sortRows(asc.cells, { col: 0, r0: 1, r1: 4 });
+  assert.deepEqual(byName.slice(1, 5).map((r) => S.plainOf(r[0].text)), ["A店", "B店", "C店", ""]);
+  assert.equal(S.sortRows(asc.cells, { col: 1, r0: 1, r1: 4 }), asc.cells, "already in order: the same cells back");
+  // Mixed: numbers before words before TRUE; equal keys keep their order.
+  const mixed = sheetOf([["x", "k"], ["a", "b"], ["b", "3"], ["c", "a"], ["d", "3"], ["e", "=1>0"]]);
+  const sorted = S.sortRows(mixed.cells, { col: 1, r0: 1, r1: 5 });
+  assert.deepEqual(sorted.slice(1).map((r) => S.plainOf(r[0].text)), ["b", "d", "c", "a", "e"], "3, 3 (stable), the word 'a' before 'b', then TRUE");
+  // $ stays; a reference to a row that moves is rewritten like a copy.
+  const abs = sheetOf([["k", "v"], ["2", "=$B$1"], ["1", "=B3+1"]]);
+  const moved = S.sortRows(abs.cells, { col: 0, r0: 1, r1: 2 });
+  assert.equal(moved[1][1].f, "=B2+1", "the relative one moved up a row");
+  assert.equal(moved[2][1].f, "=$B$1", "the absolute one did not change");
+  // Merged cells in the way, or one row only: nothing is done.
+  const merged = sheetOf([["a", "b"], ["1", "x"], ["2", ""]]);
+  merged.cells[1][1] = { ...merged.cells[1][1], rs: 2 };
+  merged.cells[2][1] = { merged: true };
+  assert.equal(S.sortRows(merged.cells, { col: 0, r0: 1, r1: 2, desc: true }), null);
+  assert.equal(S.sortRows(table.cells, { col: 1, r0: 2, r1: 2 }), null);
+  assert.equal(S.sortRows(table.cells, { col: 1, r0: 1, r1: 99 }), null);
+});
+
+test("フィルター: the rows that fail the condition are hidden; the header and totals rows stay; merged cells stop it", async () => {
+  const rows = [["店", "売上"], ["A店", "10"], ["B店", "1,200"], ["C店", "30"], ["", ""], ["合計", "=SUM(B2:B5)"]];
+  const base = { ...sheetOf(rows), header: true, lastRow: true };
+  const hide = (filter) => S.filterRows({ ...base, cells: S.recalc(base).cells, filter });
+  assert.deepEqual(hide({ col: 1, op: "gt", value: "15" }), [1, 4], "売上 > 15: 10 and the blank row go (1,200 is a number)");
+  assert.deepEqual(hide({ col: 1, op: "le", value: "30" }), [2, 4]);
+  assert.deepEqual(hide({ col: 0, op: "eq", value: "B店" }), [1, 3, 4], "words: equal means the same words");
+  assert.deepEqual(hide({ col: 0, op: "ne", value: "B店" }), [2], "not equal: a blank is not B店");
+  assert.deepEqual(hide({ col: 0, op: "contains", value: "店" }), [4], "contains: the blank row goes");
+  assert.deepEqual(hide({ col: 1, op: "blank" }), [1, 2, 3]);
+  assert.deepEqual(hide({ col: 1, op: "nonblank" }), [4]);
+  assert.deepEqual(hide({ col: 1, op: "nonsense" }), [], "an unknown condition hides nothing");
+  assert.deepEqual(hide(undefined), []);
+  const merged = { ...base, filter: { col: 1, op: "gt", value: "15" } };
+  merged.cells = base.cells.map((row) => row.map((cell) => ({ ...cell })));
+  merged.cells[1][0].rs = 2;
+  merged.cells[2][0] = { merged: true };
+  assert.deepEqual(S.filterRows(merged), [], "a table with merged cells is not filtered");
+  // applyFilter writes `hide` in place and takes it away again.
+  const t = { ...base, cells: S.recalc(base).cells, filter: { col: 1, op: "gt", value: "15" } };
+  S.applyFilter(t);
+  assert.deepEqual([...t.hide], [1, 4]);
+  delete t.filter;
+  S.applyFilter(t);
+  assert.equal(t.hide, undefined);
+});
+
+test("フィルター in the engine: `filter` is kept for a sheet, the hidden rows are not drawn, and the rows left fill the height", async () => {
+  const E = await loadEngine();
+  E.sheetCalc = (table) => { S.recalc(table, { inPlace: true }); S.applyFilter(table); };
+  const rows = [["店", "売上"], ["A店", "10"], ["B店", "20"], ["C店", "30"]];
+  const draw = (filter, extra = {}) => {
+    const o = E.normalizeObject({ id: "t", kind: "table", sheet: true, x: 0, y: 0, w: 800, h: 400, cols: [0.5, 0.5], rows: [0.25, 0.25, 0.25, 0.25], cells: rows.map((r) => r.map((text) => ({ text: `<p>${text}</p>` }))), header: true, filter, ...extra });
+    return { o };
+  };
+  const { o } = draw({ col: 1, op: "gt", value: "15" });
+  assert.deepEqual(plain(o.filter), { col: 1, op: "gt", value: "15" });
+  assert.deepEqual(plain(o.hide), [1], "A店 (10) is hidden");
+  // Not a sheet, or a filter that makes no sense: nothing kept.
+  assert.equal(draw({ col: 9, op: "gt", value: "1" }).o.filter, undefined, "a column that is not there");
+  assert.equal(draw({ col: 0, op: "xx" }).o.filter, undefined, "an unknown condition");
+  assert.equal(draw(undefined).o.hide, undefined);
+  assert.equal(E.normalizeObject({ id: "u", kind: "table", x: 0, y: 0, w: 400, h: 200, cols: [1], rows: [1], cells: [[{ text: "<p>a</p>" }]], filter: { col: 0, op: "eq", value: "a" } }).filter, undefined, "a plain table has no filter");
+  // A saved `hide` is kept as it was when nothing works the rows out (an exported show), and only valid rows.
+  delete E.sheetCalc;
+  const saved = E.normalizeObject({ id: "s", kind: "table", sheet: true, x: 0, y: 0, w: 800, h: 400, cols: [1], rows: [0.5, 0.5], cells: [[{ text: "<p>a</p>" }], [{ text: "<p>b</p>" }]], filter: { col: 0, op: "eq", value: "a" }, hide: [1, 1, 7, -1, "x"] });
+  assert.deepEqual(plain(saved.hide), [1]);
+  // Drawn: the table with the hidden row left out, the others sharing the height.
+  const slide = { type: "blank", elements: [{ ...saved, hide: [1] }] };
+  const el = E.render(slide, { mode: "present", index: 1, deck: { slides: [slide], theme: "sej" } });
+  const trs = [...el.querySelectorAll(".hs-otable tr")];
+  assert.equal(trs.length, 1, "one row left");
+  assert.equal(trs[0].getAttribute("data-r"), "0", "the rows keep their own numbers");
+  assert.equal(trs[0].style.height, "400px", "and the whole height");
+});
+const plain = (v) => JSON.parse(JSON.stringify(v));

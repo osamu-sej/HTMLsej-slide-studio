@@ -293,6 +293,56 @@ export function createTableUi(editor, app, kit) {
     if (!x || (x.r0 === x.r1 && x.c0 === x.c1)) { app.toast("コピー先までドラッグで選んでください（いちばん上の行・左の列が元になります）"); return; }
     change((o) => ({ ...o, cells: sheet.fillBlock(o.cells, x.r0, x.c0, x.r1, x.c1, axis) }));
   }
+  /** 並べ替え: the picked block's rows (one cell picked: the data rows under the header) in the order of the active column. */
+  function sortBy(desc) {
+    const x = sheetCells() || (target()?.o.sheet ? target() : null);
+    if (!x) { app.toast("数式を使う表で、並べ替えの基準にする列のセルを選んでください"); return; }
+    const [first, last] = sheet.sortSpan(x.o);
+    const block = x.cells && x.r1 > x.r0;
+    const [r0, r1] = block ? [x.r0, x.r1] : [first, last];
+    const sorted = sheet.sortRows(x.o.cells, { col: x.cells ? x.c0 : 0, desc, r0, r1 });
+    if (sorted === null) { app.toast("結合したセルをまたぐ行は並べ替えられません（範囲に結合したセルがあるか、並べる行が1つしかありません）"); return; }
+    if (sorted === x.o.cells) { app.toast("すでにその順に並んでいます"); return; }
+    change((o) => ({ ...o, cells: sorted }));
+    app.toast(`${sheet.colName(x.cells ? x.c0 : 0)}列の${desc ? "降順" : "昇順"}に並べ替えました（数式は行といっしょに動きます）`);
+  }
+  /** フィルター: show only the data rows that meet one column's condition (the rest are hidden, not deleted). */
+  function filterDialog() {
+    const o = table();
+    if (!o?.sheet) { app.toast("数式を使う表で使えます"); return; }
+    if (o.cells.some((row) => row.some((cell) => cell.merged || cell.rs > 1 || cell.cs > 1))) { app.toast("結合したセルのある表はフィルターできません"); return; }
+    const now = o.filter || {};
+    const picked = target()?.cells ? target().c0 : null;
+    const [first] = sheet.sortSpan(o);
+    const name = (c) => { const words = first > 0 ? sheet.plainOf(o.cells[0][c]?.text).trim() : ""; return `${sheet.colName(c)}列${words ? `（${words.slice(0, 12)}）` : ""}`; };
+    const field = (label, control) => h("label", { class: "field" }, h("span", {}, label), control);
+    const col = h("select", { name: "col", "aria-label": "列" }, o.cells[0].map((_, c) => h("option", { value: String(c), selected: c === (now.col ?? picked ?? 0) || null }, name(c))));
+    const op = h("select", { name: "op", "aria-label": "条件" }, sheet.FILTER_OPS.map(([v, label]) => h("option", { value: v, selected: v === (now.op || "eq") || null }, label)));
+    const value = h("input", { type: "text", name: "value", "aria-label": "値", value: now.value || "", placeholder: "例：100・東京" });
+    const sync = () => { value.disabled = ["blank", "nonblank"].includes(op.value); };
+    op.addEventListener("change", sync);
+    sync();
+    const dialog = h("dialog", { class: "fmt-dialog filter-dialog", "aria-label": "フィルター" },
+      h("div", { class: "dialog-head" }, h("h3", {}, "フィルター"), h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "閉じる", onclick: () => dialog.close() }, "✕")),
+      h("div", { class: "dialog-body" }, field("列", col), field("条件", op), field("値", value),
+        h("p", { class: "hint" }, "条件に合わない行は表示されません（消えるわけではありません）。見出しの行と合計の行は残ります。")),
+      h("div", { class: "dialog-foot" }, h("button", { type: "button", class: "btn btn-ghost", onclick: () => dialog.close() }, "キャンセル"),
+        h("button", { type: "button", class: "btn btn-primary fmt-ok", onclick: () => {
+          const next = { col: Number(col.value), op: op.value, ...(value.disabled || !value.value.trim() ? {} : { value: value.value.trim() }) };
+          dialog.close();
+          change((x) => ({ ...x, filter: next }));
+          const hidden = (table()?.hide || []).length;
+          app.toast(hidden ? `${hidden}行を隠しました（フィルターを解除すると戻ります）` : "条件に合わない行はありませんでした");
+        } }, "OK")));
+    dialog.addEventListener("close", () => dialog.remove());
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+  function clearFilter() {
+    if (!table()?.filter) { app.toast("フィルターはかかっていません"); return; }
+    change((x) => ({ ...x, filter: undefined, hide: undefined }));
+    app.toast("フィルターを解除しました");
+  }
   /** 桁数・桁区切り・％・¥ on the picked cells (a formula's result takes the setting; a typed number is rewritten). */
   function restyle(op) {
     const x = target();
@@ -405,6 +455,11 @@ export function createTableUi(editor, app, kit) {
         col(btn("sigma", "オートSUM", "選んだセルに、すぐ上（なければ左）の数字の合計を入れる", () => autoSum(), { enabled: isSheet, keep: true }),
           btn("fillDown", "下へコピー", "選んだ範囲の一番上のセルを下へコピー（数式のセルの参照は動きます）", () => fill("down"), { enabled: isSheet, keep: true }),
           btn("fillRight", "右へコピー", "選んだ範囲の一番左のセルを右へコピー（数式のセルの参照は動きます）", () => fill("right"), { enabled: isSheet, keep: true }))),
+      group("並べ替えとフィルター",
+        col(btn("sortAsc", "昇順", "選んだセルの列の昇順に並べ替える（数字→文字の順。空白は最後。見出しの行と合計の行は動きません）。数式は行といっしょに動きます", () => sortBy(false), { enabled: isSheet, keep: true }),
+          btn("sortDesc", "降順", "選んだセルの列の降順に並べ替える", () => sortBy(true), { enabled: isSheet, keep: true })),
+        col(btn("filter", "フィルター", "ある列の条件に合う行だけを表示する（合わない行は隠れるだけで消えません）", () => filterDialog(), { enabled: isSheet, keep: true, pressed: () => Boolean(table()?.filter) }),
+          btn("trash", "解除", "フィルターを解除してすべての行を表示する", () => clearFilter(), { enabled: () => Boolean(table()?.filter), keep: true }))),
       group("数値の書式",
         row(btn("percent", "", "パーセント表示（％）：数式の結果と入力した数字に", () => restyle("pct"), { enabled: isTable, keep: true }),
           btn("yen", "", "円の記号（¥）を付ける・外す", () => restyle("yen"), { enabled: isTable, keep: true }),
@@ -814,7 +869,8 @@ export function createTableUi(editor, app, kit) {
     let x = o.x;
     o.cols.slice(0, -1).forEach((f, i) => { x += f * o.w; out.push(h("span", { class: "ed-handle ed-tline col", "data-handle": `tbl:col:${i}`, title: "ドラッグで列の幅を変える", style: { left: `${x * k}px`, top: `${o.y * k}px`, height: `${o.h * k}px` } })); });
     let y = o.y;
-    o.rows.slice(0, -1).forEach((f, i) => { y += f * o.h; out.push(h("span", { class: "ed-handle ed-tline row", "data-handle": `tbl:row:${i}`, title: "ドラッグで行の高さを変える", style: { top: `${y * k}px`, left: `${o.x * k}px`, width: `${o.w * k}px` } })); });
+    // (With a filter hiding rows the lines are not where the rows are: only the columns' lines are offered.)
+    if (!o.hide?.length) o.rows.slice(0, -1).forEach((f, i) => { y += f * o.h; out.push(h("span", { class: "ed-handle ed-tline row", "data-handle": `tbl:row:${i}`, title: "ドラッグで行の高さを変える", style: { top: `${y * k}px`, left: `${o.x * k}px`, width: `${o.w * k}px` } })); });
     if (line) out.push(h("span", { class: `ed-tguide ${line.axis}`, style: line.axis === "cols" ? { left: `${line.at * k}px`, top: `${o.y * k}px`, height: `${o.h * k}px` } : { top: `${line.at * k}px`, left: `${o.x * k}px`, width: `${o.w * k}px` } }));
     return out;
   }

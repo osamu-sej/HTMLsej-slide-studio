@@ -1307,6 +1307,8 @@ li > .hs-detail-badge, li > .hs-drill-badge { top: 50%; right: 0; transform: tra
 @keyframes hs-live { 50% { opacity: .35; } }
 .hs-player-notes { max-height: 24vh; overflow: auto; padding: 14px 5vw 64px; background: #11141c; color: #dfe5f0; font-size: 17px; line-height: 1.75; white-space: pre-wrap; }
 .hs-player-notes p { margin: 0 0 .35em; }
+.hs-tabbox { display: inline-block; vertical-align: top; white-space: nowrap; overflow: visible; }
+.hs-tabbox.is-end { display: inline; white-space: normal; }
 .hs-player-notes ul, .hs-player-notes ol { margin: .1em 0 .35em; padding-left: 1.5em; }
 .hs-player-notes a { color: #9bb8ff; }
 .hs-player-grid { position: absolute; inset: 0; z-index: 12; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 22px; align-content: start; padding: 40px 48px 90px; background: rgba(7, 8, 12, .96); }

@@ -1092,6 +1092,84 @@
     const n = m ? Math.round(Number(m[1]) * 100) / 100 : NaN;
     return Number.isFinite(n) && n !== 0 && n >= lo && n <= hi ? n : null;
   };
+  // ---------------------------------------------------------------- タブ設定 (tab stops of a paragraph)
+  const TAB_ALIGNS = { l: "left", c: "center", r: "right" };
+  const DEFAULT_TAB = 144;
+  /** "l300,r900" → [{ type: "l", x: 300 }, { type: "r", x: 900 }] (sorted, one to a place, at most 8, within the slide). */
+  function parseTabs(text) {
+    const seen = new Set();
+    const stops = [];
+    for (const part of String(text ?? "").split(",")) {
+      const m = /^\s*([lcr])(\d{1,4}(?:\.\d{1,2})?)\s*$/.exec(part);
+      if (!m) continue;
+      const x = Math.round(Number(m[2]) * 100) / 100;
+      if (!(x >= 1 && x <= 3840) || seen.has(x)) continue;
+      seen.add(x);
+      stops.push({ type: m[1], x });
+    }
+    return stops.sort((a, b) => a.x - b.x).slice(0, 8);
+  }
+  const tabsText = (stops) => (stops || []).map((s) => `${s.type}${s.x}`).join(",");
+  /**
+   * Where the words between tab characters sit. Every word but a last left-aligned one gets a box: [{ w, align }] (w in px, null for
+   * "as long as it is"). A left stop starts the next word at it; a right (centre) stop ends (centres) it there; the room between two
+   * stops that do not meet is shared half and half. Past the last stop, tabs fall on every inch (144 px) as in PowerPoint.
+   * `start` is where the first word begins (the stops are measured from the same edge).
+   */
+  function tabBoxes(count, stops, start = 0) {
+    const all = (stops || []).slice();
+    let at = all.length ? all[all.length - 1].x : 0;
+    while (all.length < count - 1) { at = (Math.floor(at / DEFAULT_TAB) + 1) * DEFAULT_TAB; all.push({ type: "l", x: at }); }
+    const out = [];
+    let cursor = start;
+    for (let k = 0; k < count; k += 1) {
+      const before = k ? all[k - 1] : null;
+      const after = k < count - 1 ? all[k] : null;
+      let end;
+      if (before?.type === "r") end = before.x;
+      else if (before?.type === "c") end = before.x + Math.max(0, before.x - cursor);
+      else if (!after) end = null;
+      else if (after.type === "l") end = after.x;
+      else end = cursor + (after.x - cursor) / 2;
+      out.push({ w: end === null ? null : r2(Math.max(0, end - cursor)), align: before ? TAB_ALIGNS[before.type] : "left" });
+      if (end !== null) cursor = Math.max(cursor, end);
+    }
+    return out;
+  }
+  /** The nodes of a paragraph cut at its tab characters: an array of arrays of nodes (an inline tag across a tab is repeated on each side). */
+  function splitTabs(parent, doc) {
+    const segs = [[]];
+    for (const node of [...parent.childNodes]) {
+      if (node.nodeType === 3) {
+        node.data.split("\t").forEach((piece, i) => { if (i) segs.push([]); if (piece) segs[segs.length - 1].push(doc.createTextNode(piece)); });
+      } else if (node.nodeType === 1 && node.textContent.includes("\t")) {
+        splitTabs(node, doc).forEach((nodes, i) => {
+          if (i) segs.push([]);
+          if (nodes.length) { const copy = node.cloneNode(false); copy.append(...nodes); segs[segs.length - 1].push(copy); }
+        });
+      } else segs[segs.length - 1].push(node);
+    }
+    return segs;
+  }
+  /** タブ設定 on drawing: the paragraphs of a text box that hold tab characters become boxes at their stops (nothing is measured). */
+  function layoutTabs(tx) {
+    const doc = root.document;
+    for (const p of [...tx.querySelectorAll("p")]) {
+      if (!p.textContent.includes("\t")) continue;
+      const segs = splitTabs(p, doc);
+      // Stops are measured from the text area's left edge; the first line starts at the paragraph's margin plus its first-line indent.
+      const start = (pxLen(p.style?.marginLeft, 0, 1200) || 0) + (pxLen(p.style?.textIndent, -1200, 1200) || 0);
+      const boxes = tabBoxes(segs.length, parseTabs(p.getAttribute("data-tabs")), start);
+      p.replaceChildren(...segs.map((nodes, i) => {
+        const span = doc.createElement("span");
+        span.className = "hs-tabbox";
+        if (boxes[i].w !== null) span.setAttribute("style", `width: ${boxes[i].w}px; text-align: ${boxes[i].align}`);
+        else span.classList.add("is-end");
+        span.append(...nodes);
+        return span;
+      }));
+    }
+  }
   function blockAttrs(src, el) {
     const align = String(src.style?.textAlign || src.getAttribute?.("align") || "").toLowerCase();
     const last = String(src.style?.textAlignLast || src.style?.getPropertyValue?.("text-align-last") || "").toLowerCase();
@@ -1106,6 +1184,9 @@
     if (styles.length) el.setAttribute("style", styles.join("; "));
     const indent = Number(src.getAttribute?.("data-indent"));
     if (Number.isInteger(indent) && indent > 0) el.setAttribute("data-indent", String(Math.min(indent, 4)));
+    // 段落 → タブ設定: where the tab stops are (data-tabs="l300,r900": left / center / right at that many px from the text's left).
+    const tabs = tabsText(parseTabs(src.getAttribute?.("data-tabs")));
+    if (tabs && el.tagName === "P") el.setAttribute("data-tabs", tabs);
     // A paragraph's own bullet or number ("■", "①", "1."), as PowerPoint draws it (a hanging mark).
     const bullet = String(src.getAttribute?.("data-bullet") || "");
     if (bullet.trim() && /^[^<>"&\s]{1,4}$/u.test(bullet) && el.tagName !== "LI") el.setAttribute("data-bullet", bullet);
@@ -1751,6 +1832,12 @@
         const color = hexColor(raw.tglow.color);
         if (color) o.tglow = { r: Math.round(num(raw.tglow.r, 1, 100, 8)), color: color.toLowerCase(), opacity: r2(num(raw.tglow.opacity, 0.05, 1, 0.6)) };
       }
+      // 文字の輪郭 (toutline): a line of a colour and a width (px) round the letters, drawn behind their fill.
+      if (raw.toutline && typeof raw.toutline === "object") {
+        const color = hexColor(raw.toutline.color);
+        const w = Number(raw.toutline.w);
+        if (color && Number.isFinite(w) && w >= 0.25) o.toutline = { w: r2(Math.min(24, w)), color: color.toLowerCase() };
+      }
       if (Array.isArray(raw.pad) && raw.pad.length === 4) o.pad = raw.pad.map((v) => num(v, 0, 400, 0));
       if (AUTOFIT[raw.autofit]) o.autofit = raw.autofit;
       // 段組み: the words run in two to four columns.
@@ -1935,6 +2022,7 @@
     return values.map((v) => Math.round((v / sum) * 100000) / 100000);
   }
   /** A table's cells (rich text, fill, colour, bold, alignment, merged spans), columns and rows, style options. */
+  const TABLE_FILTER_OPS = new Set(["eq", "ne", "contains", "gt", "ge", "lt", "le", "nonblank", "blank"]);
   function normalizeTable(raw) {
     // Excel スプレッドシート: a table with `sheet` lets cells hold formulas (`f`), whose words (`text`) the editor's sheet.mjs works out.
     const sheet = raw.sheet === true;
@@ -1994,7 +2082,19 @@
     const out = { cells, cols: shares(raw.cols, nCols), rows: shares(raw.rows, cells.length) };
     if (TABLE_STYLES[raw.style] && raw.style !== "sej") out.style = raw.style;
     for (const key of ["header", "banded", "firstCol", "lastRow"]) if (typeof raw[key] === "boolean") out[key] = raw[key];
-    if (sheet) { out.sheet = true; E.sheetCalc?.(out); }
+    if (sheet) {
+      out.sheet = true;
+      // フィルター: one column's condition; the rows it hides (`hide`) are worked out again whenever the sheet is normalised
+      // (the editor's hook), and kept as they were saved where there is none (an exported show).
+      const flt = raw.filter;
+      if (flt && typeof flt === "object" && Number.isInteger(flt.col) && flt.col >= 0 && flt.col < nCols && TABLE_FILTER_OPS.has(flt.op)) {
+        out.filter = { col: flt.col, op: flt.op };
+        if (typeof flt.value === "string" && flt.value.trim()) out.filter.value = flt.value.trim().slice(0, 100);
+        const hide = [...new Set((Array.isArray(raw.hide) ? raw.hide : []).filter((r) => Number.isInteger(r) && r >= 0 && r < cells.length))].sort((a, b) => a - b);
+        if (hide.length && hide.length < cells.length) out.hide = hide;
+      }
+      E.sheetCalc?.(out);
+    }
     return out;
   }
   // As many categories and series as a PowerPoint chart brought over may carry.
@@ -2885,6 +2985,7 @@
     const tx = h("div", { class: "hs-obj-tx" });
     const frag = richFragment(o.text || "");
     tx.append(frag);
+    if (!o.vertical && !o.textRot && (o.text || "").includes("\t")) layoutTabs(tx);
     for (const el of tx.querySelectorAll("[style*='font-size']")) {
       const size = pxSize(el.style.fontSize);
       if (size) el.style.fontSize = `calc(${size}px * var(--os, 1))`;
@@ -2898,6 +2999,7 @@
       "letter-spacing": o.ls ? `${o.ls}em` : null, "--psp": o.psp ? `${o.psp}em` : null,
       "text-transform": o.caps === "all" ? "uppercase" : null, "font-variant": o.caps === "small" ? "small-caps" : null,
       "text-shadow": textShadowOf(o),
+      "-webkit-text-stroke": o.toutline ? `${o.toutline.w}px ${o.toutline.color}` : null, "paint-order": o.toutline ? "stroke fill" : null,
       "font-family": o.fontFace ? `"${o.fontFace}", sans-serif` : o.font ? FONTS[o.font][1] : null, "white-space": o.wrap === false ? "pre" : null,
     };
     for (const [k, v] of Object.entries(style)) if (v != null) tx.style.setProperty(k, String(v));
@@ -2990,8 +3092,12 @@
     const table = h("table", { class: classes, style: { "font-size": `calc(${o.fs}px * var(--os, 1))`, color: o.color, "line-height": String(o.lh), "font-family": o.font ? FONTS[o.font][1] : null } });
     table.append(h("colgroup", {}, o.cols.map((f) => h("col", { style: { width: `${(f * 100).toFixed(3)}%` } }))));
     const body = h("tbody");
+    // フィルター: the rows it hides are not drawn; the rows left share the table's height as theirs did.
+    const hidden = new Set(o.hide || []);
+    const shown = o.rows.reduce((sum, share, r) => sum + (hidden.has(r) ? 0 : share), 0) || 1;
     o.cells.forEach((row, r) => {
-      const tr = h("tr", { "data-r": String(r), style: { height: `${r2(o.rows[r] * o.h)}px` } });
+      if (hidden.has(r)) return;
+      const tr = h("tr", { "data-r": String(r), style: { height: `${r2((o.rows[r] / (hidden.size ? shown : 1)) * o.h)}px` } });
       row.forEach((cell, c) => {
         if (cell.merged) return;
         const edge = (side) => (cell[side] === "none" ? "none" : cell[side] ? `${cell[side].w}px solid ${cell[side].c}` : null);
@@ -3785,6 +3891,7 @@
       "data-stroke": ["shape", "text", "image"].includes(o.kind) && o.stroke !== "none" ? o.stroke : null,
       "data-shadow": o.shadow && ["shape", "text", "image"].includes(o.kind) ? "1" : null,
       "data-tshadow": o.tshadow && ["shape", "text"].includes(o.kind) ? "1" : null,
+      "data-toutline": o.toutline && ["shape", "text"].includes(o.kind) ? o.toutline.color : null,
       "data-autofit": o.autofit && o.autofit !== "none" ? o.autofit : null, "data-item": o.item || null,
       "data-bbox": Object.values(bounds(o)).map(r2).join(","),
       // Screen readers: a decorative object is skipped; a picture-like object says its alternative text.
@@ -4053,7 +4160,7 @@
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
     LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, CHART_STYLES, chartStyleOf, applyChartStyle, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
-    geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, noteHtml, noteToText, noteOf, noteFields, noteFormatted, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
+    geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, parseTabs, tabsText, tabBoxes, noteHtml, noteToText, noteOf, noteFields, noteFormatted, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, masterLayer, morphPairs, MORPH_KINDS, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,

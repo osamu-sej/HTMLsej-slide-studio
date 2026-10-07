@@ -420,9 +420,9 @@ export function createEditorUi(editor, app) {
   }
   // ---------------------------------------------------------------- 文字の効果 (文字の影・光彩)
   const textFxOf = (key) => editor.textState()?.[key];
-  const setTextFx = (patch) => editor.textFormat("tfx", { tshadow: textFxOf("tshadow"), tglow: textFxOf("tglow"), ...patch });
+  const setTextFx = (patch) => editor.textFormat("tfx", { tshadow: textFxOf("tshadow"), tglow: textFxOf("tglow"), toutline: textFxOf("toutline"), ...patch });
   function textEffectsMenu() {
-    const [shadow, glow] = [textFxOf("tshadow"), textFxOf("tglow")];
+    const [shadow, glow, outline] = [textFxOf("tshadow"), textFxOf("tglow"), textFxOf("toutline")];
     const direction = ops.shadowDirection(shadow);
     return menu([
       { head: "文字の影（SEJテンプレートでは付けません。付けるとブランドの指摘が出ます）" },
@@ -431,22 +431,29 @@ export function createEditorUi(editor, app) {
       "-", { head: "光彩" },
       ...ops.TEXT_GLOW_SIZES.map(([r, label]) => ({ label: `光彩：${label}`, on: glow?.r === r, run: () => setTextFx({ tglow: { r, color: glow?.color || ops.GLOW_COLORS[2][0], opacity: glow?.opacity ?? 0.7 } }) })),
       { label: "光彩なし", disabled: !glow, run: () => setTextFx({ tglow: undefined }) },
+      "-", { head: "文字の輪郭（SEJの文字色）" },
+      ...ops.TEXT_OUTLINE_COLORS.map(([color, label]) => ({ label: `輪郭：${label}`, on: outline?.color === color, run: () => setTextFx({ toutline: ops.textOutline(color, outline) }) })),
+      ...ops.TEXT_OUTLINE_WIDTHS.map(([w, label]) => ({ label: `輪郭の太さ：${label}`, on: outline?.w === w, run: () => setTextFx({ toutline: { w, color: outline?.color || ops.TEXT_OUTLINE_COLORS[1][0] } }) })),
+      { label: "輪郭なし", disabled: !outline, run: () => setTextFx({ toutline: undefined }) },
       "-", { label: "文字の効果のオプション…", icon: "effects", run: () => textEffectsDialog() },
-      { label: "すべての文字の効果をなくす", icon: "trash", disabled: !(shadow || glow), run: () => setTextFx({ tshadow: undefined, tglow: undefined }) },
+      { label: "すべての文字の効果をなくす", icon: "trash", disabled: !(shadow || glow || outline), run: () => setTextFx({ tshadow: undefined, tglow: undefined, toutline: undefined }) },
     ]);
   }
   /** 文字の効果のオプション: 影＝色・透明度・ぼかし・距離・角度、光彩＝大きさ・色・透明度 (pt, like the shape's). */
   function textEffectsDialog() {
     const polar = ops.shadowPolar(textFxOf("tshadow") || { dx: 3, dy: 3, blur: 4, color: "#000000", opacity: 0.4 });
     const glow = textFxOf("tglow");
+    const outline = textFxOf("toutline");
     const input = (name, value, { min = 0, max = 100, step = 1 } = {}) => h("input", { type: "number", name, "aria-label": name, value: String(value), min: String(min), max: String(max), step: String(step) });
     const on = (name, checked) => h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name, checked: checked || null }), h("span", {}, "付ける"));
     const sColor = select("shadowColor", ops.SHADOW_COLORS, polar.color);
     const gColor = select("glowColor", ops.GLOW_COLORS, glow?.color || ops.GLOW_COLORS[2][0]);
+    const oColor = select("outlineColor", ops.TEXT_OUTLINE_COLORS, outline?.color || ops.TEXT_OUTLINE_COLORS[1][0]);
     const body = h("div", { class: "fx-body" },
       fieldset("文字の影", on("shadowOn", Boolean(textFxOf("tshadow"))), labeled("色", sColor), labeled("透明度（%）", input("shadowTransparency", Math.round((1 - polar.opacity) * 100))), labeled("ぼかし（pt）", input("shadowBlur", polar.blur, { max: 50, step: 0.5 })), labeled("距離（pt）", input("shadowDistance", polar.distance, { max: 50, step: 0.5 })), labeled("角度（°）", input("shadowAngle", polar.angle, { min: -180, max: 180 })),
         h("p", { class: "hint" }, "SEJテンプレートでは影を付けません。付けるとブランドの指摘が出ます。")),
-      fieldset("文字の光彩", on("glowOn", Boolean(glow)), labeled("大きさ（pt）", input("glowSize", (glow?.r ?? 10) / 2, { min: 0.5, max: 50, step: 0.5 })), labeled("色", gColor), labeled("透明度（%）", input("glowTransparency", Math.round((1 - (glow?.opacity ?? 0.7)) * 100)))));
+      fieldset("文字の光彩", on("glowOn", Boolean(glow)), labeled("大きさ（pt）", input("glowSize", (glow?.r ?? 10) / 2, { min: 0.5, max: 50, step: 0.5 })), labeled("色", gColor), labeled("透明度（%）", input("glowTransparency", Math.round((1 - (glow?.opacity ?? 0.7)) * 100)))),
+      fieldset("文字の輪郭", on("outlineOn", Boolean(outline)), labeled("太さ（pt）", input("outlineWidth", (outline?.w ?? 2) / 2, { min: 0.25, max: 12, step: 0.25 })), labeled("色", oColor)));
     settingsDialog("tfx-dialog", "文字の効果のオプション", body, () => {
       const dlg = document.querySelector(".tfx-dialog");
       const f = (name) => dlg.querySelector(`[name="${name}"]`);
@@ -454,6 +461,7 @@ export function createEditorUi(editor, app) {
       setTextFx({
         tshadow: f("shadowOn").checked ? ops.shadowFromPolar({ distance: n("shadowDistance"), angle: n("shadowAngle"), blur: n("shadowBlur"), opacity: 1 - n("shadowTransparency") / 100, color: f("shadowColor").value }) : undefined,
         tglow: f("glowOn").checked ? { r: Math.max(1, Math.round(n("glowSize", 5) * 2)), color: f("glowColor").value, opacity: 1 - n("glowTransparency", 30) / 100 } : undefined,
+        toutline: f("outlineOn").checked ? { w: Math.max(0.5, Math.round(n("outlineWidth", 1) * 4) / 2), color: f("outlineColor").value } : undefined,
       });
     });
   }
@@ -818,9 +826,14 @@ export function createEditorUi(editor, app) {
     const after = number("段落後", Math.round((st.psp || 0) * fsPt * 10) / 10, { step: 1, min: 0, max: 200 });
     const lineSel = select("行間", [...LINE_HEIGHTS.map(([v, l]) => [v, l]), ["custom", "倍数…"]], LINE_HEIGHTS.some(([v]) => Math.abs(v - (st.lh || 0)) < 0.01) ? LINE_HEIGHTS.find(([v]) => Math.abs(v - st.lh) < 0.01)[0] : "custom");
     const lineNum = number("倍数", st.lh || 1.35, { step: 0.05, min: 0.5, max: 5 });
+    // タブ位置: "左 3, 右 9" (cm from the text's left) — one stop a word, at most eight.
+    const TAB_WORDS = { l: "左", c: "中央", r: "右" };
+    const tabsNow = (st.tabs || []).map((s) => `${TAB_WORDS[s.type]} ${ops.toCm(s.x)}`).join(", ");
+    const tabsInput = h("input", { type: "text", name: "tabs", "aria-label": "タブ位置", value: tabsNow, placeholder: "例：左 3, 右 9（cm）" });
     const body = h("div", {},
       fieldset("全般", labeled("配置", align)),
       fieldset("インデント", labeled("テキストの前（cm）", left), labeled("最初の行", firstKind), labeled("幅（cm）", width)),
+      fieldset("タブ", labeled("タブ位置", tabsInput), h("p", { class: "hint" }, "文字の編集中に Tab キーで入れたタブが、ここで決めた位置にそろいます（左・中央・右。入れなければ2.5cmごと）。")),
       fieldset("間隔", labeled("段落後（pt）", after), labeled("行間", lineSel), labeled("倍数", lineNum)),
       h("p", { class: "hint" }, "インデントは選んだ段落（入力中でなければ、選んだ図形のすべての段落）に付きます。"));
     settingsDialog("para-dialog", "段落", body, () => {
@@ -829,6 +842,15 @@ export function createEditorUi(editor, app) {
       const b = ops.fromCm(Math.max(0, Number(left.value) || 0));
       const next = firstKind.value === "hanging" ? { left: Math.round((b + w) * 100) / 100, first: -w } : firstKind.value === "first" ? { left: b, first: w } : { left: b, first: 0 };
       if (Math.abs(next.left - ind.left) > 0.5 || Math.abs(next.first - ind.first) > 0.5) editor.textFormat("paraIndent", next);
+      // The tab stops as typed: "左 3, 右 9" → l/r at those cm (a bare number is a left stop).
+      const stops = tabsInput.value.split(/[,、，]/).map((part) => {
+        const m = /^\s*(左|中央|右|l|c|r)?\s*([\d.]+)/i.exec(part.replace(/[０-９．]/g, (c) => (c === "．" ? "." : String.fromCharCode(c.charCodeAt(0) - 0xfee0))));
+        if (!m || !(Number(m[2]) > 0)) return null;
+        const type = { 左: "l", 中央: "c", 右: "r" }[m[1]] || (m[1] || "l").toLowerCase();
+        return { type, x: Math.round(ops.fromCm(Number(m[2])) * 100) / 100 };
+      }).filter(Boolean);
+      const nextTabs = E.parseTabs(E.tabsText(stops));
+      if (E.tabsText(nextTabs) !== E.tabsText(st.tabs || [])) editor.textFormat("paraTabs", nextTabs);
       const lh = lineSel.value === "custom" ? Number(lineNum.value) : Number(lineSel.value);
       if (lh > 0 && Math.abs(lh - (st.lh || 0)) > 0.001) editor.textFormat("lh", Math.min(5, Math.max(0.5, lh)));
       const psp = Math.round(((Number(after.value) || 0) / fsPt) * 100) / 100;

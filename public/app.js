@@ -31,7 +31,7 @@ import { createGifExport } from "./editor/gif.mjs?v=__APP_VERSION__";
 import { lockHtml } from "./editor/protect.mjs?v=__APP_VERSION__";
 import { createBackground } from "./editor/background.mjs?v=__APP_VERSION__";
 import { createAutoCorrect } from "./editor/autocorrect.mjs?v=__APP_VERSION__";
-import { recalc as sheetRecalc } from "./editor/sheet.mjs?v=__APP_VERSION__";
+import { applyFilter as applySheetFilter, recalc as sheetRecalc } from "./editor/sheet.mjs?v=__APP_VERSION__";
 import { createPrintMasters, masterSlides, normalizeMasters } from "./editor/printmaster.mjs?v=__APP_VERSION__";
 
 /*
@@ -42,7 +42,7 @@ import { createPrintMasters, masterSlides, normalizeMasters } from "./editor/pri
 const $ = (id) => document.getElementById(id);
 const E = window.SlideEngine;
 // Excel スプレッドシート: a table with `sheet` has its formulas worked out whenever the engine normalizes it.
-E.sheetCalc = (table) => sheetRecalc(table, { inPlace: true });
+E.sheetCalc = (table) => { sheetRecalc(table, { inPlace: true }); applySheetFilter(table); };
 E.lottieUrl = "/vendor/lottie.js";
 const APP_VERSION = "__APP_VERSION__";
 const STORAGE = {

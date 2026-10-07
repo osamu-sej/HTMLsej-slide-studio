@@ -1771,6 +1771,110 @@ await step("図形の効果（影・反射・光彩・ぼかし）: メニュー
   assert(await page.getAttribute(q(""), "data-shadow") === null, "and the mark with them");
 });
 
+await step("表の並べ替え・フィルター: 昇順・降順（数式は行といっしょに動く）、条件に合う行だけを表示、解除、1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("表");
+  await page.waitForSelector(".tb-pick");
+  await page.click('.tb-pick-more[data-sheet="insert"]');
+  await page.waitForFunction(() => (window.__hsej.slide().elements || []).some((o) => o.kind === "table" && o.sheet), null, { timeout: 5000 });
+  const table = async () => (await slide()).elements.filter((o) => o.kind === "table").at(-1);
+  const words = (o, r, c) => (o.cells[r][c].text || "").replace(/<[^>]+>/g, "");
+  let o = await table();
+  assert(words(o, 1, 0) === "店舗" && words(o, 2, 0) === "宅配", "店舗 (1,200) above 宅配 (480) to begin with");
+  // B2 is being typed in: 昇順 sorts the data rows by column B (the header and the total row stay).
+  await byTitle("選んだセルの列の昇順");
+  await page.waitForFunction(() => /宅配/.test((window.__hsej.slide().elements.find((x) => x.kind === "table").cells[1][0].text || "")), null, { timeout: 5000 });
+  o = await table();
+  assert(words(o, 1, 0) === "宅配" && words(o, 2, 0) === "店舗" && words(o, 3, 0) === "合計" && words(o, 0, 0) === "項目", "宅配 first, the header and the total stay");
+  assert(o.cells[1][3].f === "=SUM(B2:C2)" && words(o, 1, 3) === "1,040", `the formula moved with its row: ${o.cells[1][3].f} ${words(o, 1, 3)}`);
+  assert(words(o, 3, 1) === "1,680", "the total still adds both rows");
+  await shot("sheet-sorted");
+  await page.keyboard.press("Escape");
+  await undo();
+  assert(words(await table(), 1, 0) === "店舗", "⌘Z puts the rows back in one step");
+  await page.locator("#stageBody .hs-obj td[data-r='1'][data-c='1']").first().dblclick();
+  await page.waitForSelector(".tb-fx:not([disabled])");
+  await byTitle("選んだセルの列の降順");
+  await page.waitForTimeout(400);
+  assert(words(await table(), 1, 0) === "店舗", "already in 降順: nothing moves");
+  // フィルター: column B larger than 1000 → 宅配 is hidden, not deleted.
+  await byTitle("ある列の条件に合う行だけを表示する");
+  await page.waitForSelector(".filter-dialog[open]");
+  await page.selectOption('.filter-dialog [name="col"]', "1");
+  await page.selectOption('.filter-dialog [name="op"]', "gt");
+  await page.fill('.filter-dialog [name="value"]', "1000");
+  await page.click(".filter-dialog .fmt-ok");
+  await page.waitForFunction(() => (window.__hsej.slide().elements.find((x) => x.kind === "table").hide || []).length === 1, null, { timeout: 5000 });
+  o = await table();
+  assert(JSON.stringify(o.hide) === "[2]" && o.filter.op === "gt" && o.cells.length === 4, `row 3 (宅配) hidden, all four rows kept: ${JSON.stringify({ hide: o.hide, filter: o.filter })}`);
+  const trs = await page.$$eval(`#stageBody .hs-obj[data-kind="table"] tr`, (list) => list.map((tr) => tr.getAttribute("data-r")));
+  assert(trs.join(",") === "0,1,3", `the hidden row is not drawn: ${trs}`);
+  await shot("sheet-filtered");
+  assert(await page.locator('.rb-btn[title^="ある列の条件に合う行だけを表示する"][aria-pressed="true"]').count() === 1, "the button shows a filter is on");
+  // The sum still counts the hidden row (as Excel's SUM does), and the rows left are not squeezed.
+  assert(words(o, 3, 1) === "1,680", "SUM counts hidden rows too");
+  // 解除.
+  await byTitle("フィルターを解除");
+  await page.waitForFunction(() => !(window.__hsej.slide().elements.find((x) => x.kind === "table").filter), null, { timeout: 5000 });
+  o = await table();
+  assert(!o.hide && o.cells.length === 4, "every row is back");
+  assert((await page.$$eval(`#stageBody .hs-obj[data-kind="table"] tr`, (list) => list.length)) === 4, "and drawn");
+});
+
+await step("段落のタブ設定: Tab キーでタブを入れる・段落ダイアログでタブ位置（左・右）を決める・描画で位置にそろう・1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("テキスト ボックス");
+  await menuItem("横書きテキスト ボックス");
+  await page.mouse.click(...(await stageAt(300, 400)));
+  await page.waitForTimeout(250);
+  // At the start of a paragraph Tab indents; after words it types a tab character.
+  await page.keyboard.type("品名");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("数量");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("金額");
+  await page.waitForTimeout(200);
+  assert(await page.evaluate(() => document.querySelector(".ed-typing-tx")?.textContent === "品名\t数量\t金額"), `tabs typed: ${JSON.stringify(await page.evaluate(() => document.querySelector(".ed-typing-tx")?.textContent))}`);
+  assert(await page.locator(".ed-typing-tx.ed-has-tab").count() === 1, "the box shows its tabs while it is edited");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const id = (await slide()).elements.at(-1).id;
+  const obj = () => page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id), id);
+  let o = await obj();
+  assert(/品名\t数量\t金額/.test(o.text), `the tab characters are kept: ${JSON.stringify(o.text)}`);
+  const widths = () => page.$$eval(`#stageBody .hs-obj[data-el="${id}"] .hs-tabbox`, (list) => list.map((b) => b.getAttribute("style") || "(natural)"));
+  assert((await widths()).join("|") === "width: 144px; text-align: left|width: 144px; text-align: left|(natural)", `an inch to a tab to begin with: ${await widths()}`);
+  // 段落 → タブ位置: 左 5 cm, 右 15 cm.
+  await tab("ホーム");
+  await byTitle("段落の設定");
+  await page.waitForSelector(".para-dialog[open]");
+  await page.fill('.para-dialog input[name="tabs"]', "左 5, 右 15");
+  await page.click(".para-dialog .fmt-ok");
+  await page.waitForTimeout(400);
+  o = await obj();
+  assert(/data-tabs="l\d+(\.\d+)?,r\d+(\.\d+)?"/.test(o.text), `the stops are on the paragraph: ${o.text}`);
+  const stops = await page.evaluate((id) => window.SlideEngine.parseTabs(/data-tabs="([^"]*)"/.exec(window.__hsej.slide().elements.find((x) => x.id === id).text)[1]), id);
+  assert(Math.abs(stops[0].x - 5 * 144 / 2.54) < 1 && Math.abs(stops[1].x - 15 * 144 / 2.54) < 1, `5 cm and 15 cm: ${JSON.stringify(stops)}`);
+  // A box wide enough for the stops (words past the box's right edge wrap, as they do in PowerPoint).
+  await page.evaluate((id) => Object.assign(window.__hsej.slide().elements.find((x) => x.id === id), { w: 1500, x: 200 }), id);
+  await redraw();
+  await pickInPane([id]);
+  const drawn = await widths();
+  assert(drawn.length === 3 && /text-align: right/.test(drawn[2]) && /text-align: left/.test(drawn[0]), `boxes at the stops: ${drawn}`);
+  assert(Math.abs(parseFloat(drawn[0].match(/width: ([\d.]+)px/)[1]) - stops[0].x) < 0.5, "the first word reaches the left stop");
+  await shot("tabs");
+  // The dialog shows what is set; ⌘Z takes the stops back in one step.
+  await byTitle("段落の設定");
+  await page.waitForSelector(".para-dialog[open]");
+  assert(/^左 5(\.0+)?, 右 15/.test(await page.inputValue('.para-dialog input[name="tabs"]')), `shown again: ${await page.inputValue('.para-dialog input[name="tabs"]')}`);
+  await page.keyboard.press("Escape");
+  await undo();
+  o = await obj();
+  assert(!/data-tabs/.test(o.text) && /品名\t数量\t金額/.test(o.text), "⌘Z: the stops go, the words stay");
+});
+
 await step("文字の効果（文字の影・光彩）: ホームの「文字の影」・図形の書式の文字の効果・オプション、影はブランドの指摘、1回の⌘Zで戻る", async () => {
   await freshSlide();
   await tab("挿入");
@@ -1827,6 +1931,32 @@ await step("文字の効果（文字の影・光彩）: ホームの「文字の
   await undo();
   fx = await obj();
   assert(fx.tshadow.dy === 3 && fx.tglow.color === "#b7c3da", `one undo: ${JSON.stringify(fx)}`);
+  // 文字の輪郭: 色と太さ（濃紺・1.5 pt）。
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("輪郭：濃紺")').click();
+  await page.waitForTimeout(300);
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("輪郭の太さ：1.5 pt")').click();
+  await page.waitForTimeout(300);
+  let outline = await page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id).toutline, id);
+  assert(outline?.w === 3 && outline.color === "#1f3864", `an outline of 1.5 pt in navy: ${JSON.stringify(outline)}`);
+  assert(/-webkit-text-stroke:[^;]*3px/.test(await textStyle()), `drawn round the letters: ${await textStyle()}`);
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("文字の効果のオプション")').click();
+  await page.waitForSelector(".tfx-dialog[open]");
+  await page.fill('.tfx-dialog [name="outlineWidth"]', "2");
+  await page.selectOption('.tfx-dialog [name="outlineColor"]', "#808080");
+  await page.click(".tfx-dialog .fmt-ok");
+  await page.waitForTimeout(300);
+  outline = await page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id).toutline, id);
+  assert(outline?.w === 4 && outline.color === "#808080", `the dialog: ${JSON.stringify(outline)}`);
+  await undo();
+  outline = await page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id).toutline, id);
+  assert(outline?.w === 3 && outline.color === "#1f3864", `one undo: ${JSON.stringify(outline)}`);
+  await byTitle("文字の効果");
+  await page.locator('.rb-pop .rb-menu button:has-text("輪郭なし")').click();
+  await page.waitForTimeout(300);
+  assert(!(await page.evaluate((id) => window.__hsej.slide().elements.find((x) => x.id === id).toutline, id)), "the outline is gone");
   // 光彩だけならブランドの指摘は出ない。すべての文字の効果をなくす。
   await byTitle("文字の効果");
   await page.locator('.rb-pop .rb-menu button:has-text("影なし")').click();

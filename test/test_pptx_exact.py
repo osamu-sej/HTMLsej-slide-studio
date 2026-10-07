@@ -250,6 +250,7 @@ class SourceEffectsTest(unittest.TestCase):
         box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
         box.text = "光る文字"
         rpr = box.text_frame.paragraphs[0].runs[0]._r.get_or_add_rPr()
+        rpr.append(etree.fromstring('''<a:ln xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" w="19050"><a:solidFill><a:srgbClr val="1F3864"/></a:solidFill></a:ln>'''))
         rpr.append(etree.fromstring('''<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
           <a:glow rad="76200"><a:srgbClr val="B7C3DA"><a:alpha val="60000"/></a:srgbClr></a:glow>
           <a:outerShdw blurRad="38100" dist="38100" dir="2700000"><a:srgbClr val="000000"><a:alpha val="40000"/></a:srgbClr></a:outerShdw>
@@ -268,10 +269,32 @@ class SourceEffectsTest(unittest.TestCase):
         self.assertGreater(fx["tshadow"]["dx"], 0)
         self.assertGreater(fx["tshadow"]["dy"], 0)
         self.assertGreater(fx["tshadow"]["blur"], 0)
+        self.assertEqual(fx["toutline"]["color"], "#1f3864", "文字の輪郭")
+        self.assertAlmostEqual(fx["toutline"]["w"], 3.0, places=1)
         self.assertNotIn("shadow", fx, "the shape's own shadow is another thing")
         ordinary = by_text(deck["slideData"][0], "ふつうの文字")
         self.assertNotIn("tshadow", ordinary)
         self.assertNotIn("tglow", ordinary)
+        self.assertNotIn("toutline", ordinary)
+
+    def test_tab_characters_and_tab_stops_are_kept(self):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(8), Inches(1))
+        box.text_frame.text = "品名\t数量\t金額"
+        ppr = box.text_frame.paragraphs[0]._p.get_or_add_pPr()
+        ppr.append(etree.fromstring('''<a:tabLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:tab pos="2743200" algn="l"/><a:tab pos="5486400" algn="r"/></a:tabLst>'''))
+        plain = slide.shapes.add_textbox(Inches(1), Inches(3), Inches(8), Inches(1))
+        plain.text_frame.text = "名前\t値"
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        tabbed = by_text(deck["slideData"][0], "品名")
+        self.assertIn("品名\t数量\t金額", tabbed["text"], "the tab characters stay")
+        self.assertIn('data-tabs="l432,r864"', tabbed["text"], "3 in and 6 in, in px (144 to the inch)")
+        ordinary = by_text(deck["slideData"][0], "名前")
+        self.assertIn("名前\t値", ordinary["text"])
+        self.assertNotIn("data-tabs", ordinary["text"], "no stops: the default inch stops apply")
 
 
 if __name__ == "__main__":

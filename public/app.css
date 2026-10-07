@@ -1090,6 +1090,7 @@ body.is-final .film-item { -webkit-user-drag: none; }
 .slide-wrap .hs-slide.hs-editable .hs-obj.ed-typing .hs-obj-text { cursor: text; }
 .slide-wrap .hs-slide .ed-typing-tx { outline: none; user-select: text; -webkit-user-select: text; cursor: text; caret-color: #1f3864; }
 .slide-wrap .hs-slide .ed-typing-tx * { user-select: text; -webkit-user-select: text; }
+.slide-wrap .hs-slide .ed-typing-tx.ed-has-tab p { white-space: pre-wrap; tab-size: 144px; }
 .ed-layer { position: absolute; inset: 0; z-index: 20; pointer-events: none; }
 .ed-outline, .ed-frame { position: absolute; box-sizing: border-box; transform-origin: 50% 50%; }
 .ed-outline { border: 1.5px solid #2b6be0; }
