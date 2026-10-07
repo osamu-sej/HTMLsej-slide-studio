@@ -2416,7 +2416,8 @@ def read_chartex(root):
     if not series:
         return None
     layout = series[0].get("layoutId", "")
-    if any(sr.get("layoutId") == "paretoLine" for sr in series):
+    pareto = any(sr.get("layoutId") == "paretoLine" for sr in series)
+    if pareto:
         series = [sr for sr in series if sr.get("layoutId") != "paretoLine"]
 
     def name_of(sr, i):
@@ -2456,6 +2457,19 @@ def read_chartex(root):
         if groups:
             n = max(len(v) for _, v in groups)
             out = {"type": "boxplot", "labels": [str(i + 1) for i in range(n)], "series": [{"name": name, "values": v + [None] * (n - len(v))} for name, v in groups]}
+    elif layout == "clusteredColumn" and pareto and cats and cats[0]:
+        # パレート図: the categories with their values (or, with none, how often each comes), the line of shares drawn by the studio.
+        labels = [str(c or f"項目{i + 1}") for i, c in enumerate(cats[0])]
+        nums = [_cx_num(vals[i]) if i < len(vals) else None for i in range(len(labels))]
+        totals = {}
+        for label, n in zip(labels, nums):
+            if any(v is not None for v in nums):
+                if n is not None:
+                    totals[label] = totals.get(label, 0) + n
+            else:
+                totals[label] = totals.get(label, 0) + 1
+        if totals:
+            out = {"type": "pareto", "labels": list(totals)[:500], "series": [{"name": name_of(series[0], 0), "values": list(totals.values())[:500]}]}
     elif layout == "clusteredColumn":
         nums = [x for x in (_cx_num(v) for v in vals) if x is not None][:500]
         if nums:

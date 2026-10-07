@@ -556,7 +556,10 @@
     const second = Boolean(combo && opts.axis2);
     const [padL, padR] = second ? [92, 92] : [0, 0];
     const all = combo && !second ? [...values, ...model.series[1].values] : values;
-    const max = axisBounds(opts, 0, niceMax(Math.max(...all, 0) * 1.05))[1];
+    // パレート図: the bars' scale ends at their total, so the running share (right axis, 0〜100%) climbs the same height.
+    const pct = Boolean(second && opts.axis2Pct);
+    const total = values.reduce((sum, v) => sum + Math.max(0, v), 0);
+    const max = axisBounds(opts, 0, pct && total > 0 ? total : niceMax(Math.max(...all, 0) * 1.05))[1];
     const slot = (w - padL - padR) / n;
     const bw = barLayout(opts, slot, 1, Math.min(110, slot * 0.54)).bar;
     const y0 = top + plotH;
@@ -574,16 +577,17 @@
     if (opts.trend && !combo) trendLine(svg, values.map((_, i) => i + 1), values, (x, y) => [slot * (x - 1) + slot / 2, y0 - (Math.min(max, Math.max(0, y)) / max) * plotH], "var(--ink)", opts, 0, [w, top - 24]);
     if (combo) {
       const line = model.series[1].values;
-      const lo2 = second ? Math.min(0, ...line) : 0;
-      const hi2 = second ? lo2 + niceMax((Math.max(...line, 0) - lo2) * 1.05 || 1) : max;
+      const lo2 = pct ? 0 : second ? Math.min(0, ...line) : 0;
+      const hi2 = pct ? 100 : second ? lo2 + niceMax((Math.max(...line, 0) - lo2) * 1.05 || 1) : max;
+      const unit2 = pct ? "%" : "";
       const yLine = (value) => y0 - ((Math.min(hi2, Math.max(lo2, value)) - lo2) / (hi2 - lo2 || 1)) * plotH;
-      if (second) for (let k = 0; k <= 4; k += 1) { const v = lo2 + ((hi2 - lo2) * k) / 4; svg.append(s("text", { class: "hs-tick hs-tick2", x: w - padR + 12, y: yLine(v) + 8, "text-anchor": "start" }, fmtTick(Math.round(v * 100) / 100))); }
+      if (second) for (let k = 0; k <= 4; k += 1) { const v = lo2 + ((hi2 - lo2) * k) / 4; svg.append(s("text", { class: "hs-tick hs-tick2", x: w - padR + 12, y: yLine(v) + 8, "text-anchor": "start" }, `${fmtTick(Math.round(v * 100) / 100)}${unit2}`)); }
       const pts = line.map((value, i) => [padL + slot * i + slot / 2, yLine(value)]);
       const len = pathLength(pts);
       svg.append(s("polyline", { class: "hs-draw", points: pts.map((p) => p.join(",")).join(" "), fill: "none", stroke: "var(--accent)", "stroke-width": 5, "stroke-linejoin": "round", "stroke-linecap": "round", style: { "--len": len } }));
       pts.forEach(([x, y], i) => {
-        svg.append(markTip(s("circle", { cx: x, cy: y, r: 9, fill: "var(--accent)", stroke: "var(--bg)", "stroke-width": 4 }), `${labels[i]}：${fmt(line[i])}`, i));
-        if (i === pts.length - 1 || (second && n <= 12)) svg.append(s("text", { class: "hs-val hot", x, y: y - 22, "text-anchor": "middle" }, fmt(line[i])));
+        svg.append(markTip(s("circle", { cx: x, cy: y, r: 9, fill: "var(--accent)", stroke: "var(--bg)", "stroke-width": 4 }), `${labels[i]}：${fmt(line[i])}${unit2}`, i));
+        if (i === pts.length - 1 || (second && n <= 12)) svg.append(s("text", { class: "hs-val hot", x, y: y - 22, "text-anchor": "middle" }, `${fmt(line[i])}${unit2}`));
       });
     }
   }

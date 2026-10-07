@@ -1771,6 +1771,40 @@ await step("図形の効果（影・反射・光彩・ぼかし）: メニュー
   assert(await page.getAttribute(q(""), "data-shadow") === null, "and the mark with them");
 });
 
+await step("パレート図: 順不同の値が大きい順の棒になり、累積比率の線が右軸（0〜100%）に出る・書式設定の棒の間隔・1回の⌘Zで戻る", async () => {
+  await freshSlide();
+  await tab("挿入");
+  await ribbonBtn("グラフ");
+  await page.click('.tb-chart-grid button[data-chart="pareto"]');
+  await page.waitForTimeout(400);
+  if (await page.isVisible("dialog[open]")) await page.keyboard.press("Escape");
+  const id = (await slide()).elements.at(-1).id;
+  const chartOf = async () => (await slide()).elements.find((x) => x.id === id).chart;
+  let c = await chartOf();
+  assert(c.type === "pareto" && c.labels.length === 6 && c.series.length === 1, `a pareto with its sample: ${JSON.stringify({ type: c.type, n: c.labels.length })}`);
+  const texts = () => page.$$eval(`#stageBody .hs-obj[data-el="${id}"] .hs-chart svg text`, (list) => list.map((t) => t.textContent));
+  let t = await texts();
+  const order = ["弁当", "パン", "おにぎり", "惣菜", "サラダ", "デザート"];
+  assert(JSON.stringify(t.filter((x) => order.includes(x))) === JSON.stringify(order), `the bars come largest first: ${t.join(",")}`);
+  const right = await page.$$eval(`#stageBody .hs-obj[data-el="${id}"] .hs-tick2`, (list) => list.map((x) => x.textContent));
+  assert(right.join(",") === "0%,25%,50%,75%,100%", `the right axis is in percent: ${right}`);
+  assert(t.includes("100%"), "the line ends at 100%");
+  await shot("pareto");
+  // The values stay as typed (the order is only drawn); the gap is the bars' own.
+  assert(JSON.stringify(c.labels) === JSON.stringify(["おにぎり", "弁当", "パン", "サラダ", "デザート", "惣菜"]), "the data keeps the order it was typed in");
+  await tab("グラフのデザイン");
+  await byTitle("データ ラベル・凡例・目盛線");
+  await page.locator('.rb-pop .rb-menu button:has-text("グラフの書式設定")').click();
+  await page.waitForSelector(".cf-dialog[open]");
+  await page.fill('.cf-dialog input[name="gap"]', "40");
+  await page.click(".cf-dialog .cf-ok");
+  await page.waitForTimeout(300);
+  c = await chartOf();
+  assert(c.opts?.gap === 40 && !c.opts.axis2, `the gap is kept: ${JSON.stringify(c.opts)}`);
+  await undo();
+  assert(!(await chartOf()).opts?.gap, "⌘Z takes the gap back in one step");
+});
+
 await step("表の並べ替え・フィルター: 昇順・降順（数式は行といっしょに動く）、条件に合う行だけを表示、解除、1回の⌘Zで戻る", async () => {
   await freshSlide();
   await tab("挿入");

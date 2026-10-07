@@ -1420,7 +1420,7 @@
   // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
   const TABLE_STYLES = { sej: "罫線（SEJ）", rows: "淡い横線", grid: "格子", lines: "横線だけ", plain: "線なし", brown: "淡茶の見出し" };
   const CHART_KINDS = { bar: "縦棒", "clustered-bar": "集合縦棒", "stacked-bar": "積み上げ縦棒", "100-stacked-bar": "100%積み上げ縦棒", line: "折れ線", "multi-line": "折れ線（複数）", area: "面", pie: "円", donut: "ドーナツ", scatter: "散布図", radar: "レーダー", waterfall: "ウォーターフォール", funnel: "じょうご", combo: "複合（棒と折れ線）",
-    hbar: "集合横棒", "stacked-hbar": "積み上げ横棒", "stacked-area": "積み上げ面", bubble: "バブル", histogram: "ヒストグラム", boxplot: "箱ひげ図", treemap: "ツリーマップ", sunburst: "サンバースト" };
+    hbar: "集合横棒", "stacked-hbar": "積み上げ横棒", "stacked-area": "積み上げ面", bubble: "バブル", histogram: "ヒストグラム", boxplot: "箱ひげ図", treemap: "ツリーマップ", sunburst: "サンバースト", pareto: "パレート図" };
   const DASHES = {
     solid: ["実線", null], roundDot: ["丸点線", [0, 2]], squareDot: ["角点線", [1, 1]], dash: ["破線", [4, 3]], dashDot: ["一点鎖線", [4, 3, 1, 3]],
     longDash: ["長破線", [8, 3]], longDashDot: ["長鎖線", [8, 3, 1, 3]], longDashDotDot: ["長二点鎖線", [8, 3, 1, 3, 1, 3]],
@@ -2102,7 +2102,7 @@
   const CHART_MAX_SERIES = 100;
   // The chart kinds that take 近似曲線, 棒の間隔・重なり, 項目を逆順, 折れ線の書式 and 目盛間隔.
   const TREND_CHART_KINDS = new Set(["bar", "line", "multi-line", "scatter"]);
-  const BAR_GAP_CHARTS = new Set(["bar", "combo", "clustered-bar", "stacked-bar", "100-stacked-bar", "hbar", "stacked-hbar"]);
+  const BAR_GAP_CHARTS = new Set(["bar", "combo", "pareto", "clustered-bar", "stacked-bar", "100-stacked-bar", "hbar", "stacked-hbar"]);
   const REVERSE_CHARTS = new Set(["bar", "combo", "clustered-bar", "stacked-bar", "100-stacked-bar", "line", "multi-line", "area", "stacked-area", "hbar", "stacked-hbar", "pie", "donut", "funnel", "radar"]);
   const LINE_CHART_KINDS = new Set(["line", "multi-line"]);
   const STEP_CHARTS = new Set(["line", "multi-line", "area", "scatter"]);
@@ -2832,11 +2832,19 @@
     } else if (["multi-line", "clustered-bar", "area", "scatter", "radar", "hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst"].includes(c.type)) {
       data.xAxisLabels = c.labels;
       data.series = c.series.map((s) => ({ label: s.name, values: s.values }));
+    } else if (c.type === "pareto") {
+      // パレート図: the first series from the largest, a line of the running share (%) on a scale of its own that ends at 100.
+      const order = c.labels.map((_, i) => i).sort((a, b) => (first[b] ?? 0) - (first[a] ?? 0) || a - b);
+      const total = order.reduce((sum, i) => sum + Math.max(0, first[i] ?? 0), 0) || 1;
+      let run = 0;
+      data.items = order.map((i) => { run += Math.max(0, first[i] ?? 0); return { label: c.labels[i], barValue: first[i] ?? 0, value: Math.round((run / total) * 1000) / 10 }; });
+      data.legendLabels = [c.series[0]?.name, "累積比率"].filter(Boolean);
     } else if (c.type === "combo") {
       const line = c.series[1]?.values || first;
       data.items = c.labels.map((label, i) => ({ label, barValue: first[i] ?? 0, value: line[i] ?? 0 }));
       data.legendLabels = [c.series[0]?.name, c.series[1]?.name || c.series[0]?.name].filter(Boolean);
     } else data.items = c.labels.map((label, i) => ({ label, value: first[i] ?? 0 }));
+    if (c.type === "pareto") return { chartType: "combo", data, opts: { ...(c.opts || {}), axis2: true, axis2Pct: true } };
     return { chartType: c.type, data, ...(c.opts ? { opts: c.opts } : {}) };
   }
 
@@ -3214,7 +3222,7 @@
   }
   /** A chart drawn by the engine's own charts (the same look as the layouts' charts), with an optional title. */
   // Kinds only the studio's own charts draw: an imported chart turned into one of them keeps its colours' order only.
-  const STUDIO_ONLY_CHARTS = new Set(["hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst"]);
+  const STUDIO_ONLY_CHARTS = new Set(["hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst", "pareto"]);
   function chartBody(o, rotEl) {
     if (o.chart.style && !STUDIO_ONLY_CHARTS.has(o.chart.type)) {
       rotEl.append(h("div", { class: "hs-obj-chart is-office" }, officeChart(o.chart, o.w, o.h)));

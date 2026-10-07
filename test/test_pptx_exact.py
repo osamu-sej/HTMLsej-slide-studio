@@ -476,6 +476,22 @@ class ChartExTest(unittest.TestCase):
         self.assertEqual(len([x for x in els if x["kind"] != "chart"]), 1, "the map keeps PowerPoint's picture")
 
 
+    def test_a_pareto_chart_comes_over_as_the_studios_pareto(self):
+        line = '<cx:series layoutId="paretoLine" uniqueId="{2}"><cx:axisId val="1"/></cx:series>'
+        with_values = self.chart("clusteredColumn", '<cx:data id="0">' + self.dim("cat", "strDim", [["弁当", "おにぎり", "パン", "弁当"]]) + self.dim("val", "numDim", [["30", "50", "20", "40"]]) + "</cx:data>",
+                                 series_extra='<cx:layoutPr><cx:aggregation/></cx:layoutPr>', title="廃棄の内訳", more_series=line)
+        counted = self.chart("clusteredColumn", '<cx:data id="0">' + self.dim("cat", "strDim", [["傷", "汚れ", "傷", "傷", "欠け"]]) + "</cx:data>",
+                             series_extra='<cx:layoutPr><cx:aggregation/></cx:layoutPr>', more_series=line)
+        deck = self.deck_with([with_values, counted])
+        charts = [x["chart"] for x in deck["slideData"][0]["elements"] if x["kind"] == "chart"]
+        self.assertEqual([c["type"] for c in charts], ["pareto", "pareto"])
+        self.assertEqual(charts[0]["labels"], ["弁当", "おにぎり", "パン"], "the same category is added up")
+        self.assertEqual(charts[0]["series"][0]["values"], [70, 50, 20])
+        self.assertEqual(charts[0]["title"], "廃棄の内訳")
+        self.assertEqual(charts[1]["labels"], ["傷", "汚れ", "欠け"], "with no values, how often each comes")
+        self.assertEqual(charts[1]["series"][0]["values"], [3, 1, 1])
+
+
 class DistributedAlignTest(unittest.TestCase):
     """均等割り付け (algn="dist") comes over as distributed, not as justified."""
 
