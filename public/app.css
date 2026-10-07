@@ -1015,6 +1015,10 @@ body.is-final .film-item { -webkit-user-drag: none; }
 .rb-form { display: flex; flex-direction: column; gap: 8px; width: 300px; }
 .rb-link-form b { margin-top: 4px; }
 .gr-preview { height: 56px; border: 1px solid var(--line-2); border-radius: 8px; margin: 6px 0; }
+.pat-grid { display: grid; grid-template-columns: repeat(auto-fill, 52px); gap: 6px; max-height: 260px; overflow: auto; padding: 4px; margin-bottom: 8px; }
+.pat-tile { display: block; padding: 2px; border: 1px solid var(--line); border-radius: 4px; background: #fff; cursor: pointer; }
+.pat-tile svg { display: block; }
+.pat-tile.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .rb-pic-styles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 380px; }
 .rb-pic-styles button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; border: 0; background: none; cursor: pointer; border-radius: 8px; }
 .rb-pic-styles button:hover { background: #f1f5fb; }

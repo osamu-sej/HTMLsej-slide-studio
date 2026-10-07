@@ -36,8 +36,8 @@ export function newId() {
 // 既定の図形に設定・既定のテキスト ボックスに設定・既定の線に設定 (kept on the deck as deck.objectDefaults): which
 // parts of an object's look a new shape, text box or line starts with — never its words, place or size.
 export const DEFAULT_STYLE_KEYS = {
-  shape: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
-  text: ["fill", "gradient", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
+  shape: ["fill", "gradient", "pattern", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "opacity"],
+  text: ["fill", "gradient", "pattern", "fillOpacity", "stroke", "strokeW", "dash", "fs", "color", "bold", "italic", "underline", "uline", "strike", "sline", "caps", "tshadow", "tglow", "toutline", "align", "valign", "font", "lh", "ls", "psp", "pad", "autofit", "wrap", "opacity"],
   line: ["stroke", "strokeW", "dash", "head", "tail", "headSize", "tailSize", "route", "opacity"],
 };
 
@@ -1146,6 +1146,7 @@ export function snapToPalette(o, P) {
   if (hex(out.stroke)) out.stroke = pick(out.stroke, "line");
   if (hex(out.color)) out.color = pick(out.color, out.kind === "icon" ? "line" : "text");
   if (out.gradient?.stops) out.gradient = { ...out.gradient, stops: out.gradient.stops.map((s) => (hex(s.color) ? { ...s, color: pick(s.color, "fill") } : s)) };
+  if (out.pattern) out.pattern = { ...out.pattern, fg: hex(out.pattern.fg) ? pick(out.pattern.fg, "fill") : out.pattern.fg, bg: hex(out.pattern.bg) ? pick(out.pattern.bg, "fill") : out.pattern.bg };
   if (typeof out.text === "string") {
     out.text = out.text
       .replace(/background-color:\s*(#[0-9a-f]{6})/gi, (_, c) => `background-color: ${pick(c, "highlight")}`)
@@ -1208,7 +1209,24 @@ export function textOutline(color, current = null) {
 export function textEffectsWords(o) {
   return [o?.tshadow ? "影" : "", o?.tglow ? "光彩" : "", o?.toutline ? "輪郭" : ""].filter(Boolean).join("・");
 }
+// 3-D 回転: the gallery's turns (degrees about the x axis — the top goes back when positive — and the y axis — the right goes back
+// when positive) and the camera's field of view (45° is a natural view, 0° a flat isometric one).
+export const ROT3D_PRESETS = [
+  ["right", "右を奥に", { x: 0, y: 28 }], ["left", "左を奥に", { x: 0, y: -28 }], ["top", "上を奥に", { x: 28, y: 0 }], ["bottom", "下を奥に", { x: -28, y: 0 }],
+  ["topRight", "右上を奥に", { x: 22, y: 22 }], ["topLeft", "左上を奥に", { x: 22, y: -22 }], ["bottomRight", "右下を奥に", { x: -22, y: 22 }], ["bottomLeft", "左下を奥に", { x: -22, y: -22 }],
+  ["isoTopLeft", "等角図法：左上", { x: 35, y: -45, p: 0 }], ["isoTopRight", "等角図法：右上", { x: 35, y: 45, p: 0 }], ["isoBottomLeft", "等角図法：左下", { x: -35, y: -45, p: 0 }], ["isoBottomRight", "等角図法：右下", { x: -35, y: 45, p: 0 }],
+];
+/** A preset's turn as an object's `rot3d` (null for an unknown name). */
+export function rot3dPreset(key) {
+  const found = ROT3D_PRESETS.find(([k]) => k === key);
+  return found ? { ...found[2] } : null;
+}
+/** Which preset a turn is (or ""). */
+export function rot3dKey(rot3d) {
+  if (!rot3d) return "";
+  return ROT3D_PRESETS.find(([, , t]) => t.x === rot3d.x && t.y === rot3d.y && (t.p ?? 45) === (rot3d.p ?? 45))?.[0] || "";
+}
 /** The effects an object has, as one line for a button's hint ("影・反射"), or "" when it has none. */
 export function effectsWords(o) {
-  return [o?.shadow ? "影" : "", o?.reflect ? "反射" : "", o?.glow ? "光彩" : "", o?.soft ? "ぼかし" : ""].filter(Boolean).join("・");
+  return [o?.shadow ? "影" : "", o?.reflect ? "反射" : "", o?.glow ? "光彩" : "", o?.soft ? "ぼかし" : "", o?.rot3d ? "3-D 回転" : ""].filter(Boolean).join("・");
 }

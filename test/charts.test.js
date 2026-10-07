@@ -309,6 +309,36 @@ test("グラフ スタイル: colours, elements and the bars' gap or the line's 
   }
 });
 
+test("パレート図: the first series from the largest, with a line of the running share on a right axis that ends at 100%", async () => {
+  const E = await loadEngine();
+  const chart = { type: "pareto", labels: ["弁当", "おにぎり", "パン", "サラダ"], series: [{ name: "廃棄数", values: [30, 50, 10, 10] }, { name: "使わない", values: [1, 2, 3, 4] }] };
+  const { o, el } = draw(E, chart);
+  assert.equal(o.chart.type, "pareto");
+  const spec = E.chartSpec(o.chart);
+  assert.equal(spec.chartType, "combo", "drawn as bars and a line");
+  assert.deepEqual(plain(spec.data.items.map((i) => i.label)), ["おにぎり", "弁当", "パン", "サラダ"], "from the largest (a tie keeps its order)");
+  assert.deepEqual(plain(spec.data.items.map((i) => i.barValue)), [50, 30, 10, 10]);
+  assert.deepEqual(plain(spec.data.items.map((i) => i.value)), [50, 80, 90, 100], "the running share, 100 at the end");
+  assert.deepEqual(plain(spec.data.legendLabels), ["廃棄数", "累積比率"]);
+  assert.equal(spec.opts.axis2, true);
+  assert.equal(spec.opts.axis2Pct, true);
+  assert.equal(o.chart.opts, undefined, "what makes it a pareto is not kept on the chart itself");
+  // Drawn: the labels in the new order, the right axis in %, the left axis ending at the total (100).
+  const texts = [...el.querySelectorAll(".hs-chart svg text")].map((t) => t.textContent);
+  assert.deepEqual(texts.filter((t) => ["おにぎり", "弁当", "パン", "サラダ"].includes(t)), ["おにぎり", "弁当", "パン", "サラダ"]);
+  const right = [...el.querySelectorAll(".hs-tick2")].map((t) => t.textContent);
+  assert.deepEqual(right, ["0%", "25%", "50%", "75%", "100%"]);
+  assert.ok([...el.querySelectorAll(".hs-chart svg text")].some((t) => t.textContent === "100%" && t.getAttribute("class")?.includes("hs-val")), "the last point says 100%");
+  assert.ok(texts.includes("100"), `the left axis ends at the total: ${texts.join(",")}`);
+  assert.equal(el.querySelectorAll(".hs-bar").length, 4);
+  // Negative values count as nothing; an empty total does not divide by zero.
+  const odd = E.chartSpec(E.normalizeObject({ id: "d", kind: "chart", x: 0, y: 0, w: 900, h: 500, chart: { type: "pareto", labels: ["a", "b"], series: [{ name: "s", values: [-5, 0] }] } }).chart);
+  assert.deepEqual(plain(odd.data.items.map((i) => i.value)), [0, 0]);
+  // The gap works on its bars like any bar chart's; the kind is one only the studio draws (not a PowerPoint chart's own look).
+  assert.ok(E.BAR_GAP_CHARTS.has("pareto"));
+  assert.equal(E.normalizeObject({ id: "e", kind: "chart", x: 0, y: 0, w: 900, h: 500, chart: { ...chart, opts: { gap: 40 } } }).chart.opts.gap, 40);
+});
+
 test("グラフ フィルター hides series and categories without losing them; データ テーブル shows the values under the chart", async () => {
   const E = await loadEngine();
   const chart = { type: "waterfall", labels: ["期首", "増", "減", "期末"], series: [{ name: "売上", values: [10, 5, -3, 12] }, { name: "目標", values: [9, 4, -2, 11] }],

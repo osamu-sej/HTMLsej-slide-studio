@@ -244,6 +244,26 @@ class SourceEffectsTest(unittest.TestCase):
         self.assertEqual(imported["gradient"]["angle"], 90)
         self.assertAlmostEqual(imported["shadow"]["opacity"], 0.5)
 
+    def test_a_pattern_fill_comes_over_as_a_pattern(self):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        kinds = [("ltUpDiag", "ltUpDiag"), ("pct25", "pct25"), ("dashHorz", "horz"), ("zigZag", "dnDiag")]
+        for i, (prst, _) in enumerate(kinds):
+            shape = slide.shapes.add_shape(1, Inches(1), Inches(1 + i), Inches(3), Inches(0.8))
+            shape.text = f"パターン{i}"
+            sppr = shape._element.spPr
+            for child in list(sppr):
+                if etree.QName(child).localname in ("solidFill", "noFill"):
+                    sppr.remove(child)
+            sppr.insert(1, etree.fromstring(f'''<a:pattFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" prst="{prst}"><a:fgClr><a:srgbClr val="1F3864"/></a:fgClr><a:bgClr><a:srgbClr val="DCE4F2"/></a:bgClr></a:pattFill>'''))
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        for i, (_, expected) in enumerate(kinds):
+            o = by_text(deck["slideData"][0], f"パターン{i}")
+            self.assertEqual(o["pattern"], {"kind": expected, "fg": "#1f3864", "bg": "#dce4f2"}, kinds[i][0])
+            self.assertEqual(o["fill"], "none", "the pattern is the fill")
+
     def test_text_shadow_and_glow_on_the_letters_become_text_effects(self):
         prs = Presentation()
         slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -474,6 +494,22 @@ class ChartExTest(unittest.TestCase):
         self.assertEqual(wf["opts"], {"totals": [0, 3]})
         self.assertEqual(deck["stats"]["charts"], 3)
         self.assertEqual(len([x for x in els if x["kind"] != "chart"]), 1, "the map keeps PowerPoint's picture")
+
+
+    def test_a_pareto_chart_comes_over_as_the_studios_pareto(self):
+        line = '<cx:series layoutId="paretoLine" uniqueId="{2}"><cx:axisId val="1"/></cx:series>'
+        with_values = self.chart("clusteredColumn", '<cx:data id="0">' + self.dim("cat", "strDim", [["弁当", "おにぎり", "パン", "弁当"]]) + self.dim("val", "numDim", [["30", "50", "20", "40"]]) + "</cx:data>",
+                                 series_extra='<cx:layoutPr><cx:aggregation/></cx:layoutPr>', title="廃棄の内訳", more_series=line)
+        counted = self.chart("clusteredColumn", '<cx:data id="0">' + self.dim("cat", "strDim", [["傷", "汚れ", "傷", "傷", "欠け"]]) + "</cx:data>",
+                             series_extra='<cx:layoutPr><cx:aggregation/></cx:layoutPr>', more_series=line)
+        deck = self.deck_with([with_values, counted])
+        charts = [x["chart"] for x in deck["slideData"][0]["elements"] if x["kind"] == "chart"]
+        self.assertEqual([c["type"] for c in charts], ["pareto", "pareto"])
+        self.assertEqual(charts[0]["labels"], ["弁当", "おにぎり", "パン"], "the same category is added up")
+        self.assertEqual(charts[0]["series"][0]["values"], [70, 50, 20])
+        self.assertEqual(charts[0]["title"], "廃棄の内訳")
+        self.assertEqual(charts[1]["labels"], ["傷", "汚れ", "欠け"], "with no values, how often each comes")
+        self.assertEqual(charts[1]["series"][0]["values"], [3, 1, 1])
 
 
 class DistributedAlignTest(unittest.TestCase):

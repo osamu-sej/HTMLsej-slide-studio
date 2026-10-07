@@ -1420,7 +1420,7 @@
   // Table styles in the SEJ palette: 罫線表 (navy rules above and below, grey lines between rows) and its kin.
   const TABLE_STYLES = { sej: "罫線（SEJ）", rows: "淡い横線", grid: "格子", lines: "横線だけ", plain: "線なし", brown: "淡茶の見出し" };
   const CHART_KINDS = { bar: "縦棒", "clustered-bar": "集合縦棒", "stacked-bar": "積み上げ縦棒", "100-stacked-bar": "100%積み上げ縦棒", line: "折れ線", "multi-line": "折れ線（複数）", area: "面", pie: "円", donut: "ドーナツ", scatter: "散布図", radar: "レーダー", waterfall: "ウォーターフォール", funnel: "じょうご", combo: "複合（棒と折れ線）",
-    hbar: "集合横棒", "stacked-hbar": "積み上げ横棒", "stacked-area": "積み上げ面", bubble: "バブル", histogram: "ヒストグラム", boxplot: "箱ひげ図", treemap: "ツリーマップ", sunburst: "サンバースト" };
+    hbar: "集合横棒", "stacked-hbar": "積み上げ横棒", "stacked-area": "積み上げ面", bubble: "バブル", histogram: "ヒストグラム", boxplot: "箱ひげ図", treemap: "ツリーマップ", sunburst: "サンバースト", pareto: "パレート図" };
   const DASHES = {
     solid: ["実線", null], roundDot: ["丸点線", [0, 2]], squareDot: ["角点線", [1, 1]], dash: ["破線", [4, 3]], dashDot: ["一点鎖線", [4, 3, 1, 3]],
     longDash: ["長破線", [8, 3]], longDashDot: ["長鎖線", [8, 3, 1, 3]], longDashDotDot: ["長二点鎖線", [8, 3, 1, 3, 1, 3]],
@@ -1731,6 +1731,14 @@
     }
     const opacity = num(raw.opacity, 0, 1);
     if (opacity != null && opacity < 1) o.opacity = opacity;
+    // 3-D 回転 (図形の効果): the object turned about its horizontal (x) and vertical (y) axis, in degrees, seen from a camera whose
+    // field of view is `p` degrees (45 unless said; 0 is a flat, isometric view). Shapes, text boxes and pictures.
+    if (raw.rot3d && typeof raw.rot3d === "object" && ["shape", "text", "image"].includes(o.kind)) {
+      const x = Math.round(num(raw.rot3d.x, -89, 89, 0) * 10) / 10;
+      const y = Math.round(num(raw.rot3d.y, -89, 89, 0) * 10) / 10;
+      const p = Math.round(num(raw.rot3d.p, 0, 120, 45));
+      if (Math.abs(x) >= 0.5 || Math.abs(y) >= 0.5) o.rot3d = { x, y, ...(p !== 45 ? { p } : {}) };
+    }
     if (raw.shadow && typeof raw.shadow === "object") {
       const color = hexColor(raw.shadow.color);
       if (color) o.shadow = { dx: num(raw.shadow.dx, -500, 500, 0), dy: num(raw.shadow.dy, -500, 500, 0),
@@ -1784,6 +1792,12 @@
         const stops = raw.gradient.stops.slice(0, 100).map((stop) => ({ at: num(stop?.at, 0, 1), color: hexColor(stop?.color), opacity: num(stop?.opacity, 0, 1, 1) }))
           .filter((stop) => stop.at != null && stop.color);
         if (stops.length) o.gradient = { angle: num(raw.gradient.angle, -360, 360, 0), stops };
+      }
+      // パターンの塗りつぶし: a kind (PATTERN_KINDS) and its two colours.
+      if (raw.pattern && typeof raw.pattern === "object" && PATTERN_KINDS[raw.pattern.kind]) {
+        const fg = hexColor(raw.pattern.fg);
+        const bg = hexColor(raw.pattern.bg);
+        if (fg && bg) o.pattern = { kind: raw.pattern.kind, fg: fg.toLowerCase(), bg: bg.toLowerCase() };
       }
       // 図形の塗りつぶし → 図: a picture fills the shape (cut to its outline), stretched to cover it or tiled.
       if (typeof raw.fillImg === "string" && /^(data:image\/(png|jpeg|webp|gif)[;,]|idb:|asset:|https:\/\/|blob:)/i.test(raw.fillImg.trim()) && raw.fillImg.length <= 30_000_000) {
@@ -2102,7 +2116,7 @@
   const CHART_MAX_SERIES = 100;
   // The chart kinds that take 近似曲線, 棒の間隔・重なり, 項目を逆順, 折れ線の書式 and 目盛間隔.
   const TREND_CHART_KINDS = new Set(["bar", "line", "multi-line", "scatter"]);
-  const BAR_GAP_CHARTS = new Set(["bar", "combo", "clustered-bar", "stacked-bar", "100-stacked-bar", "hbar", "stacked-hbar"]);
+  const BAR_GAP_CHARTS = new Set(["bar", "combo", "pareto", "clustered-bar", "stacked-bar", "100-stacked-bar", "hbar", "stacked-hbar"]);
   const REVERSE_CHARTS = new Set(["bar", "combo", "clustered-bar", "stacked-bar", "100-stacked-bar", "line", "multi-line", "area", "stacked-area", "hbar", "stacked-hbar", "pie", "donut", "funnel", "radar"]);
   const LINE_CHART_KINDS = new Set(["line", "multi-line"]);
   const STEP_CHARTS = new Set(["line", "multi-line", "area", "scatter"]);
@@ -2832,11 +2846,19 @@
     } else if (["multi-line", "clustered-bar", "area", "scatter", "radar", "hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst"].includes(c.type)) {
       data.xAxisLabels = c.labels;
       data.series = c.series.map((s) => ({ label: s.name, values: s.values }));
+    } else if (c.type === "pareto") {
+      // パレート図: the first series from the largest, a line of the running share (%) on a scale of its own that ends at 100.
+      const order = c.labels.map((_, i) => i).sort((a, b) => (first[b] ?? 0) - (first[a] ?? 0) || a - b);
+      const total = order.reduce((sum, i) => sum + Math.max(0, first[i] ?? 0), 0) || 1;
+      let run = 0;
+      data.items = order.map((i) => { run += Math.max(0, first[i] ?? 0); return { label: c.labels[i], barValue: first[i] ?? 0, value: Math.round((run / total) * 1000) / 10 }; });
+      data.legendLabels = [c.series[0]?.name, "累積比率"].filter(Boolean);
     } else if (c.type === "combo") {
       const line = c.series[1]?.values || first;
       data.items = c.labels.map((label, i) => ({ label, barValue: first[i] ?? 0, value: line[i] ?? 0 }));
       data.legendLabels = [c.series[0]?.name, c.series[1]?.name || c.series[0]?.name].filter(Boolean);
     } else data.items = c.labels.map((label, i) => ({ label, value: first[i] ?? 0 }));
+    if (c.type === "pareto") return { chartType: "combo", data, opts: { ...(c.opts || {}), axis2: true, axis2Pct: true } };
     return { chartType: c.type, data, ...(c.opts ? { opts: c.opts } : {}) };
   }
 
@@ -3031,6 +3053,40 @@
     for (const [key, value] of [["-webkit-mask-image", mask], ["mask-image", mask], ["-webkit-mask-composite", "source-in"], ["mask-composite", "intersect"]]) el.style.setProperty(key, value);
   }
 
+  // ---------------------------------------------------------------- パターンの塗りつぶし
+  // PowerPoint's pattern fills are tiny 8 × 8 bitmaps repeated over the shape. These are drawn the same way, a cell being 1.5 px on
+  // the slide, in two colours of the SEJ's; a few of PowerPoint's own are drawn by the nearest of these.
+  const BAYER = [[0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26], [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22], [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25], [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21]];
+  const m8 = (n) => ((n % 8) + 8) % 8;
+  const m4 = (n) => ((n % 4) + 4) % 4;
+  const PATTERN_KINDS = {};
+  for (const p of [5, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90]) PATTERN_KINDS[`pct${p}`] = [`${p}%`, (x, y) => BAYER[y][x] < Math.round(p * 0.64)];
+  Object.assign(PATTERN_KINDS, {
+    ltHorz: ["薄い横線", (x, y) => y === 0], horz: ["横線", (x, y) => y % 4 === 0], narHorz: ["細かい横線", (x, y) => y % 2 === 0], dkHorz: ["濃い横線", (x, y) => y % 4 < 2],
+    ltVert: ["薄い縦線", (x) => x === 0], vert: ["縦線", (x) => x % 4 === 0], narVert: ["細かい縦線", (x) => x % 2 === 0], dkVert: ["濃い縦線", (x) => x % 4 < 2],
+    ltDnDiag: ["薄い右下がり斜線", (x, y) => m8(x - y) === 0], dnDiag: ["右下がり斜線", (x, y) => m4(x - y) === 0], dkDnDiag: ["濃い右下がり斜線", (x, y) => m4(x - y) < 2], wdDnDiag: ["太い右下がり斜線", (x, y) => m8(x - y) < 3],
+    ltUpDiag: ["薄い右上がり斜線", (x, y) => m8(x + y) === 0], upDiag: ["右上がり斜線", (x, y) => m4(x + y) === 0], dkUpDiag: ["濃い右上がり斜線", (x, y) => m4(x + y) < 2], wdUpDiag: ["太い右上がり斜線", (x, y) => m8(x + y) < 3],
+    smGrid: ["小さい格子", (x, y) => x % 4 === 0 || y % 4 === 0], lgGrid: ["大きい格子", (x, y) => x === 0 || y === 0],
+    smCheck: ["小さい市松模様", (x, y) => ((x >> 1) + (y >> 1)) % 2 === 0], lgCheck: ["大きい市松模様", (x, y) => ((x >> 2) + (y >> 2)) % 2 === 0],
+    diagCross: ["斜め格子", (x, y) => m4(x - y) === 0 || m4(x + y) === 0], openDmnd: ["ひし形格子", (x, y) => m8(x - y) === 0 || m8(x + y) === 0],
+  });
+  /** An SVG <pattern> of a pattern fill: the background colour and the kind's cells in the other (an unknown kind is 50%). */
+  function patternNode(id, { kind, fg, bg }, cell = 1.5) {
+    const rule = (PATTERN_KINDS[kind] || PATTERN_KINDS.pct50)[1];
+    const size = 8 * cell;
+    let d = "";
+    for (let y = 0; y < 8; y += 1) {
+      for (let x = 0; x < 8; x += 1) {
+        if (!rule(x, y)) continue;
+        let run = 1;
+        while (x + run < 8 && rule(x + run, y)) run += 1;
+        d += `M${r2(x * cell)} ${r2(y * cell)}h${r2(run * cell)}v${r2(cell)}h${r2(-run * cell)}z`;
+        x += run - 1;
+      }
+    }
+    return s("pattern", { id, patternUnits: "userSpaceOnUse", width: size, height: size }, s("rect", { width: size, height: size, fill: bg }), s("path", { d, fill: fg, "shape-rendering": "crispEdges" }));
+  }
+
   function shapeBody(o, rotEl, scale, ctx = {}) {
     const g = geometry(o.shape, o.w, o.h, o.adj, o.path);
     const sw = o.stroke !== "none" ? o.strokeW : 0;
@@ -3046,6 +3102,12 @@
       const grad = s("linearGradient", { id, x1: `${50 - dx}%`, y1: `${50 - dy}%`, x2: `${50 + dx}%`, y2: `${50 + dy}%` });
       for (const stop of o.gradient.stops) grad.append(s("stop", { offset: `${stop.at * 100}%`, "stop-color": stop.color, "stop-opacity": stop.opacity }));
       svg.append(s("defs", {}, grad));
+      paint = `url(#${id})`;
+    }
+    // パターンの塗りつぶし: two colours in a repeating cell pattern (over a gradient).
+    if (!g.open && o.pattern) {
+      const id = newId();
+      svg.append(s("defs", {}, patternNode(id, o.pattern)));
       paint = `url(#${id})`;
     }
     // 図で塗りつぶし: the picture covers the shape's box (cut to its outline), or repeats as tiles.
@@ -3214,7 +3276,7 @@
   }
   /** A chart drawn by the engine's own charts (the same look as the layouts' charts), with an optional title. */
   // Kinds only the studio's own charts draw: an imported chart turned into one of them keeps its colours' order only.
-  const STUDIO_ONLY_CHARTS = new Set(["hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst"]);
+  const STUDIO_ONLY_CHARTS = new Set(["hbar", "stacked-hbar", "stacked-area", "bubble", "histogram", "boxplot", "treemap", "sunburst", "pareto"]);
   function chartBody(o, rotEl) {
     if (o.chart.style && !STUDIO_ONLY_CHARTS.has(o.chart.type)) {
       rotEl.append(h("div", { class: "hs-obj-chart is-office" }, officeChart(o.chart, o.w, o.h)));
@@ -3881,6 +3943,14 @@
     return el;
   }
 
+  /** 3-D 回転: the CSS that turns an object about its x and y axes, with the camera's field of view as the perspective. */
+  function rot3dCss(o) {
+    if (!o.rot3d) return "";
+    const { x, y, p = 45 } = o.rot3d;
+    const persp = p > 0 ? `perspective(${r2(Math.max(o.w, o.h) / 2 / Math.tan((p * Math.PI) / 360))}px) ` : "";
+    return `${persp}rotateX(${x}deg) rotateY(${y}deg)`;
+  }
+
   /** One object as HTML: a positioned box → a layer for motion paths → a layer for effects → a rotated body. */
   function objectNode(raw, ctx, all, scale) {
     const o = withDefaults(raw);
@@ -3892,6 +3962,7 @@
       "data-shadow": o.shadow && ["shape", "text", "image"].includes(o.kind) ? "1" : null,
       "data-tshadow": o.tshadow && ["shape", "text"].includes(o.kind) ? "1" : null,
       "data-toutline": o.toutline && ["shape", "text"].includes(o.kind) ? o.toutline.color : null,
+      "data-pattern": o.pattern && ["shape", "text"].includes(o.kind) ? `${o.pattern.fg},${o.pattern.bg}` : null,
       "data-autofit": o.autofit && o.autofit !== "none" ? o.autofit : null, "data-item": o.item || null,
       "data-bbox": Object.values(bounds(o)).map(r2).join(","),
       // Screen readers: a decorative object is skipped; a picture-like object says its alternative text.
@@ -3904,7 +3975,7 @@
     const fx = h("div", { class: "hs-obj-fx" });
     const rot = h("div", { class: "hs-obj-rot" });
     if (o.kind === "image") applyEffects(o, rot);
-    const transform = [o.rot ? `rotate(${o.rot}deg)` : "", o.flipH || o.flipV ? `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1})` : ""].filter(Boolean).join(" ");
+    const transform = [rot3dCss(o), o.rot ? `rotate(${o.rot}deg)` : "", o.flipH || o.flipV ? `scale(${o.flipH ? -1 : 1}, ${o.flipV ? -1 : 1})` : ""].filter(Boolean).join(" ");
     if (transform) rot.style.transform = transform;
     if (o.kind === "shape" || o.kind === "text") {
       shapeBody(o, rot, scale, ctx);
@@ -4160,7 +4231,7 @@
   Object.assign(E, {
     PX_PER_PT, PX_PER_CM, PALETTE, BRAND_FILLS, BRAND_LINES, FONTS, SHAPES, SHAPE_GROUPS, LIST_STYLES, OBJECT_KINDS: KINDS, KIND_LABELS, DASHES, ARROWHEADS, ROUTES, AUTOFIT, FITS, OBJECT_DEFAULTS: DEFAULTS, IX_HOVERS, IX_LOOPS, IX_CLICKS,
     LINE_CAPS, LINE_JOINS, COMPOUNDS, LIST_MARKS, LIST_MARK_SIZES, U_LINES, CHART_COLORS, CHART_LAYOUTS, chartLayoutOf, applyChartLayout, CHART_STYLES, chartStyleOf, applyChartStyle, visibleChart, TREND_CHART_KINDS, BAR_GAP_CHARTS, REVERSE_CHARTS, LINE_CHART_KINDS, STEP_CHARTS, MARKER_SHAPES, LABEL_ALL_CHARTS, LABEL_POS_CHARTS, SLICE_LABEL_PARTS, TABLE_CHARTS, TABLE_STYLES, CHART_KINDS, CHART_MAX_LABELS, CHART_MAX_SERIES, chartSpec, officeChart, numFormat, freeformD, objectDetails, richNodes: (html) => richFragment(html),
-    geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, parseTabs, tabsText, tabBoxes, noteHtml, noteToText, noteOf, noteFields, noteFormatted, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
+    geometry, adjOf, sanitizeRich, richFragment, textToRich, richToText, PATTERN_KINDS, patternNode, parseTabs, tabsText, tabBoxes, noteHtml, noteToText, noteOf, noteFields, noteFormatted, hexColor, normalizeObject, normalizeObjects, withDefaults, newObjectId: newId,
     corners, bounds, sites, lineEnds, linePath, objectLayer, masterLayer, morphPairs, MORPH_KINDS, BG_COLORS, normalizeBackground, backgroundLayer, readingOrderOf, objectNode, fitObjects, objectText, objectName,
     VOLUMES, normalizePlayback, normalizeBookmarks, mediaMarks, placeMarks, mediaPlay, mediaPause, mediaToggle, mediaSpan,
     SMARTART_LAYOUTS, SMARTART_GROUPS, SMARTART_COLORS, SMARTART_STYLES, normalizeSmartart, smartartParts, smartartObjects, smartartSample,

@@ -345,14 +345,56 @@ export function createEditorUi(editor, app) {
   const strokeOf = () => { const o = selected()[0]; return o ? E.withDefaults(o).stroke : null; };
   const textColorOf = () => editor.textState()?.color ?? "#1a1a1a";
   // A colour replaces a picture fill (図で塗りつぶし), as in PowerPoint.
-  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color, fillImg: undefined, fillTile: undefined, gradient: undefined } : null));
+  const setFill = (color) => editor.apply((o) => (["shape", "text"].includes(o.kind) ? { fill: color, fillImg: undefined, fillTile: undefined, gradient: undefined, pattern: undefined } : null));
   /** 塗りつぶし → グラデーション: a gradient of the SEJ's light fills (kept with its first colour as the fill). */
   const setGradient = (setKey, directionKey) => editor.apply((o) => {
     if (!["shape", "text"].includes(o.kind)) return null;
     const g = ops.makeGradient(setKey, directionKey);
-    return { gradient: g, fill: g.stops[0].color, fillImg: undefined, fillTile: undefined };
+    return { gradient: g, fill: g.stops[0].color, fillImg: undefined, fillTile: undefined, pattern: undefined };
   });
   const gradientOf = () => editor.selectedObjects().find((o) => o.gradient)?.gradient || null;
+  const patternOf = () => editor.selectedObjects().find((o) => o.pattern)?.pattern || null;
+  /** パターンの塗りつぶし: the kinds drawn small (pick one), then the two colours (the SEJ's fills and lines). */
+  function patternDialog() {
+    const now = patternOf() || { kind: "ltUpDiag", fg: "#b7c3da", bg: "#ffffff" };
+    const colors = [...new Map([...E.PALETTE.fill, ...E.PALETTE.line].map(([c, label]) => [c, label])).entries()];
+    const fg = select("前景", colors, now.fg);
+    const bg = select("背景", E.PALETTE.fill.map(([c, label]) => [c, label]), now.bg);
+    let kind = now.kind;
+    const grid = h("div", { class: "pat-grid", role: "listbox", "aria-label": "パターン" });
+    const tiles = new Map();
+    const draw = () => {
+      for (const [key, [label]] of Object.entries(E.PATTERN_KINDS)) {
+        const id = `pt-${key}`;
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 48 36");
+        svg.setAttribute("width", "48");
+        svg.setAttribute("height", "36");
+        const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+        defs.append(E.patternNode(id, { kind: key, fg: fg.value, bg: bg.value }));
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("width", "48");
+        rect.setAttribute("height", "36");
+        rect.setAttribute("fill", `url(#${id})`);
+        svg.append(defs, rect);
+        let tile = tiles.get(key);
+        if (!tile) {
+          tile = h("button", { type: "button", class: "pat-tile", role: "option", "data-pattern": key, title: label, onclick: () => { kind = key; mark(); } });
+          tiles.set(key, tile);
+          grid.append(tile);
+        }
+        tile.replaceChildren(svg);
+      }
+      mark();
+    };
+    const mark = () => { for (const [key, tile] of tiles) { tile.classList.toggle("on", key === kind); tile.setAttribute("aria-selected", String(key === kind)); } };
+    fg.addEventListener("change", draw);
+    bg.addEventListener("change", draw);
+    draw();
+    const dialog = settingsDialog("pattern-dialog", "パターンの塗りつぶし", h("div", {}, grid, labeled("前景", fg), labeled("背景", bg), h("p", { class: "hint" }, "SEJの色だけを使います。PowerPoint のパターンに近い見た目です。")), () => {
+      editor.apply((o) => (["shape", "text"].includes(o.kind) ? { pattern: { kind, fg: fg.value, bg: bg.value }, fill: bg.value, fillImg: undefined, fillTile: undefined, gradient: undefined } : null));
+    });
+  }
   function gradientDialog() {
     const current = ops.gradientChoice(gradientOf()) || { set: ops.GRADIENT_SETS[0][0], direction: "down" };
     const sets = select("色の組み合わせ", ops.GRADIENT_SETS.map(([key, label]) => [key, label]), current.set);
@@ -370,7 +412,7 @@ export function createEditorUi(editor, app) {
   const setEffect = (patch) => editor.apply((o) => (EFFECT_KINDS.includes(o.kind) ? patch : null));
   const effectOf = (key) => selected().find((o) => EFFECT_KINDS.includes(o.kind))?.[key];
   function effectsMenu() {
-    const [shadow, reflect, glow, soft] = ["shadow", "reflect", "glow", "soft"].map(effectOf);
+    const [shadow, reflect, glow, soft, rot3d] = ["shadow", "reflect", "glow", "soft", "rot3d"].map(effectOf);
     const direction = ops.shadowDirection(shadow);
     return menu([
       { head: "影（SEJテンプレートでは付けません。付けるとブランドの指摘が出ます）" },
@@ -385,8 +427,11 @@ export function createEditorUi(editor, app) {
       "-", { head: "ぼかし（縁をぼかす）" },
       ...ops.SOFT_SIZES.map(([r, label]) => ({ label: `ぼかし：${label}`, on: soft === r, run: () => setEffect({ soft: r }) })),
       { label: "ぼかしなし", disabled: !soft, run: () => setEffect({ soft: undefined }) },
+      "-", { head: "3-D 回転" },
+      ...ops.ROT3D_PRESETS.map(([key, label]) => ({ label: `3-D：${label}`, on: ops.rot3dKey(rot3d) === key, run: () => setEffect({ rot3d: ops.rot3dPreset(key) }) })),
+      { label: "3-D 回転なし", disabled: !rot3d, run: () => setEffect({ rot3d: undefined }) },
       "-", { label: "効果のオプション…", icon: "effects", run: () => effectsDialog() },
-      { label: "すべての効果をなくす", icon: "trash", disabled: !(shadow || reflect || glow || soft), run: () => setEffect({ shadow: undefined, reflect: undefined, glow: undefined, soft: undefined }) },
+      { label: "すべての効果をなくす", icon: "trash", disabled: !(shadow || reflect || glow || soft || rot3d), run: () => setEffect({ shadow: undefined, reflect: undefined, glow: undefined, soft: undefined, rot3d: undefined }) },
     ]);
   }
   /** 効果のオプション: each effect's numbers (影＝色・透明度・ぼかし・距離・角度、反射＝大きさ・透明度・間隔、光彩＝大きさ・色・透明度、ぼかし＝大きさ). */
@@ -395,6 +440,7 @@ export function createEditorUi(editor, app) {
     const reflect = effectOf("reflect");
     const glow = effectOf("glow");
     const soft = effectOf("soft");
+    const rot3d = effectOf("rot3d");
     const input = (name, value, { min = 0, max = 100, step = 1 } = {}) => h("input", { type: "number", name, "aria-label": name, value: String(value), min: String(min), max: String(max), step: String(step) });
     const on = (name, checked) => h("label", { class: "sh-choice" }, h("input", { type: "checkbox", name, checked: checked || null }), h("span", {}, "付ける"));
     const sColor = select("shadowColor", ops.SHADOW_COLORS, polar.color);
@@ -404,7 +450,9 @@ export function createEditorUi(editor, app) {
         h("p", { class: "hint" }, "SEJテンプレートでは影を付けません。付けるとブランドの指摘が出ます。")),
       fieldset("反射", on("reflectOn", Boolean(reflect)), labeled("大きさ（%）", input("reflectSize", Math.round((reflect?.size ?? 0.5) * 100), { min: 5 })), labeled("透明度（%）", input("reflectTransparency", Math.round((1 - (reflect?.opacity ?? 0.4)) * 100))), labeled("間隔（pt）", input("reflectGap", (reflect?.gap ?? 2) / 2, { max: 50, step: 0.5 }))),
       fieldset("光彩", on("glowOn", Boolean(glow)), labeled("大きさ（pt）", input("glowSize", (glow?.r ?? 16) / 2, { min: 0.5, max: 100, step: 0.5 })), labeled("色", gColor), labeled("透明度（%）", input("glowTransparency", Math.round((1 - (glow?.opacity ?? 0.6)) * 100)))),
-      fieldset("ぼかし", on("softOn", Boolean(soft)), labeled("大きさ（pt）", input("softSize", (soft ?? 10) / 2, { min: 0.5, max: 100, step: 0.5 }))));
+      fieldset("ぼかし", on("softOn", Boolean(soft)), labeled("大きさ（pt）", input("softSize", (soft ?? 10) / 2, { min: 0.5, max: 100, step: 0.5 }))),
+      fieldset("3-D 回転", on("rot3dOn", Boolean(rot3d)), labeled("X 回転（°）", input("rotX", rot3d?.x ?? 0, { min: -89, max: 89, step: 1 })), labeled("Y 回転（°）", input("rotY", rot3d?.y ?? 0, { min: -89, max: 89, step: 1 })), labeled("遠近（°。0 は平行）", input("rotP", rot3d?.p ?? 45, { min: 0, max: 120, step: 1 })),
+        h("p", { class: "hint" }, "X が正だと上が、Y が正だと右が奥に下がります。")));
     settingsDialog("fx-dialog", "図形の効果のオプション", body, () => {
       const dlg = document.querySelector(".fx-dialog");
       const f = (name) => dlg.querySelector(`[name="${name}"]`);
@@ -414,6 +462,7 @@ export function createEditorUi(editor, app) {
         reflect: f("reflectOn").checked ? { size: Math.min(1, Math.max(0.05, n("reflectSize", 50) / 100)), opacity: 1 - n("reflectTransparency", 60) / 100, gap: Math.round(n("reflectGap") * 2) } : undefined,
         glow: f("glowOn").checked ? { r: Math.max(1, Math.round(n("glowSize", 8) * 2)), color: f("glowColor").value, opacity: 1 - n("glowTransparency", 40) / 100 } : undefined,
         soft: f("softOn").checked ? Math.max(1, Math.round(n("softSize", 5) * 2)) : undefined,
+        rot3d: f("rot3dOn").checked && (Math.abs(n("rotX")) >= 0.5 || Math.abs(n("rotY")) >= 0.5) ? { x: Math.max(-89, Math.min(89, n("rotX"))), y: Math.max(-89, Math.min(89, n("rotY"))), p: Math.max(0, Math.min(120, Math.round(n("rotP", 45)))) } : undefined,
       };
       setEffect(patch);
     });
@@ -481,6 +530,8 @@ export function createEditorUi(editor, app) {
     { key: "tile", label: "図を並べて表示", icon: "grid", on: editor.selectedObjects().some((o) => o.fillTile), disabled: !pictureFilled(), run: () => { const on = !editor.selectedObjects().some((o) => o.fillTile); editor.apply((o) => (o.fillImg ? { fillTile: on || undefined } : null)); } },
     { key: "gradient", label: "グラデーション…", icon: "gradient", run: () => gradientDialog() },
     { key: "nogradient", label: "グラデーションを外す", icon: "trash", disabled: !gradientOf(), run: () => editor.apply((o) => (o.gradient ? { gradient: undefined } : null)) },
+    { key: "pattern", label: "パターン…", icon: "grid", run: () => patternDialog() },
+    { key: "nopattern", label: "パターンを外す", icon: "trash", disabled: !patternOf(), run: () => editor.apply((o) => (o.pattern ? { pattern: undefined } : null)) },
     { key: "nopicture", label: "図を外す", icon: "trash", disabled: !pictureFilled(), run: () => editor.apply((o) => (o.fillImg ? { fillImg: undefined, fillTile: undefined } : null)) },
   ];
   const setStroke = (color) => editor.apply((o) => (["shape", "text", "image", "line"].includes(o.kind) ? { stroke: color, ...(color !== "none" && o.kind !== "line" && E.withDefaults(o).stroke === "none" ? { strokeW: E.withDefaults(o).strokeW || 2 } : {}) } : o.kind === "icon" ? { color } : null));
@@ -1330,7 +1381,7 @@ export function createEditorUi(editor, app) {
   }
   function styleMenu() {
     return (close) => h("div", { class: "rb-styles" }, QUICK_STYLES.map(([label, style]) => {
-      const sample = h("button", { type: "button", title: label, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); editor.apply((o) => (["shape", "text"].includes(o.kind) ? { ...style, gradient: undefined } : null)); } },
+      const sample = h("button", { type: "button", title: label, onmousedown: (e) => e.preventDefault(), onclick: () => { close(); editor.apply((o) => (["shape", "text"].includes(o.kind) ? { ...style, gradient: undefined, pattern: undefined } : null)); } },
         h("span", { class: "rb-style", style: { background: style.fill === "none" ? "transparent" : style.fill, border: style.stroke !== "none" ? `2px solid ${style.stroke}` : "1px solid transparent", color: style.color } }, "Aa"), h("small", {}, label));
       return sample;
     }));

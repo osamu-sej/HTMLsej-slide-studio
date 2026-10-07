@@ -50,6 +50,16 @@ DSP = "{%s}" % NS["dsp"]
 
 # PowerPoint's preset shapes → the studio's (public/engine/objects.js SHAPES). `scale` turns an OOXML
 # adjustment (1/100000) into ours; "deg" angles (1/60000 degree).
+# PowerPoint's 54 pattern fills (a:pattFill prst) and the studio's nearest (objects.js PATTERN_KINDS).
+PATTERN_MAP = {
+    **{f"pct{p}": f"pct{p}" for p in (5, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90)},
+    **{k: k for k in ("ltHorz", "horz", "narHorz", "dkHorz", "ltVert", "vert", "narVert", "dkVert", "ltDnDiag", "dnDiag", "dkDnDiag", "wdDnDiag",
+                      "ltUpDiag", "upDiag", "dkUpDiag", "wdUpDiag", "smGrid", "lgGrid", "smCheck", "lgCheck", "diagCross", "openDmnd")},
+    "dashHorz": "horz", "dashVert": "vert", "dashDnDiag": "dnDiag", "dashUpDiag": "upDiag", "dotGrid": "pct20", "cross": "lgGrid",
+    "solidDmnd": "diagCross", "dotDmnd": "openDmnd", "plaid": "lgCheck", "weave": "smCheck", "trellis": "diagCross", "zigZag": "dnDiag",
+    "wave": "ltDnDiag", "divot": "pct30", "shingle": "upDiag", "sphere": "pct50", "horzBrick": "lgGrid", "diagBrick": "diagCross",
+    "smConfetti": "pct20", "lgConfetti": "pct30",
+}
 SHAPE_MAP = {name: name for name in (
     "rect roundRect snip1Rect snip2SameRect snip2DiagRect round1Rect round2SameRect round2DiagRect ellipse triangle "
     "rtTriangle parallelogram trapezoid diamond pentagon hexagon heptagon octagon decagon dodecagon pie chord teardrop "
@@ -526,9 +536,15 @@ class SlideReader:
                 if name == "gradFill":
                     return self.gradient_of(child)
                 if name == "pattFill":
-                    self.deck.stats["unsupported"] += 1
-                    c = self.color(child.find(A + "fgClr")) or self.color(child.find(A + "bgClr"))
-                    return ("solid", c) if c else None
+                    fg = self.color(child.find(A + "fgClr"))
+                    bg = self.color(child.find(A + "bgClr")) or ((255, 255, 255), 1.0)
+                    if fg is None:
+                        c = self.color(child.find(A + "bgClr"))
+                        return ("solid", c) if c else None
+                    kind = PATTERN_MAP.get(child.get("prst", "pct50"), "pct50")
+                    if kind != child.get("prst", "pct50"):
+                        self.deck.stats["unsupported"] += 1  # drawn by the nearest pattern of the studio's
+                    return ("pattern", {"kind": kind, "fg": hexc(fg), "bg": hexc(bg)})
                 if name == "blipFill":
                     return ("blip", child)
                 if name == "grpFill":
@@ -1144,6 +1160,9 @@ class SlideReader:
         elif fill and fill[0] == "gradient":
             out["fill"] = "none"
             out["gradient"] = fill[1]
+        elif fill and fill[0] == "pattern":
+            out["fill"] = "none"
+            out["pattern"] = fill[1]
         else:
             out["fill"] = "none"
         out.update(self.stroke(line) if line else {"stroke": "none"})
@@ -1739,6 +1758,9 @@ class SlideReader:
             elif fill[0] == "gradient":
                 self.objects.append({"id": self.new_id("bg", None), "kind": "shape", "name": "背景", "shape": "rect", **full,
                                      "fill": "none", "gradient": fill[1], "stroke": "none", "locked": True})
+            elif fill[0] == "pattern":
+                self.objects.append({"id": self.new_id("bg", None), "kind": "shape", "name": "背景", "shape": "rect", **full,
+                                     "fill": "none", "pattern": fill[1], "stroke": "none", "locked": True})
             return
 
     def decorations(self):
@@ -2416,7 +2438,8 @@ def read_chartex(root):
     if not series:
         return None
     layout = series[0].get("layoutId", "")
-    if any(sr.get("layoutId") == "paretoLine" for sr in series):
+    pareto = any(sr.get("layoutId") == "paretoLine" for sr in series)
+    if pareto:
         series = [sr for sr in series if sr.get("layoutId") != "paretoLine"]
 
     def name_of(sr, i):
@@ -2456,6 +2479,19 @@ def read_chartex(root):
         if groups:
             n = max(len(v) for _, v in groups)
             out = {"type": "boxplot", "labels": [str(i + 1) for i in range(n)], "series": [{"name": name, "values": v + [None] * (n - len(v))} for name, v in groups]}
+    elif layout == "clusteredColumn" and pareto and cats and cats[0]:
+        # パレート図: the categories with their values (or, with none, how often each comes), the line of shares drawn by the studio.
+        labels = [str(c or f"項目{i + 1}") for i, c in enumerate(cats[0])]
+        nums = [_cx_num(vals[i]) if i < len(vals) else None for i in range(len(labels))]
+        totals = {}
+        for label, n in zip(labels, nums):
+            if any(v is not None for v in nums):
+                if n is not None:
+                    totals[label] = totals.get(label, 0) + n
+            else:
+                totals[label] = totals.get(label, 0) + 1
+        if totals:
+            out = {"type": "pareto", "labels": list(totals)[:500], "series": [{"name": name_of(series[0], 0), "values": list(totals.values())[:500]}]}
     elif layout == "clusteredColumn":
         nums = [x for x in (_cx_num(v) for v in vals) if x is not None][:500]
         if nums:

@@ -106,6 +106,7 @@ const P = {
   chartStack: '<path d="M4 20h16"/><rect x="5.5" y="12" width="3.5" height="8"/><path d="M5.5 15.5h3.5"/><rect x="10.5" y="7" width="3.5" height="13"/><path d="M10.5 12h3.5"/><rect x="15.5" y="10" width="3.5" height="10"/><path d="M15.5 14h3.5"/>',
   chartLine: '<path d="M4 20h16M4 4v16"/><path d="m6 16 4-5 3 3 6-7"/>',
   chartDonut: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/><path d="M12 4v4.5M19.4 15l-4.2-1.5"/>',
+  chartPareto: '<path d="M4 20h16"/><rect x="5.5" y="9" width="3" height="11"/><rect x="10.5" y="13" width="3" height="7"/><rect x="15.5" y="17" width="3" height="3"/><path d="m5 8 5-2.5 4-1.2 5-.8"/>',
   chartCombo: '<path d="M4 20h16"/><rect x="5.5" y="13" width="3" height="7"/><rect x="10.5" y="10" width="3" height="10"/><rect x="15.5" y="12" width="3" height="8"/><path d="m5 9 5-3 4 2 5-4"/>',
   rowAbove: '<rect x="3" y="11" width="18" height="9" rx="1"/><path d="M3 15.5h18M12 3v6M9 6h6"/>',
   rowBelow: '<rect x="3" y="4" width="18" height="9" rx="1"/><path d="M3 8.5h18M12 15v6M9 18h6"/>',
