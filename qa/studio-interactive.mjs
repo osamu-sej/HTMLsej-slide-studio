@@ -22,6 +22,9 @@ const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
 page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL|ytimg|fonts/.test(`${message.text()} ${message.location().url}`)) errors.push(`console: ${message.text()} ${message.location().url}`.trim()); });
+// The slide as a picture of its place on the page. An element screenshot waits for the element to hold still and gives up
+// when the stage re-renders or keeps moving; clipping the page does not depend on that.
+const stageShot = async (name) => { const box = await page.locator(".slide-wrap").boundingBox(); await page.screenshot({ path: join(outDir, `interactive-${name}.png`), clip: box }); };
 const shot = async (name, target = page) => { const file = join(outDir, `interactive-${name}.png`); await target.screenshot({ path: file }); console.log("saved", file); };
 const step = async (label, fn) => { try { await fn(); console.log("ok  ", label); } catch (error) { errors.push(`${label}: ${error.message}`); console.log("FAIL", label, error.message); } };
 const expect = (value, wanted, what) => { if (JSON.stringify(value) !== JSON.stringify(wanted)) throw new Error(`${what}: ${JSON.stringify(value)}`); };
@@ -53,12 +56,12 @@ await step("editing: simulator and gap forms, the formula recalculates, evidence
   await page.fill("#f-formula", "a × b × c ÷ 50");
   await page.waitForTimeout(500);
   expect(await page.textContent(".slide-wrap .hs-sim-out"), "7,200", "the result after changing the formula");
-  await page.locator(".slide-wrap").screenshot({ path: join(outDir, "interactive-edit-simulator.png") });
+  await stageShot("edit-simulator");
   await page.fill("#f-formula", "a × b × c ÷ 100");
   await film(6);
   await page.waitForSelector('#inspector [data-path="measures[0].title"], #inspector input[value="業務別テンプレート"]');
   expect(await page.textContent(".slide-wrap .hs-gap-num"), "+100", "a finished gap slide shows every measure on");
-  await page.locator(".slide-wrap").screenshot({ path: join(outDir, "interactive-edit-gap.png") });
+  await stageShot("edit-gap");
   await film(2);
   await page.waitForSelector("#inspector .detail-evidence[open] textarea");
   const rows = await page.locator("#inspector .detail-card").first().locator(".detail-evidence textarea").first().inputValue();
