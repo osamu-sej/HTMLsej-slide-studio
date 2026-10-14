@@ -378,3 +378,4 @@ await step("the exported file carries the Lottie player and plays the animation"
 await writeFile(join(outDir, "motion-errors.txt"), errors.join("\n"));
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");
 await browser.close();
+process.exit(errors.length ? 1 : 0);

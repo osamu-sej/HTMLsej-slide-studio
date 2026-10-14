@@ -191,3 +191,4 @@ await step("JSON round trip", async () => {
 await writeFile(join(outDir, "edit-errors.txt"), errors.join("\n"));
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");
 await browser.close();
+process.exit(errors.length ? 1 : 0);

@@ -1,5 +1,5 @@
 // Visual QA: render slides of a deck in every requested theme and screenshot contact sheets.
-// Usage: node qa/shoot.mjs [--themes=clarity,midnight] [--deck=/public/samples/ai-rollout.json] [--per=6] [--only=1,2,3] [--mode=thumb]
+// Usage: node qa/shoot.mjs [--themes=clarity,midnight] [--deck=/public/samples/ai-rollout.json] [--per=6] [--only=1,2,3] [--mode=thumb] [--strict]
 import { createServer } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
@@ -37,7 +37,7 @@ for (const theme of themes) {
     const url = `http://127.0.0.1:${port}/qa/gallery.html?deck=${encodeURIComponent(deck)}&theme=${theme}&only=${only}&mode=${args.mode || "thumb"}&cols=${args.cols || 2}&w=${args.w || 960}`;
     await page.goto(url);
     const done = await page.waitForFunction(() => window.__done, null, { timeout: 60000 }).then((handle) => handle.jsonValue());
-    if (done.error) { console.error(theme, done.error); continue; }
+    if (done.error) { console.error(theme, done.error); problems.push(`${theme} batch ${b + 1}: ${done.error}`); continue; }
     for (const result of done) if (result.issues.length || result.fs < 1 || result.ts < 1) problems.push(`${theme} #${result.index + 1} ${result.type}: fs=${result.fs} ts=${result.ts} ${result.issues.map((i) => `${i.field}:${i.message}`).join(" | ")}`);
     for (const result of done) for (const issue of result.brand || []) brandProblems.push(`${theme} #${result.index + 1} ${result.type}: ${issue.field}: ${issue.message}`);
     const file = join(outDir, `${theme}-${String(b + 1).padStart(2, "0")}.png`);
@@ -49,3 +49,5 @@ console.log(problems.length ? `fit notes:\n${problems.join("\n")}` : "no fit not
 if (themes.includes("sej")) console.log(brandProblems.length ? `SEJ brand check:\n${brandProblems.join("\n")}` : "SEJ brand check: no findings");
 await browser.close();
 server.close();
+// --strict (CI): any fit note, brand finding or failed batch fails the run.
+if ("strict" in args && (problems.length || brandProblems.length)) process.exitCode = 1;

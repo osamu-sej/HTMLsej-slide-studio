@@ -230,3 +230,4 @@ await step("the exported file: works the same, and #static shows every page fini
 
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");
 await browser.close();
+process.exit(errors.length ? 1 : 0);

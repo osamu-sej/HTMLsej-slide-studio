@@ -36,6 +36,7 @@
     "qa:3d": "node qa/studio-3d.mjs",
     "qa:live": "node qa/studio-live.mjs",
     "qa:tools": "node qa/studio-tools.mjs",
+    "qa:all": "node qa/run.mjs",
     "qa:sej": "node qa/shoot.mjs --themes=sej --deck=/qa/all-layouts.json && node qa/shoot.mjs --themes=sej --deck=/qa/sej-pages.json --per=8"
   },
   "engines": {
