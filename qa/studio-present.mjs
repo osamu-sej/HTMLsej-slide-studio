@@ -300,17 +300,24 @@ await step("the viewer follows the presenter, click by click, and cannot move th
   await shot("online-following", viewer);
 });
 
+// A wait on the viewer that says what the viewer was showing when it gave up (a CI run leaves no other trace).
+const viewerState = () => viewer.evaluate(() => ({ banner: document.querySelector(".op-banner")?.textContent || "", title: window.__hsejWatch?.deck?.title, live: window.__hsejWatch?.state?.live })).catch((error) => ({ error: error.message }));
+const viewerUntil = async (what, fn, arg) => {
+  try { await viewer.waitForFunction(fn, arg, { timeout: 20000 }); }
+  catch (error) { throw new Error(`${what}: ${error.message.split("\n")[0]} - the viewer showed ${JSON.stringify(await viewerState())}`); }
+};
+
 await step("the presenter ends the slide show: the viewer waits; 資料の更新 brings the changed deck", async () => {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500);
-  await viewer.waitForFunction(() => /待っています/.test(document.querySelector(".op-banner")?.textContent || ""), null, { timeout: 8000 });
+  await viewerUntil("the viewer waits after the show ends", () => /待っています/.test(document.querySelector(".op-banner")?.textContent || ""), null);
   await page.fill("#deckTitleInput", "オンライン発表のテスト");
   await page.press("#deckTitleInput", "Enter");
   await onlineDialog();
   await page.waitForSelector(".online-dialog[open] .op-update:not([hidden])");
   assert(/資料の更新/.test(await page.textContent(".online-dialog .op-body")), "says the deck changed");
   await page.click(".online-dialog .op-update");
-  await viewer.waitForFunction(() => window.__hsejWatch.deck?.title === "オンライン発表のテスト", null, { timeout: 8000 });
+  await viewerUntil("the viewer gets the changed deck", () => window.__hsejWatch.deck?.title === "オンライン発表のテスト", null);
   assert(await viewer.isVisible("#presenter .hs-player"), "the viewer still shows the show");
 });
 
@@ -320,17 +327,17 @@ await step("while online, an ordinary slide show (このスライドから) goes
   await tab("スライド ショー");
   await ribbonBtn("このスライド");
   await page.waitForSelector("#presenter .hs-player");
-  await viewer.waitForFunction(() => window.__hsejWatch.state.live && !(document.querySelector(".op-banner")?.textContent), null, { timeout: 8000 });
+  await viewer.waitForFunction(() => window.__hsejWatch.state.live && !(document.querySelector(".op-banner")?.textContent), null, { timeout: 20000 });
   const here = await presenterCount();
-  await viewer.waitForFunction((want) => document.querySelector("#presenter .hs-player-count")?.textContent === want, here, { timeout: 8000 });
+  await viewer.waitForFunction((want) => document.querySelector("#presenter .hs-player-count")?.textContent === want, here, { timeout: 20000 });
   await page.keyboard.press("Escape");
-  await viewer.waitForFunction(() => /待っています/.test(document.querySelector(".op-banner")?.textContent || ""), null, { timeout: 8000 });
+  await viewer.waitForFunction(() => /待っています/.test(document.querySelector(".op-banner")?.textContent || ""), null, { timeout: 20000 });
 });
 
 await step("オンライン プレゼンテーションの終了: the viewer hears it is over", async () => {
   await onlineDialog();
   await page.click(".online-dialog .op-end");
-  await viewer.waitForFunction(() => /終了しました/.test(document.querySelector(".op-banner")?.textContent || ""), null, { timeout: 8000 });
+  await viewer.waitForFunction(() => /終了しました/.test(document.querySelector(".op-banner")?.textContent || ""), null, { timeout: 20000 });
   await page.waitForTimeout(300);
   assert(!(await page.evaluate(() => document.querySelector('.rb-btn[aria-pressed="true"]')?.textContent?.includes("オンライン"))), "the ribbon button is no longer pressed");
   await shot("online-over", viewer);

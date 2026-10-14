@@ -74,3 +74,49 @@ jobs:
           path: qa/out
           retention-days: 7
           if-no-files-found: ignore
+
+  # The PowerPoint import against LibreOffice's drawing of the same deck (qa/fidelity.mjs, tools/fidelity.py): every slide is
+  # scored, and a deck that looks worse than qa/fidelity-baseline.json - or a slide whose layout or words are far off - fails.
+  fidelity:
+    name: qa (fidelity)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
+      - run: pip install -r tools/requirements.txt
+      - run: npm ci
+      - name: LibreOffice and fonts
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libreoffice-impress fonts-ipafont fonts-wqy-zenhei
+      - name: Playwright and Chromium
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw"
+          cd "$RUNNER_TEMP/pw"
+          npm init -y > /dev/null
+          npm install playwright@1.56.1 --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          echo "PLAYWRIGHT_MODULE=$RUNNER_TEMP/pw/node_modules/playwright" >> "$GITHUB_ENV"
+          echo "CHROME_PATH=$(node -e "console.log(require('playwright').chromium.executablePath())")" >> "$GITHUB_ENV"
+      - name: Measure the import
+        run: node qa/fidelity.mjs --strict
+        env:
+          PYTHON_BIN: python
+      - name: Keep the report and the side-by-side pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-fidelity
+          path: |
+            qa/out/fidelity/report.md
+            qa/out/fidelity/report.json
+            qa/out/fidelity/*/compare
+          retention-days: 14
+          if-no-files-found: ignore

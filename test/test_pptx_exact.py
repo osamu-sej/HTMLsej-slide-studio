@@ -530,6 +530,36 @@ class DistributedAlignTest(unittest.TestCase):
         self.assertIn('style="text-align: justify; text-align-last: justify"', imported["text"])
 
 
+class TableFrameTest(unittest.TestCase):
+    """A table is drawn by its grid. Google Slides leaves the graphic frame at a placeholder size (3000000 x 3000000 EMU)."""
+
+    def deck_with_frame(self, frame_cx, frame_cy):
+        prs = Presentation()
+        prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        shape = slide.shapes.add_table(3, 2, Inches(0.5), Inches(1), Inches(9), Inches(1.5))
+        # What the grid says: 2 columns of 4.5in, 3 rows of 0.5in (the table is 9in x 1.5in).
+        frame = shape._element.find(".//{http://schemas.openxmlformats.org/presentationml/2006/main}xfrm")
+        ext = frame.find("{http://schemas.openxmlformats.org/drawingml/2006/main}ext")
+        ext.set("cx", str(frame_cx))
+        ext.set("cy", str(frame_cy))
+        out = io.BytesIO()
+        prs.save(out)
+        deck = read_pptx_exact(out.getvalue())
+        return next(o for o in deck["slideData"][0]["elements"] if o["kind"] == "table")
+
+    def test_the_grid_sets_the_size_when_the_frame_is_a_placeholder(self):
+        table = self.deck_with_frame(3000000, 3000000)
+        self.assertAlmostEqual(table["w"], 1728, delta=2, msg="9in of a 10in slide, not the 3000000 EMU of the frame")
+        self.assertAlmostEqual(table["h"], 288, delta=2)
+        self.assertEqual(table["x"], 96)
+
+    def test_a_consistent_frame_is_left_alone(self):
+        table = self.deck_with_frame(Inches(9), Inches(1.75))  # PowerPoint can lay rows out taller than their minimum
+        self.assertAlmostEqual(table["w"], 1728, delta=2)
+        self.assertAlmostEqual(table["h"], 336, delta=2, msg="the frame's own height, 1.75in")
+
+
 class MediaTest(unittest.TestCase):
     """PowerPoint's videos come over playable, with their poster, trim, fades, bookmarks and volume."""
 
