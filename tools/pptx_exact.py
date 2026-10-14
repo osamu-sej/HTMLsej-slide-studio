@@ -1390,7 +1390,11 @@ class SlideReader:
             return
         uri = data.get("uri", "")
         if uri.endswith("/table"):
-            table = self.table(data.find(A + "tbl"), b, spid)
+            tbl = data.find(A + "tbl")
+            sized = table_frame(tbl, xf)
+            if sized is not xf:
+                b = self.box(sized, tf)
+            table = self.table(tbl, b, spid)
             if table:
                 self.add(table, spid, group)
         elif uri.endswith("/chart"):
@@ -1957,6 +1961,20 @@ def text_body(el):
 def shares(values):
     total = sum(values) or 1
     return [round(v / total, 5) for v in values]
+
+
+def table_frame(tbl, xf):
+    """The frame a table is really drawn in. PowerPoint draws a table by its grid (the column widths and the row heights)
+    and rewrites the frame to match when it saves, but other writers leave the frame at a placeholder: Google Slides writes
+    3000000 x 3000000 EMU whatever the table is. When the frame's width does not agree with the grid, the grid wins."""
+    if tbl is None:
+        return xf
+    cols = [int(c.get("w", 0)) for c in tbl.findall(f"{A}tblGrid/{A}gridCol")]
+    rows = [int(r.get("h", 0)) for r in tbl.findall(A + "tr")]
+    grid_w, grid_h = sum(cols), sum(rows)
+    if grid_w <= 0 or xf["w"] <= 0 or abs(grid_w - xf["w"]) <= xf["w"] * 0.02:
+        return xf
+    return {**xf, "w": grid_w, "h": grid_h if grid_h > 0 else xf["h"]}
 
 
 def number_label(kind: str, n: int) -> str:
