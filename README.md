@@ -440,6 +440,7 @@ public/app.js, app.css       スタジオ画面
 ```bash
 npm test               # サーバー・スキーマ・プロンプト・エンジンのテスト（CodexとOllamaは偽物で代用）
 npm run test:py        # 取り込みツール（見た目どおりの取り込みを含む）と、SEJマスターの位置がtemplate.pptxと一致するかのテスト（python-pptx などが必要）
+npm run qa:all         # ブラウザQAをまとめて実行（サーバーを自動で立て、落ちたら1回だけ再試行して所要時間の表を出す。--only=studio-format,sej で一部だけ）。GitHub Actions の qa が PR と main で同じものを走らせる
 npm run qa:sej         # 全レイアウトとSEJの特別なページをSEJテーマで撮影し、SEJブランド検査の結果も出す
 npm run qa             # 全レイアウト×テーマの見た目を撮影（Playwright）→ qa/out/
 npm run qa:studio      # スタジオを実際のブラウザで操作する通しテスト（npm start の後に）
