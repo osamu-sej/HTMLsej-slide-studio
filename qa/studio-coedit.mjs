@@ -24,7 +24,7 @@ async function person(name) {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, permissions: ["clipboard-read", "clipboard-write"] });
   const page = await context.newPage();
   page.on("pageerror", (error) => errors.push(`${name} pageerror: ${error.message}`));
-  page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL|ytimg|ERR_CERT|fonts\.g|ERR_ABORTED|EventSource/.test(message.text())) errors.push(`${name} console: ${message.text()}`); });
+  page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL|ytimg|ERR_CERT|fonts\.g|ERR_ABORTED|EventSource/.test(`${message.text()} ${message.location().url}`)) errors.push(`${name} console: ${message.text()} ${message.location().url}`.trim()); });
   page.on("dialog", (dialog) => dialog.accept());
   await page.goto(base);
   await page.evaluate((n) => { localStorage.clear(); localStorage.setItem("hsej-user-name", n); }, name);

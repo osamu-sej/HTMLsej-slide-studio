@@ -21,7 +21,7 @@ const context = await browser.newContext({ viewport: { width: 1600, height: 1000
 const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
-page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL|ytimg|fonts/.test(message.text())) errors.push(`console: ${message.text()}`); });
+page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL|ytimg|fonts/.test(`${message.text()} ${message.location().url}`)) errors.push(`console: ${message.text()} ${message.location().url}`.trim()); });
 const shot = async (name, target = page) => { const file = join(outDir, `interactive-${name}.png`); await target.screenshot({ path: file }); console.log("saved", file); };
 const step = async (label, fn) => { try { await fn(); console.log("ok  ", label); } catch (error) { errors.push(`${label}: ${error.message}`); console.log("FAIL", label, error.message); } };
 const expect = (value, wanted, what) => { if (JSON.stringify(value) !== JSON.stringify(wanted)) throw new Error(`${what}: ${JSON.stringify(value)}`); };
