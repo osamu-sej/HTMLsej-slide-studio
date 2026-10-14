@@ -72,8 +72,8 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 
 ## PRとマージ
 
-- 変更はブランチで作り、PRを出す。**CI（test）が通ったら、確認を待たずにマージする**（下書きを解除してから squash マージ）。ユーザーに「マージしますか」と聞かない。
-- CIが落ちたら直してから。競合したら main を取り込んで直す。
+- 変更はブランチで作り、PRを出す。**CI（`test` と `qa` の全シャード）が通ったら、確認を待たずにマージする**（下書きを解除してから squash マージ）。ユーザーに「マージしますか」と聞かない。`qa` は実際のブラウザでQAを走らせる（下の「確認」）。
+- CIが落ちたら直してから。競合したら main を取り込んで直す。`qa` が「flaky」（1回目に落ちて再試行で通った）と警告したら、その手順の固定の待ち時間を「画面が出るまで待つ」に直す。
 - マージ後は作業ブランチを最新の main にそろえる。
 
 ## 版と更新履歴
@@ -83,6 +83,7 @@ AIで構成したスライドを、SEJの原本テンプレートの見た目で
 ## 確認
 
 - `npm test`（CodexとOllamaは偽物で代用）。
+- ブラウザQAは `qa/run.mjs`（`npm run qa:all`）でまとめて走らせる。サーバーを自分で立て、スクリプトごとに「終了コード0・`errors:` が出ていない・最後の行が `no errors`」をすべて確かめ、落ちたら1回だけ再試行して（再試行で通ったら flaky と警告）、所要時間の表を出す。`--only=studio-format,sej` で一部だけ、`sej` はSEJブランド検査（`shoot.mjs --strict`＝指摘が1つでもあれば失敗）。GitHub Actions の `.github/workflows/qa.yml` が PR と main への push でこれを7つのシャードに分けて並列に走らせる（日本語フォントは IPA、Chromium は Playwright 1.56.1）。QAスクリプトを足したら、`qa/run.mjs` の `ORDER` と `qa.yml` のシャードに入れる。スクリプトは失敗したら必ず `process.exit(1)` で終わる（終わらないと CI が気づけない）。手順の待ちは `waitForTimeout` の固定値でなく `waitForFunction`／`waitForSelector` にする。
 - 画面にかかわる変更は、`npm start` のあと `qa/studio-smoke.mjs`・`studio-editing.mjs`・`studio-ai-mock.mjs`・`studio-motion.mjs`・`studio-drill.mjs`・`studio-interactive.mjs`・`studio-objects.mjs`・`studio-animations.mjs`・`studio-tables.mjs`・`studio-convert.mjs`・`studio-import.mjs`・`studio-interact.mjs`・`studio-layout.mjs`・`studio-motion-ide.mjs`・`studio-powerpoint.mjs`・`studio-media.mjs`・`studio-graphics.mjs`・`studio-coedit.mjs`・`studio-draw.mjs`・`studio-show.mjs`・`studio-review.mjs`・`studio-more.mjs`・`studio-format.mjs`・`studio-present.mjs`・`studio-rehearse.mjs`・`studio-3d.mjs`・`studio-live.mjs`・`studio-tools.mjs` を実際のブラウザで通す。リボンは狭い幅だとグループを1つのボタンに折りたたむので、QAでボタンを探すときは折りたたんだグループも開く。
 - 深掘りページ（`drillOf`）は元のスライドの直後に置く本編外のページ。本編の並び・番号は `E.storyMap`（engine.js）とサーバーの `drillParents`（server/chat.mjs）が同じ決まりで求める。
 - レイアウトの「見た目のグループ」と単調さのチェックは `public/layout-looks.mjs` にあり、サーバー（AIへの指示・自動の選び直し）とスタジオ（チェック・骨子の画面）が同じものを使う。

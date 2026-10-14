@@ -37,7 +37,7 @@ await context.addInitScript(() => {
 const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
-page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL|ytimg|ERR_CERT|fonts\.g/.test(message.text())) errors.push(`console: ${message.text()}`); });
+page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL|ytimg|ERR_CERT|fonts\.g/.test(`${message.text()} ${message.location().url}`)) errors.push(`console: ${message.text()} ${message.location().url}`.trim()); });
 page.on("dialog", (dialog) => dialog.accept());
 const shot = async (name) => { const file = join(outDir, `rehearse-${name}.png`); await page.screenshot({ path: file }); console.log("saved", file); };
 const step = async (label, fn) => {

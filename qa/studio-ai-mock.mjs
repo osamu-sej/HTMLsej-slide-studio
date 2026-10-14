@@ -52,7 +52,7 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH 
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
 const errors = [];
 page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
-page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL|ytimg/.test(message.text())) errors.push(`console: ${message.text()}`); });
+page.on("console", (message) => { if (message.type() === "error" && !/ERR_TUNNEL|ytimg/.test(`${message.text()} ${message.location().url}`)) errors.push(`console: ${message.text()} ${message.location().url}`.trim()); });
 
 await page.route("**/api/codex/status", (route) => route.fulfill({ json: { available: true, authorized: true, authenticated: true, planType: "test", team: false, fallback: { available: false, model: "gemma4:12b", web: false, reason: "" } } }));
 await page.route("**/api/decks/outline", (route) => route.fulfill({ status: 202, json: { jobId: newJob({ kind: "outline", outline }) } }));
@@ -156,3 +156,4 @@ await step("three variants", async () => {
 await writeFile(join(outDir, "ai-errors.txt"), errors.join("\n"));
 console.log(errors.length ? `errors:\n${errors.join("\n")}` : "no errors");
 await browser.close();
+process.exit(errors.length ? 1 : 0);
